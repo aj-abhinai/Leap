@@ -1,0 +1,21 @@
+[app]
+port = 9000
+name = "CRM"
+
+[db]
+host = "localhost"
+port = 5432
+user = "crm"
+password = "crm"
+name = "crm"
+sslmode = "disable"
+
+[auth]
+jwt_secret = "change-me-in-production"
+access_token_ttl = "15m"
+refresh_token_ttl = "168h"
+bcrypt_cost = 12
+
+[log]
+level = "info"
+format = "json"
