@@ -28,8 +28,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	pipelineID := r.URL.Query().Get("pipeline_id")
 	stageID := r.URL.Query().Get("stage_id")
+	contactID := r.URL.Query().Get("contact_id")
 
-	leads, total, err := h.svc.List(pipelineID, stageID, page, perPage)
+	leads, total, err := h.svc.List(pipelineID, stageID, contactID, page, perPage)
 	if err != nil {
 		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return

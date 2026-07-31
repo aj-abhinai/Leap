@@ -22,6 +22,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Dashboard' },
   },
   {
+    path: '/contacts/:id',
+    name: 'ContactDetail',
+    component: () => import('@/views/ContactDetailPage.vue'),
+    meta: { title: 'Contact' },
+  },
+  {
     path: '/contacts',
     name: 'Contacts',
     component: () => import('@/views/ContactsPage.vue'),

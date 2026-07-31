@@ -15,7 +15,7 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) List(pipelineID, stageID string, page, perPage int) ([]Lead, int, error) {
+func (s *Service) List(pipelineID, stageID, contactID string, page, perPage int) ([]Lead, int, error) {
 	var total int
 	baseWhere := "WHERE l.deleted_at IS NULL"
 	args := []any{}
@@ -29,6 +29,11 @@ func (s *Service) List(pipelineID, stageID string, page, perPage int) ([]Lead, i
 	if stageID != "" {
 		baseWhere += fmt.Sprintf(" AND l.stage_id = $%d", argIdx)
 		args = append(args, stageID)
+		argIdx++
+	}
+	if contactID != "" {
+		baseWhere += fmt.Sprintf(" AND l.contact_id = $%d", argIdx)
+		args = append(args, contactID)
 		argIdx++
 	}
 

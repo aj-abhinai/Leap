@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiClient } from '@/composables/useApi'
 import { useContactsStore, type Contact } from '@/stores/contacts'
@@ -24,7 +24,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { Plus, Pencil, Trash2, Search, Users, ChevronLeft, ChevronRight, FolderKanban } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Search, Users, ChevronLeft, ChevronRight, FolderKanban, List, LayoutGrid, Table2 } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import {
   AlertDialog,
@@ -37,6 +37,40 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import ContactForm from '@/components/contacts/ContactForm.vue'
+import ContactCompactCard from '@/components/contacts/ContactCompactCard.vue'
+import ContactSpreadsheet from '@/components/contacts/ContactSpreadsheet.vue'
+
+const store = useContactsStore()
+const router = useRouter()
+const search = ref('')
+const page = ref(1)
+const perPage = 20
+
+const drawerOpen = ref(false)
+const editingContact = ref<Contact | null>(null)
+
+const deletingId = ref<string | null>(null)
+const deleteDialogOpen = ref(false)
+
+const totalPages = computed(() => Math.ceil(store.total / perPage) || 1)
+
+const deletingContactName = computed(() => {
+  if (!deletingId.value) return ''
+  const contact = store.contacts.find(c => c.id === deletingId.value)
+  return contact?.name || ''
+})
+
+const viewMode = ref<'table' | 'compact' | 'spreadsheet'>('table')
+
+onMounted(() => {
+  const saved = localStorage.getItem('crm-contact-view')
+  if (saved === 'table' || saved === 'compact' || saved === 'spreadsheet') {
+    viewMode.value = saved
+  }
+  loadContacts().catch(() => {})
+})
+
+watch(viewMode, (v) => localStorage.setItem('crm-contact-view', v))
 
 const store = useContactsStore()
 const router = useRouter()
@@ -165,6 +199,17 @@ function getAvatarColor(name: string): string {
           />
         </div>
         <Button variant="outline" size="sm" @click="onSearch">Search</Button>
+        <div class="flex items-center gap-1">
+          <Button variant="ghost" size="icon-sm" :class="{ 'bg-muted': viewMode === 'table' }" @click="viewMode = 'table'" title="Table view">
+            <List class="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon-sm" :class="{ 'bg-muted': viewMode === 'compact' }" @click="viewMode = 'compact'" title="Compact cards">
+            <LayoutGrid class="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon-sm" :class="{ 'bg-muted': viewMode === 'spreadsheet' }" @click="viewMode = 'spreadsheet'" title="Spreadsheet view">
+            <Table2 class="size-4" />
+          </Button>
+        </div>
         <Sheet v-model:open="drawerOpen">
           <SheetTrigger as-child>
             <Button @click="openCreate">
@@ -185,6 +230,7 @@ function getAvatarColor(name: string): string {
         </Sheet>
       </div>
 
+      <template v-if="viewMode === 'table'">
       <div class="rounded-lg border">
         <Table>
           <TableHeader>
@@ -271,6 +317,33 @@ function getAvatarColor(name: string): string {
           </TableBody>
         </Table>
       </div>
+      </template>
+
+      <div v-else-if="viewMode === 'compact'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div v-if="store.loading">
+          <div v-for="i in 8" :key="i" class="rounded-lg border p-4 space-y-3">
+            <Skeleton class="h-5 w-3/4" />
+            <Skeleton class="h-4 w-1/2" />
+            <Skeleton class="h-4 w-full" />
+          </div>
+        </div>
+        <div v-else-if="store.contacts.length === 0" class="col-span-full flex flex-col items-center justify-center py-12 text-center">
+          <Users class="size-10 text-muted-foreground/40 mb-3" />
+          <p class="text-sm font-medium text-muted-foreground">No contacts found</p>
+        </div>
+        <ContactCompactCard
+          v-for="c in store.contacts"
+          :key="c.id"
+          :contact="c"
+          @click="router.push({ name: 'ContactDetail', params: { id: c.id } })"
+        />
+      </div>
+
+      <ContactSpreadsheet
+        v-else
+        :contacts="store.contacts"
+        @row-click="(id) => router.push({ name: 'ContactDetail', params: { id } })"
+      />
 
       <AlertDialog :open="deleteDialogOpen">
         <AlertDialogContent>
