@@ -2,9 +2,11 @@
 import { onMounted, ref, computed } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { useContactsStore, type Contact } from '@/stores/contacts'
+import { toast } from 'vue-sonner'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -21,7 +23,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { Plus, Pencil, Trash2 } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Search, Users, ChevronLeft, ChevronRight } from '@lucide/vue'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,7 +33,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import ContactForm from '@/components/contacts/ContactForm.vue'
 
@@ -48,7 +49,15 @@ const deleteDialogOpen = ref(false)
 
 const totalPages = computed(() => Math.ceil(store.total / perPage) || 1)
 
-onMounted(() => loadContacts())
+const deletingContactName = computed(() => {
+  if (!deletingId.value) return ''
+  const contact = store.contacts.find(c => c.id === deletingId.value)
+  return contact?.name || ''
+})
+
+onMounted(() => {
+  loadContacts().catch(() => {})
+})
 
 async function loadContacts() {
   await store.fetchContacts(page.value, perPage, search.value)
@@ -56,7 +65,17 @@ async function loadContacts() {
 
 function onSearch() {
   page.value = 1
-  loadContacts()
+  loadContacts().catch(() => {})
+}
+
+function nextPage() {
+  page.value++
+  loadContacts().catch(() => {})
+}
+
+function prevPage() {
+  page.value--
+  loadContacts().catch(() => {})
 }
 
 function openCreate() {
@@ -70,37 +89,79 @@ function openEdit(contact: Contact) {
 }
 
 async function handleSave(body: Record<string, any>) {
-  if (editingContact.value) {
-    await apiClient.patch(`/api/contacts/${editingContact.value.id}`, body)
-  } else {
-    await apiClient.post('/api/contacts', body)
+  try {
+    if (editingContact.value) {
+      await apiClient.patch(`/api/contacts/${editingContact.value.id}`, body)
+      toast.success('Contact updated')
+    } else {
+      await apiClient.post('/api/contacts', body)
+      toast.success('Contact created')
+    }
+    drawerOpen.value = false
+    loadContacts().catch(() => {})
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to save contact')
   }
-  drawerOpen.value = false
-  loadContacts()
+}
+
+function confirmDelete(id: string) {
+  deletingId.value = id
+  deleteDialogOpen.value = true
 }
 
 async function handleDelete() {
   if (!deletingId.value) return
   try {
     await apiClient.delete(`/api/contacts/${deletingId.value}`)
+    toast.success('Contact deleted')
     deletingId.value = null
     deleteDialogOpen.value = false
-    loadContacts()
-  } catch {}
+    loadContacts().catch(() => {})
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to delete contact')
+  }
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .map(n => n.charAt(0))
+    .join('')
+    .toUpperCase()
+    .slice(0, 2)
+}
+
+function getAvatarColor(name: string): string {
+  const colors = [
+    'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+    'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+    'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300',
+    'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
+    'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300',
+  ]
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return colors[Math.abs(hash) % colors.length]
 }
 </script>
 
 <template>
   <LayoutShell>
-    <div class="flex flex-1 flex-col gap-4 p-4 pt-0">
+    <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
       <div class="flex items-center gap-2">
-        <Input
-          v-model="search"
-          placeholder="Search contacts..."
-          class="max-w-sm"
-          @keyup.enter="onSearch"
-        />
-        <Button variant="outline" @click="onSearch">Search</Button>
+        <div class="relative flex-1 max-w-sm">
+          <Search class="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            v-model="search"
+            placeholder="Search contacts..."
+            class="pl-8"
+            @keyup.enter="onSearch"
+          />
+        </div>
+        <Button variant="outline" size="sm" @click="onSearch">Search</Button>
         <Sheet v-model:open="drawerOpen">
           <SheetTrigger as-child>
             <Button @click="openCreate">
@@ -119,81 +180,103 @@ async function handleDelete() {
           </SheetContent>
         </Sheet>
       </div>
-      <div class="rounded-md border">
+
+      <div class="rounded-lg border">
         <Table>
           <TableHeader>
-            <TableRow>
+            <TableRow class="hover:bg-transparent">
+              <TableHead class="w-12" />
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Location</TableHead>
               <TableHead>Age</TableHead>
-              <TableHead class="w-20">Actions</TableHead>
+              <TableHead class="w-24">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow v-if="store.loading">
-              <TableCell colspan="6" class="text-center text-muted-foreground">
-                Loading...
-              </TableCell>
-            </TableRow>
+            <template v-if="store.loading">
+              <TableRow v-for="i in 8" :key="i">
+                <TableCell v-for="j in 7" :key="j">
+                  <Skeleton class="h-5 w-full" />
+                </TableCell>
+              </TableRow>
+            </template>
             <TableRow v-else-if="store.contacts.length === 0">
-              <TableCell colspan="6" class="text-center text-muted-foreground">
-                No contacts found
+              <TableCell colspan="7">
+                <div class="flex flex-col items-center justify-center py-12 text-center">
+                  <Users class="size-10 text-muted-foreground/40 mb-3" />
+                  <p class="text-sm font-medium text-muted-foreground">No contacts found</p>
+                  <p class="text-xs text-muted-foreground/60 mt-1">
+                    {{ search ? 'Try a different search term' : 'Add your first contact to get started' }}
+                  </p>
+                </div>
               </TableCell>
             </TableRow>
-            <TableRow v-for="c in store.contacts" :key="c.id">
-              <TableCell class="font-medium">{{ c.name }}</TableCell>
-              <TableCell>{{ c.email }}</TableCell>
-              <TableCell>{{ c.phone }}</TableCell>
-              <TableCell>{{ c.location }}</TableCell>
-              <TableCell>{{ c.age }}</TableCell>
+            <TableRow v-else v-for="c in store.contacts" :key="c.id" class="group">
               <TableCell>
-                <div class="flex gap-1">
-                  <Button variant="ghost" size="icon" @click="openEdit(c)">
-                    <Pencil class="size-4" />
+                <div
+                  class="flex size-8 items-center justify-center rounded-full text-xs font-medium"
+                  :class="getAvatarColor(c.name)"
+                >
+                  {{ getInitials(c.name) }}
+                </div>
+              </TableCell>
+              <TableCell class="font-medium">{{ c.name }}</TableCell>
+              <TableCell class="text-muted-foreground">{{ c.email || '—' }}</TableCell>
+              <TableCell class="text-muted-foreground">{{ c.phone || '—' }}</TableCell>
+              <TableCell class="text-muted-foreground">{{ c.location || '—' }}</TableCell>
+              <TableCell class="text-muted-foreground">{{ c.age || '—' }}</TableCell>
+              <TableCell>
+                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button variant="ghost" size="icon-sm" @click="openEdit(c)">
+                    <Pencil class="size-3.5" />
                   </Button>
-                  <AlertDialog :open="deleteDialogOpen">
-                    <AlertDialogTrigger as-child>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        @click="deletingId = c.id; deleteDialogOpen = true"
-                      >
-                        <Trash2 class="size-4 text-destructive" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Delete Contact</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Are you sure you want to delete this contact? This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel @click="deletingId = null; deleteDialogOpen = false">
-                          Cancel
-                        </AlertDialogCancel>
-                        <AlertDialogAction @click="handleDelete">Delete</AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    @click="confirmDelete(c.id)"
+                  >
+                    <Trash2 class="size-3.5" />
+                  </Button>
                 </div>
               </TableCell>
             </TableRow>
           </TableBody>
         </Table>
       </div>
+
+      <AlertDialog :open="deleteDialogOpen">
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Contact</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{{ deletingContactName }}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel @click="deletingId = null; deleteDialogOpen = false">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction variant="destructive" @click="handleDelete">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div class="flex items-center justify-between">
         <span class="text-sm text-muted-foreground">
-          Page {{ page }} of {{ totalPages }} ({{ store.total }} total)
+          Page {{ page }} of {{ totalPages }} &middot; {{ store.total }} total
         </span>
-        <div class="flex gap-2">
-          <Button variant="outline" :disabled="page <= 1" @click="page--; loadContacts()">
+        <div class="flex items-center gap-1">
+          <Button variant="outline" size="sm" :disabled="page <= 1" @click="prevPage">
+            <ChevronLeft class="size-4" />
             Previous
           </Button>
-          <Button variant="outline" :disabled="page >= totalPages" @click="page++; loadContacts()">
+          <Button variant="outline" size="sm" :disabled="page >= totalPages" @click="nextPage">
             Next
+            <ChevronRight class="size-4" />
           </Button>
         </div>
       </div>

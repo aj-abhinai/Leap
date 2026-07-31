@@ -3,8 +3,13 @@ import { type Lead } from '@/stores/leads'
 import { type Stage } from '@/stores/pipeline'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Plus } from '@lucide/vue'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Plus, MoreHorizontal, ChevronRight } from '@lucide/vue'
 
 const props = defineProps<{
   columns: (Stage & { leads: Lead[] })[]
@@ -18,6 +23,19 @@ const emit = defineEmits<{
   moveStage: [leadId: string, newStageId: string]
 }>()
 
+const stageColors: Record<number, string> = {
+  0: 'border-l-blue-400',
+  1: 'border-l-amber-400',
+  2: 'border-l-emerald-400',
+  3: 'border-l-violet-400',
+  4: 'border-l-rose-400',
+  5: 'border-l-cyan-400',
+}
+
+function getStageColor(index: number): string {
+  return stageColors[index % Object.keys(stageColors).length]
+}
+
 function formatCurrency(value?: number) {
   if (!value) return ''
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
@@ -26,52 +44,69 @@ function formatCurrency(value?: number) {
 
 <template>
   <div class="flex gap-4 overflow-x-auto pb-4">
-    <Card
-      v-for="col in columns"
+    <div
+      v-for="(col, colIdx) in columns"
       :key="col.id"
-      class="min-w-64 flex-1 bg-muted/30"
+      class="min-w-64 max-w-80 flex-1"
     >
-      <CardHeader class="flex flex-row items-center justify-between pb-2">
-        <CardTitle class="text-sm font-medium">
-          {{ col.name }}
-          <Badge variant="secondary" class="ml-2">{{ col.leads.length }}</Badge>
-        </CardTitle>
-        <Button variant="ghost" size="icon" @click="emit('create', col.id)">
-          <Plus class="size-4" />
+      <div class="mb-2 flex items-center justify-between px-1">
+        <div class="flex items-center gap-2">
+          <div class="size-2 rounded-full" :class="getStageColor(colIdx).replace('border-l-', 'bg-')" />
+          <span class="text-sm font-medium">{{ col.name }}</span>
+          <Badge variant="secondary" class="text-xs px-1.5">{{ col.leads.length }}</Badge>
+        </div>
+        <Button variant="ghost" size="icon-sm" @click="emit('create', col.id)">
+          <Plus class="size-3.5" />
         </Button>
-      </CardHeader>
-      <CardContent class="space-y-2">
+      </div>
+      <div class="space-y-2">
         <div
           v-for="lead in col.leads"
           :key="lead.id"
-          class="rounded-lg border bg-card p-3 text-sm shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+          class="group rounded-lg border bg-card p-3 text-sm shadow-sm cursor-pointer hover:shadow-md hover:border-primary/20 transition-all border-l-2"
+          :class="getStageColor(colIdx)"
           @click="emit('edit', lead)"
         >
-          <div class="font-medium">{{ lead.name }}</div>
-          <div v-if="lead.email" class="text-xs text-muted-foreground">{{ lead.email }}</div>
-          <div v-if="lead.value" class="mt-1 font-medium text-primary">
-            {{ formatCurrency(lead.value) }}
+          <div class="flex items-start justify-between gap-2">
+            <div class="font-medium truncate">{{ lead.name }}</div>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child @click.stop>
+                <Button variant="ghost" size="icon-sm" class="size-6 -mr-1 -mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <MoreHorizontal class="size-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" class="w-40">
+                <DropdownMenuItem
+                  v-for="s in stages.filter(s => s.id !== col.id)"
+                  :key="s.id"
+                  @click.stop="emit('moveStage', lead.id!, s.id)"
+                >
+                  <ChevronRight class="mr-2 size-3.5" />
+                  Move to {{ s.name }}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-          <div class="mt-2 flex gap-1">
-            <Button
-              v-for="s in stages.filter(s => s.id !== col.id)"
-              :key="s.id"
-              variant="ghost"
-              size="sm"
-              class="h-6 text-xs"
-              @click.stop="emit('moveStage', lead.id!, s.id)"
-            >
-              &rarr; {{ s.name }}
-            </Button>
+          <div v-if="lead.email" class="mt-0.5 text-xs text-muted-foreground truncate">{{ lead.email }}</div>
+          <div v-if="lead.value" class="mt-1.5 font-semibold text-primary">
+            {{ formatCurrency(lead.value) }}
           </div>
         </div>
         <div
           v-if="col.leads.length === 0"
-          class="text-xs text-muted-foreground text-center py-4"
+          class="rounded-lg border border-dashed p-6 text-center"
         >
-          No leads
+          <p class="text-xs text-muted-foreground">No leads</p>
+          <Button
+            variant="ghost"
+            size="sm"
+            class="mt-1 text-xs"
+            @click="emit('create', col.id)"
+          >
+            <Plus class="mr-1 size-3" /> Add one
+          </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   </div>
 </template>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Sun, Moon } from '@lucide/vue'
+import { Sun, Moon, ChevronRight, Home } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
@@ -10,14 +10,52 @@ import { useThemeStore } from '@/stores/theme'
 const route = useRoute()
 const theme = useThemeStore()
 const title = computed(() => (route.meta.title as string) || 'CRM')
+
+const breadcrumbs = computed(() => {
+  const crumbs: { title: string; path?: string }[] = []
+  const matched = route.matched
+
+  for (let i = 0; i < matched.length; i++) {
+    const meta = matched[i].meta
+    if (meta.title) {
+      crumbs.push({
+        title: meta.title as string,
+        path: i < matched.length - 1 ? matched[i].path : undefined,
+      })
+    }
+  }
+
+  if (crumbs.length === 0 && route.path === '/') {
+    crumbs.push({ title: 'Dashboard' })
+  }
+
+  return crumbs
+})
 </script>
 
 <template>
-  <header class="flex h-12 shrink-0 items-center gap-2 px-4">
+  <header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
     <SidebarTrigger class="-ml-1" />
     <Separator orientation="vertical" class="mr-2 h-4" />
-    <h1 class="flex-1 text-sm font-semibold">{{ title }}</h1>
-    <Button variant="ghost" size="icon" @click="theme.toggle()" :aria-label="theme.resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+    <nav class="flex items-center gap-1 text-sm text-muted-foreground">
+      <Home class="size-3.5" />
+      <template v-for="(crumb, i) in breadcrumbs" :key="i">
+        <ChevronRight v-if="i > 0" class="size-3.5" />
+        <span v-if="i === breadcrumbs.length - 1" class="font-medium text-foreground">
+          {{ crumb.title }}
+        </span>
+        <router-link v-else :to="crumb.path || '/'" class="hover:text-foreground transition-colors">
+          {{ crumb.title }}
+        </router-link>
+      </template>
+    </nav>
+    <div class="flex-1" />
+    <Button
+      variant="ghost"
+      size="icon"
+      @click="theme.toggle()"
+      :aria-label="theme.resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+    >
       <Sun v-if="theme.resolvedTheme === 'dark'" class="size-4" />
       <Moon v-else class="size-4" />
     </Button>

@@ -13,9 +13,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Badge, type BadgeVariants } from '@/components/ui/badge'
 import SettingsTabUsers from '@/components/settings/SettingsTabUsers.vue'
 import SettingsTabRoles from '@/components/settings/SettingsTabRoles.vue'
 import SettingsTabPipelines from '@/components/settings/SettingsTabPipelines.vue'
+import { RefreshCw, User, Shield, Layers, Activity, UserCircle } from '@lucide/vue'
 
 const activity = useActivityStore()
 const activityPage = ref(1)
@@ -23,56 +25,84 @@ const activityPage = ref(1)
 function loadActivity() {
   activity.fetchActivity(activityPage.value, 20)
 }
+
+function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
+  const map: Record<string, BadgeVariants['variant']> = {
+    contact: 'default',
+    lead: 'secondary',
+    user: 'outline',
+    role: 'outline',
+    pipeline: 'outline',
+  }
+  return map[type] ?? 'outline'
+}
 </script>
 
 <template>
   <LayoutShell>
-    <div class="flex flex-1 flex-col gap-4 p-4 pt-0">
+    <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
       <Tabs defaultValue="profile" class="w-full">
-        <TabsList>
-          <TabsTrigger value="profile">Profile</TabsTrigger>
-          <TabsTrigger value="users">Users</TabsTrigger>
-          <TabsTrigger value="roles">Roles</TabsTrigger>
-          <TabsTrigger value="pipelines">Pipelines</TabsTrigger>
-          <TabsTrigger value="activity">Activity Log</TabsTrigger>
+        <TabsList class="mb-4 w-full justify-start rounded-lg border bg-muted/50 p-1">
+          <TabsTrigger value="profile" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+            <UserCircle class="size-4" />
+            <span class="hidden sm:inline">Profile</span>
+          </TabsTrigger>
+          <TabsTrigger value="users" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+            <User class="size-4" />
+            <span class="hidden sm:inline">Users</span>
+          </TabsTrigger>
+          <TabsTrigger value="roles" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+            <Shield class="size-4" />
+            <span class="hidden sm:inline">Roles</span>
+          </TabsTrigger>
+          <TabsTrigger value="pipelines" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+            <Layers class="size-4" />
+            <span class="hidden sm:inline">Pipelines</span>
+          </TabsTrigger>
+          <TabsTrigger value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+            <Activity class="size-4" />
+            <span class="hidden sm:inline">Activity</span>
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="profile" class="mt-4">
+        <TabsContent value="profile" class="mt-0">
           <Card>
             <CardHeader>
               <CardTitle>Profile Settings</CardTitle>
             </CardHeader>
             <CardContent>
               <p class="text-sm text-muted-foreground">
-                Your account settings. User management is available on other tabs.
+                Your account settings. User and role management is available on other tabs.
               </p>
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="users" class="mt-4">
+        <TabsContent value="users" class="mt-0">
           <SettingsTabUsers />
         </TabsContent>
 
-        <TabsContent value="roles" class="mt-4">
+        <TabsContent value="roles" class="mt-0">
           <SettingsTabRoles />
         </TabsContent>
 
-        <TabsContent value="pipelines" class="mt-4">
+        <TabsContent value="pipelines" class="mt-0">
           <SettingsTabPipelines />
         </TabsContent>
 
-        <TabsContent value="activity" class="mt-4">
+        <TabsContent value="activity" class="mt-0">
           <Card>
-            <CardHeader>
+            <CardHeader class="flex flex-row items-center justify-between">
               <CardTitle>Activity Log</CardTitle>
+              <Button variant="outline" size="sm" @click="loadActivity()">
+                <RefreshCw class="mr-2 size-3.5" /> Refresh
+              </Button>
             </CardHeader>
             <CardContent>
-              <Button variant="outline" size="sm" @click="loadActivity()" class="mb-4">
-                Refresh
-              </Button>
-              <div v-if="activity.entries.length === 0" class="text-sm text-muted-foreground">
-                No activity logged yet
+              <div v-if="activity.entries.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
+                <Activity class="size-10 text-muted-foreground/40 mb-3" />
+                <p class="text-sm font-medium text-muted-foreground">No activity logged yet</p>
+                <p class="text-xs text-muted-foreground/60 mt-1">Actions in the CRM will appear here</p>
               </div>
               <Table v-else>
                 <TableHeader>
@@ -80,15 +110,19 @@ function loadActivity() {
                     <TableHead>Description</TableHead>
                     <TableHead>Action</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead class="text-right">Date</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <TableRow v-for="e in activity.entries" :key="e.id">
-                    <TableCell>{{ e.description }}</TableCell>
+                  <TableRow v-for="e in activity.entries" :key="e.id" class="group">
+                    <TableCell class="font-medium">{{ e.description }}</TableCell>
                     <TableCell>{{ e.action }}</TableCell>
-                    <TableCell>{{ e.resource_type }}</TableCell>
-                    <TableCell class="text-xs">
+                    <TableCell>
+                      <Badge :variant="resourceBadgeVariant(e.resource_type)" class="text-xs">
+                        {{ e.resource_type }}
+                      </Badge>
+                    </TableCell>
+                    <TableCell class="text-right text-xs text-muted-foreground tabular-nums">
                       {{ new Date(e.created_at).toLocaleString() }}
                     </TableCell>
                   </TableRow>

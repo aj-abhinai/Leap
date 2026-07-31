@@ -1,75 +1,171 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useContactsStore } from '@/stores/contacts'
 import { useLeadsStore } from '@/stores/leads'
 import { useActivityStore } from '@/stores/activity'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, FolderOpen, CheckCircle2 } from '@lucide/vue'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Users, FolderOpen, CheckCircle2, TrendingUp, Calendar, Phone, Mail, UserPlus } from '@lucide/vue'
 
 const contactsStore = useContactsStore()
 const leadsStore = useLeadsStore()
 const activity = useActivityStore()
+const loading = ref(true)
 
 onMounted(async () => {
-  await Promise.all([
-    contactsStore.fetchTotal(),
-    leadsStore.fetchTotal(),
-    activity.fetchActivity(1, 10),
-  ])
+  try {
+    await Promise.all([
+      contactsStore.fetchTotal(),
+      leadsStore.fetchTotal(),
+      activity.fetchActivity(1, 10),
+    ])
+  } finally {
+    loading.value = false
+  }
 })
+
+function timeAgo(dateStr: string): string {
+  if (!dateStr) return ''
+  const then = new Date(dateStr).getTime()
+  if (isNaN(then)) return ''
+  const now = Date.now()
+  const diff = now - then
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+function activityIcon(action: string) {
+  const a = action.toLowerCase()
+  if (a.includes('create') || a.includes('added')) return UserPlus
+  if (a.includes('update') || a.includes('edit')) return Mail
+  if (a.includes('call') || a.includes('phone')) return Phone
+  return Calendar
+}
 </script>
 
 <template>
   <LayoutShell>
-    <div class="flex flex-col gap-4 p-4 pt-0">
+    <div class="flex flex-col gap-6 p-6 pt-2">
       <div class="grid gap-4 md:grid-cols-3">
-        <Card>
+        <Card v-if="loading" class="overflow-hidden">
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
+            <Skeleton class="h-4 w-24" />
+            <Skeleton class="size-8 rounded-lg" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton class="h-8 w-16" />
+            <Skeleton class="mt-2 h-3 w-20" />
+          </CardContent>
+        </Card>
+        <Card v-else class="relative overflow-hidden animate-fade-in-up">
+          <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-blue-500 to-cyan-400" />
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Total Contacts</CardTitle>
-            <Users class="size-4 text-muted-foreground" />
+            <div class="flex size-8 items-center justify-center rounded-lg bg-blue-500/10">
+              <Users class="size-4 text-blue-600 dark:text-blue-400" />
+            </div>
           </CardHeader>
           <CardContent>
             <div class="text-2xl font-bold">{{ contactsStore.total }}</div>
+            <p class="mt-1 text-xs text-muted-foreground">All contacts in database</p>
           </CardContent>
         </Card>
-        <Card>
+
+        <Card v-if="loading" class="overflow-hidden">
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
+            <Skeleton class="h-4 w-20" />
+            <Skeleton class="size-8 rounded-lg" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton class="h-8 w-16" />
+            <Skeleton class="mt-2 h-3 w-24" />
+          </CardContent>
+        </Card>
+        <Card v-else class="relative overflow-hidden animate-fade-in-up animate-fade-in-up-delay-1">
+          <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-amber-500 to-orange-400" />
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Active Leads</CardTitle>
-            <FolderOpen class="size-4 text-muted-foreground" />
+            <div class="flex size-8 items-center justify-center rounded-lg bg-amber-500/10">
+              <FolderOpen class="size-4 text-amber-600 dark:text-amber-400" />
+            </div>
           </CardHeader>
           <CardContent>
             <div class="text-2xl font-bold">{{ leadsStore.total }}</div>
+            <p class="mt-1 text-xs text-muted-foreground">Open leads across all pipelines</p>
           </CardContent>
         </Card>
-        <Card>
+
+        <Card v-if="loading" class="overflow-hidden">
+          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
+            <Skeleton class="h-4 w-28" />
+            <Skeleton class="size-8 rounded-lg" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton class="h-8 w-16" />
+            <Skeleton class="mt-2 h-3 w-20" />
+          </CardContent>
+        </Card>
+        <Card v-else class="relative overflow-hidden animate-fade-in-up animate-fade-in-up-delay-2">
+          <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-emerald-500 to-green-400" />
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Won This Month</CardTitle>
-            <CheckCircle2 class="size-4 text-muted-foreground" />
+            <div class="flex size-8 items-center justify-center rounded-lg bg-emerald-500/10">
+              <CheckCircle2 class="size-4 text-emerald-600 dark:text-emerald-400" />
+            </div>
           </CardHeader>
           <CardContent>
             <div class="text-2xl font-bold">0</div>
+            <p class="mt-1 text-xs text-muted-foreground">Deals closed this month</p>
           </CardContent>
         </Card>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Activity</CardTitle>
+
+      <Card class="animate-fade-in-up animate-fade-in-up-delay-3">
+        <CardHeader class="flex flex-row items-center justify-between">
+          <div class="flex items-center gap-2">
+            <TrendingUp class="size-4 text-muted-foreground" />
+            <CardTitle>Recent Activity</CardTitle>
+          </div>
         </CardHeader>
         <CardContent>
-          <div v-if="activity.entries.length === 0" class="text-sm text-muted-foreground">
-            No recent activity
+          <div v-if="loading" class="space-y-3">
+            <div v-for="i in 5" :key="i" class="flex items-center gap-3">
+              <Skeleton class="size-8 rounded-full" />
+              <div class="flex-1 space-y-1.5">
+                <Skeleton class="h-4 w-3/4" />
+                <Skeleton class="h-3 w-1/2" />
+              </div>
+              <Skeleton class="h-3 w-16" />
+            </div>
           </div>
-          <div v-else class="space-y-2">
+          <div v-else-if="activity.entries.length === 0" class="flex flex-col items-center justify-center py-8 text-center">
+            <Calendar class="size-10 text-muted-foreground/40 mb-3" />
+            <p class="text-sm font-medium text-muted-foreground">No recent activity</p>
+            <p class="text-xs text-muted-foreground/60 mt-1">Activity will appear here as you use the CRM</p>
+          </div>
+          <div v-else class="space-y-1">
             <div
               v-for="entry in activity.entries.slice(0, 10)"
               :key="entry.id"
-              class="flex items-center gap-2 text-sm"
+              class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted/50"
             >
-              <span class="font-medium">{{ entry.action }}</span>
-              <span class="text-muted-foreground">{{ entry.description }}</span>
-              <span class="ml-auto text-xs text-muted-foreground">
-                {{ new Date(entry.created_at).toLocaleString() }}
+              <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
+                <component :is="activityIcon(entry.action)" class="size-3.5 text-muted-foreground" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm">
+                  <span class="font-medium">{{ entry.action }}</span>
+                  <span class="text-muted-foreground"> &mdash; {{ entry.description }}</span>
+                </p>
+              </div>
+              <span class="shrink-0 text-xs text-muted-foreground">
+                {{ timeAgo(entry.created_at) }}
               </span>
             </div>
           </div>

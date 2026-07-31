@@ -3,8 +3,10 @@ import { onMounted, ref, computed } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { usePipelineStore } from '@/stores/pipeline'
 import { useLeadsStore, type Lead } from '@/stores/leads'
+import { toast } from 'vue-sonner'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select,
   SelectContent,
@@ -22,13 +24,12 @@ import {
 } from '@/components/ui/sheet'
 import LeadKanban from '@/components/leads/LeadKanban.vue'
 import LeadForm from '@/components/leads/LeadForm.vue'
-import { Plus } from '@lucide/vue'
+import { Plus, Layers } from '@lucide/vue'
 
 const pipelineStore = usePipelineStore()
 const leadsStore = useLeadsStore()
 
 const selectedPipelineId = ref('')
-const loading = ref(false)
 
 const selectedPipeline = computed(() =>
   pipelineStore.pipelines.find((p) => p.id === selectedPipelineId.value)
@@ -56,11 +57,10 @@ onMounted(async () => {
 
 async function loadLeads() {
   if (!selectedPipelineId.value) return
-  loading.value = true
   try {
     await leadsStore.fetchLeads(selectedPipelineId.value, '', 1, 100)
-  } finally {
-    loading.value = false
+  } catch {
+    toast.error('Failed to load leads')
   }
 }
 
@@ -77,35 +77,46 @@ function openEdit(lead: Lead) {
 }
 
 async function handleSave(body: Record<string, any>) {
-  if (editingLead.value) {
-    await apiClient.patch(`/api/leads/${editingLead.value.id}`, body)
-  } else {
-    await apiClient.post('/api/leads', body)
+  try {
+    if (editingLead.value) {
+      await apiClient.patch(`/api/leads/${editingLead.value.id}`, body)
+      toast.success('Lead updated')
+    } else {
+      await apiClient.post('/api/leads', body)
+      toast.success('Lead created')
+    }
+    drawerOpen.value = false
+    loadLeads()
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to save lead')
   }
-  drawerOpen.value = false
-  loadLeads()
 }
 
 async function moveStage(leadId: string, newStageId: string) {
   try {
     await apiClient.patch(`/api/leads/${leadId}`, { stage_id: newStageId })
+    toast.success('Lead moved')
     loadLeads()
-  } catch {}
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to move lead')
+  }
 }
 
 async function deleteLead(leadId: string) {
   try {
     await apiClient.delete(`/api/leads/${leadId}`)
+    toast.success('Lead deleted')
     drawerOpen.value = false
     loadLeads()
-  } catch {}
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to delete lead')
+  }
 }
-
 </script>
 
 <template>
   <LayoutShell>
-    <div class="flex flex-1 flex-col gap-4 p-4 pt-0">
+    <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
       <div class="flex items-center gap-2">
         <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">
           <SelectTrigger class="w-48">
@@ -143,7 +154,22 @@ async function deleteLead(leadId: string) {
           </SheetContent>
         </Sheet>
       </div>
-      <div v-if="loading" class="text-sm text-muted-foreground">Loading...</div>
+
+      <div v-if="leadsStore.loading" class="flex gap-4 overflow-x-auto pb-4">
+        <div v-for="i in 4" :key="i" class="min-w-64 flex-1 rounded-lg border bg-muted/30 p-4 space-y-3">
+          <Skeleton class="h-5 w-24" />
+          <Skeleton class="h-4 w-full" />
+          <Skeleton class="h-4 w-3/4" />
+          <Skeleton class="h-4 w-1/2" />
+        </div>
+      </div>
+
+      <div v-else-if="kanbanColumns.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
+        <Layers class="size-12 text-muted-foreground/30 mb-4" />
+        <p class="text-sm font-medium text-muted-foreground">No pipelines configured</p>
+        <p class="text-xs text-muted-foreground/60 mt-1">Create a pipeline in Settings to get started</p>
+      </div>
+
       <LeadKanban
         v-else
         :columns="kanbanColumns"

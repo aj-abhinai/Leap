@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type RouteLocationNormalized } from 'vue-router'
+import { Settings } from '@lucide/vue'
 import {
   Sidebar,
   SidebarContent,
@@ -8,9 +8,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarSeparator,
 } from '@/components/ui/sidebar'
 import NavMain from './NavMain.vue'
-import NavSecondary from './NavSecondary.vue'
 import NavUser from './NavUser.vue'
 
 const navItems = [
@@ -37,11 +37,11 @@ const navItems = [
     <SidebarHeader>
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton size="lg" class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground">
-            <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+          <SidebarMenuButton size="lg">
+            <div class="flex aspect-square size-8 items-center justify-center rounded-md group-data-[collapsible=icon]:size-5 bg-linear-to-br from-primary to-primary/70 text-primary-foreground shadow-sm">
               <span class="text-sm font-bold">C</span>
             </div>
-            <div class="grid flex-1 text-left text-sm leading-tight">
+            <div class="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
               <span class="truncate font-semibold">CRM</span>
               <span class="truncate text-xs">Prayaan OS</span>
             </div>
@@ -51,9 +51,19 @@ const navItems = [
     </SidebarHeader>
     <SidebarContent>
       <NavMain :items="navItems" />
-      <NavSecondary class="mt-auto" />
     </SidebarContent>
     <SidebarFooter>
+      <SidebarSeparator />
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton as-child tooltip="Settings">
+            <router-link to="/settings" class="flex items-center gap-2">
+              <Settings class="size-4" />
+              <span>Settings</span>
+            </router-link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
       <NavUser />
     </SidebarFooter>
   </Sidebar>
