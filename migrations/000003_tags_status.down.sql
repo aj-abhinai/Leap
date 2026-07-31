@@ -1,0 +1,3 @@
+ALTER TABLE contacts DROP COLUMN IF EXISTS status_id;
+DROP TABLE IF EXISTS contact_tags;
+DROP TABLE IF EXISTS tags;

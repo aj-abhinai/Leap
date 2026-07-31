@@ -2,6 +2,12 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiClient } from '@/composables/useApi'
 
+export interface TagRef {
+  id: string
+  name: string
+  color?: string
+}
+
 export interface Contact {
   id: string
   name: string
@@ -9,6 +15,8 @@ export interface Contact {
   phone?: string
   location?: string
   age?: number
+  tags?: TagRef[]
+  status?: TagRef
   created_at: string
   updated_at: string
 }
@@ -33,6 +41,15 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  async function fetchContact(id: string): Promise<Contact | null> {
+    try {
+      const res = await apiClient.get(`/api/contacts/${id}`)
+      return res.data
+    } catch {
+      return null
+    }
+  }
+
   async function fetchTotal() {
     try {
       const params = new URLSearchParams()
@@ -42,5 +59,5 @@ export const useContactsStore = defineStore('contacts', () => {
     } catch {}
   }
 
-  return { contacts, total, loading, fetchContacts, fetchTotal }
+  return { contacts, total, loading, fetchContacts, fetchContact, fetchTotal }
 })

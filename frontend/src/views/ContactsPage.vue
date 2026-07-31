@@ -25,6 +25,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { Plus, Pencil, Trash2, Search, Users, ChevronLeft, ChevronRight, FolderKanban } from '@lucide/vue'
+import { Badge } from '@/components/ui/badge'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -192,6 +193,8 @@ function getAvatarColor(name: string): string {
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Tags</TableHead>
               <TableHead>Location</TableHead>
               <TableHead>Age</TableHead>
               <TableHead class="w-24">Actions</TableHead>
@@ -200,13 +203,13 @@ function getAvatarColor(name: string): string {
           <TableBody>
             <template v-if="store.loading">
               <TableRow v-for="i in 8" :key="i">
-                <TableCell v-for="j in 7" :key="j">
+                <TableCell v-for="j in 9" :key="j">
                   <Skeleton class="h-5 w-full" />
                 </TableCell>
               </TableRow>
             </template>
             <TableRow v-else-if="store.contacts.length === 0">
-              <TableCell colspan="7">
+              <TableCell colspan="9">
                 <div class="flex flex-col items-center justify-center py-12 text-center">
                   <Users class="size-10 text-muted-foreground/40 mb-3" />
                   <p class="text-sm font-medium text-muted-foreground">No contacts found</p>
@@ -228,6 +231,18 @@ function getAvatarColor(name: string): string {
               <TableCell class="font-medium">{{ c.name }}</TableCell>
               <TableCell class="text-muted-foreground">{{ c.email || '—' }}</TableCell>
               <TableCell class="text-muted-foreground">{{ c.phone || '—' }}</TableCell>
+              <TableCell>
+                <Badge v-if="c.status" variant="secondary">{{ c.status.name }}</Badge>
+                <span v-else class="text-muted-foreground">—</span>
+              </TableCell>
+              <TableCell>
+                <div class="flex flex-wrap gap-1">
+                  <Badge v-for="t in (c.tags || [])" :key="t.id" variant="outline" class="text-xs">
+                    {{ t.name }}
+                  </Badge>
+                  <span v-if="!c.tags?.length" class="text-muted-foreground">—</span>
+                </div>
+              </TableCell>
               <TableCell class="text-muted-foreground">{{ c.location || '—' }}</TableCell>
               <TableCell class="text-muted-foreground">{{ c.age || '—' }}</TableCell>
               <TableCell>

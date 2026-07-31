@@ -22,6 +22,9 @@ func Seed(db *sql.DB, cfg config.Auth) error {
 	if err := seedDefaultPipeline(db); err != nil {
 		return fmt.Errorf("seed default pipeline: %w", err)
 	}
+	if err := seedTagsAndStatuses(db); err != nil {
+		return fmt.Errorf("seed tags and statuses: %w", err)
+	}
 	return nil
 }
 
@@ -132,5 +135,26 @@ func seedDefaultPipeline(db *sql.DB) error {
 		}
 	}
 	slog.Info("default pipeline seeded with 6 stages")
+	return nil
+}
+
+func seedTagsAndStatuses(db *sql.DB) error {
+	tags := []string{"Hot Lead", "VIP", "Student", "Influencer"}
+	for _, name := range tags {
+		_, err := db.Exec(`INSERT INTO tags (name, type) VALUES ($1, 'tag') ON CONFLICT (name, type) DO NOTHING`, name)
+		if err != nil {
+			return fmt.Errorf("seed tag %s: %w", name, err)
+		}
+	}
+
+	statuses := []string{"New", "Active", "Cold", "Archived"}
+	for _, name := range statuses {
+		_, err := db.Exec(`INSERT INTO tags (name, type) VALUES ($1, 'status') ON CONFLICT (name, type) DO NOTHING`, name)
+		if err != nil {
+			return fmt.Errorf("seed status %s: %w", name, err)
+		}
+	}
+
+	slog.Info("default tags and statuses seeded")
 	return nil
 }

@@ -18,7 +18,8 @@ import { Badge, type BadgeVariants } from '@/components/ui/badge'
 import SettingsTabUsers from '@/components/settings/SettingsTabUsers.vue'
 import SettingsTabRoles from '@/components/settings/SettingsTabRoles.vue'
 import SettingsTabPipelines from '@/components/settings/SettingsTabPipelines.vue'
-import { RefreshCw, User, Shield, Layers, Activity } from '@lucide/vue'
+import SettingsTabGeneral from '@/components/settings/SettingsTabGeneral.vue'
+import { RefreshCw, User, Shield, Layers, Activity, Settings } from '@lucide/vue'
 
 const activity = useActivityStore()
 const rbac = useRBACStore()
@@ -55,8 +56,12 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
 <template>
   <LayoutShell>
     <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
-      <Tabs defaultValue="pipelines" class="w-full">
+      <Tabs defaultValue="general" class="w-full">
         <TabsList class="mb-4 w-full justify-start rounded-lg border bg-muted/50 p-1">
+          <TabsTrigger value="general" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+            <Settings class="size-4" />
+            <span class="hidden sm:inline">General</span>
+          </TabsTrigger>
           <TabsTrigger v-show="canOrLoading('rbac:manage')" value="users" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <User class="size-4" />
             <span class="hidden sm:inline">Users</span>
@@ -74,6 +79,10 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
             <span class="hidden sm:inline">Activity</span>
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="general" class="mt-0">
+          <SettingsTabGeneral />
+        </TabsContent>
 
         <TabsContent v-if="canOrLoading('rbac:manage')" value="users" class="mt-0">
           <SettingsTabUsers />

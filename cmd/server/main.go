@@ -12,6 +12,7 @@ import (
 	"crm/internal/pipeline"
 	"crm/internal/rbac"
 	"crm/internal/seed"
+	"crm/internal/tag"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -81,6 +82,9 @@ func main() {
 	activitySvc := activity.NewService(database)
 	activityH := activity.NewHandler(activitySvc)
 
+	tagSvc := tag.NewService(database)
+	tagH := tag.NewHandler(tagSvc)
+
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
@@ -141,6 +145,10 @@ func main() {
 		r.Delete("/api/users/{id}/roles/{role_id}", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.RemoveUserRole))
 
 		r.Get("/api/activity", middleware.RequirePermission(rbacSvc, "activity:read", activityH.List))
+
+		r.Get("/api/tags", tagH.List)
+		r.Post("/api/tags", middleware.RequirePermission(rbacSvc, "contact:write", tagH.Create))
+		r.Delete("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "contact:write", tagH.Delete))
 	})
 
 	srv := &http.Server{
