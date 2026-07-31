@@ -157,6 +157,7 @@ function getAvatarColor(name: string): string {
 
         <div class="w-2/3">
           <ContactLeadJourney :contact-id="contact.id" />
+          <ContactNotes :contact-id="contact.id" class="mt-6" />
         </div>
       </div>
     </div>
