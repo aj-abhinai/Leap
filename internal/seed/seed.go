@@ -73,6 +73,7 @@ func seedPermissions(db *sql.DB) error {
 		{"pipeline:manage", "Create/edit pipelines and stages"},
 		{"rbac:manage", "Manage users, roles, permissions"},
 		{"activity:read", "View audit log"},
+		{"activity:manage", "Manage lead activities"},
 	}
 	for _, p := range perms {
 		_, err := db.Exec(`INSERT INTO permissions (name, description) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING`, p.name, p.desc)

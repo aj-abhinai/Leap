@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, MoreHorizontal, ChevronRight, Link } from '@lucide/vue'
+import { Plus, MoreHorizontal, ChevronRight, Link, ListChecks } from '@lucide/vue'
 
 const props = defineProps<{
   columns: (Stage & { leads: Lead[] })[]
@@ -22,6 +22,7 @@ const emit = defineEmits<{
   create: [stageId: string]
   edit: [lead: Lead]
   moveStage: [leadId: string, newStageId: string, previousStageId?: string]
+  viewActivities: [lead: Lead]
 }>()
 
 let dragSourceStageId: string | null = null
@@ -92,7 +93,11 @@ function handleDragChange(evt: { added?: { element: Lead }; moved?: { element: L
           >
             <div class="flex items-start justify-between gap-2">
               <div class="font-medium truncate">{{ lead.name }}</div>
-              <DropdownMenu>
+              <div class="flex items-center gap-0.5">
+                <Button variant="ghost" size="icon-sm" class="size-6 opacity-0 group-hover:opacity-100 transition-opacity" @click.stop="emit('viewActivities', lead)" title="Activities">
+                  <ListChecks class="size-3" />
+                </Button>
+                <DropdownMenu>
                 <DropdownMenuTrigger as-child @click.stop>
                   <Button variant="ghost" size="icon-sm" class="size-6 -mr-1 -mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <MoreHorizontal class="size-3" />

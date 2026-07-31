@@ -25,6 +25,8 @@ import {
 } from '@/components/ui/sheet'
 import LeadKanban from '@/components/leads/LeadKanban.vue'
 import LeadForm, { type PrefillContact } from '@/components/leads/LeadForm.vue'
+import LeadActivity from '@/components/leads/LeadActivity.vue'
+import LeadActivityForm from '@/components/leads/LeadActivityForm.vue'
 import { Plus, Layers } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 
@@ -50,6 +52,10 @@ const drawerOpen = ref(false)
 const editingLead = ref<Lead | null>(null)
 const initialStageId = ref<string | undefined>(undefined)
 const prefillContact = ref<PrefillContact | null>(null)
+
+const activityDrawerOpen = ref(false)
+const activityLead = ref<Lead | null>(null)
+const activityRef = ref<InstanceType<typeof LeadActivity> | null>(null)
 
 onMounted(async () => {
   await pipelineStore.fetchPipelines()
@@ -97,6 +103,11 @@ function openEdit(lead: Lead) {
   editingLead.value = lead
   initialStageId.value = undefined
   drawerOpen.value = true
+}
+
+function openActivities(lead: Lead) {
+  activityLead.value = lead
+  activityDrawerOpen.value = true
 }
 
 async function handleSave(body: Record<string, any>) {
@@ -188,6 +199,21 @@ async function deleteLead(leadId: string) {
             />
           </SheetContent>
         </Sheet>
+
+        <Sheet v-model:open="activityDrawerOpen">
+          <SheetContent>
+            <SheetHeader>
+              <SheetTitle>Activities</SheetTitle>
+              <SheetDescription v-if="activityLead">
+                Activities for <strong>{{ activityLead.name }}</strong>
+              </SheetDescription>
+            </SheetHeader>
+            <div v-if="activityLead" class="mt-4 space-y-4">
+              <LeadActivityForm :lead-id="activityLead.id!" @saved="activityRef?.fetchActivities()" />
+              <LeadActivity ref="activityRef" :lead-id="activityLead.id!" />
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
 
       <div v-if="leadsStore.loading" class="flex gap-4 overflow-x-auto pb-4">
@@ -212,6 +238,7 @@ async function deleteLead(leadId: string) {
         :pipeline-id="selectedPipelineId"
         @create="openCreate"
         @edit="openEdit"
+        @view-activities="openActivities"
         @move-stage="moveStage"
       />
     </div>

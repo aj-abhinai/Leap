@@ -120,6 +120,13 @@ func main() {
 		r.Patch("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Update))
 		r.Delete("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:delete", leadH.Delete))
 
+		r.Get("/api/leads/{id}/activities", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListActivities))
+		r.Post("/api/leads/{id}/activities", middleware.RequirePermission(rbacSvc, "lead:write", leadH.CreateActivity))
+		r.Delete("/api/leads/{id}/activities/{activity_id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DeleteActivity))
+
+		r.Get("/api/reminders", leadH.PendingReminders)
+		r.Patch("/api/reminders/{id}", leadH.DismissReminder)
+
 		r.Get("/api/pipelines", pipelineH.List)
 		r.Post("/api/pipelines", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Create))
 		r.Patch("/api/pipelines/{id}", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Update))

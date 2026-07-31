@@ -43,3 +43,27 @@ type UpdateRequest struct {
 	Notes      *string  `json:"notes,omitempty"`
 	AssignedTo *string  `json:"assigned_to,omitempty"`
 }
+
+type Activity struct {
+	ID          string     `json:"id"`
+	LeadID      string     `json:"lead_id"`
+	StageID     string     `json:"stage_id"`
+	StageName   string     `json:"stage_name,omitempty"`
+	UserID      *string    `json:"user_id,omitempty"`
+	UserName    string     `json:"user_name,omitempty"`
+	Type        string     `json:"type"`
+	Description string     `json:"description"`
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
+	RemindAt    *time.Time `json:"remind_at,omitempty"`
+	IsDone      bool       `json:"is_done"`
+	IsReminded  bool       `json:"is_reminded"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+type CreateActivityRequest struct {
+	Type        string     `json:"type"`
+	Description string     `json:"description"`
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
+	RemindAt    *time.Time `json:"remind_at,omitempty"`
+}
