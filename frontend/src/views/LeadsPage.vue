@@ -26,6 +26,7 @@ import {
 import LeadKanban from '@/components/leads/LeadKanban.vue'
 import LeadForm, { type PrefillContact } from '@/components/leads/LeadForm.vue'
 import { Plus, Layers } from '@lucide/vue'
+import { toast } from 'vue-sonner'
 
 const route = useRoute()
 const pipelineStore = usePipelineStore()
@@ -114,13 +115,23 @@ async function handleSave(body: Record<string, any>) {
   }
 }
 
-async function moveStage(leadId: string, newStageId: string) {
+async function moveStage(leadId: string, newStageId: string, previousStageId?: string) {
   try {
     await apiClient.patch(`/api/leads/${leadId}`, { stage_id: newStageId })
-    toast.success('Lead moved')
+    toast.success('Lead moved', {
+      action: previousStageId ? {
+        label: 'Undo',
+        onClick: async () => {
+          await apiClient.patch(`/api/leads/${leadId}`, { stage_id: previousStageId })
+          await loadLeads()
+        },
+      } : undefined,
+      duration: 5000,
+    })
     loadLeads()
   } catch (e: any) {
     toast.error(e.message || 'Failed to move lead')
+    loadLeads()
   }
 }
 
