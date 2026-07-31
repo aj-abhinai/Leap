@@ -63,7 +63,7 @@ func (s *Service) List(page, perPage int, filters ActivityFilters) ([]Entry, int
 	}
 	defer rows.Close()
 
-	var entries []Entry
+	entries := []Entry{}
 	for rows.Next() {
 		var e Entry
 		var changes []byte

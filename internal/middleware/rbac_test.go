@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crm/internal/ctxutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +17,7 @@ func TestRequirePermissionUnauthorized(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	mw := func(w http.ResponseWriter, r *http.Request) {
-		userID := GetUserID(r)
+		userID := ctxutil.GetUserID(r)
 		if userID == "" {
 			http.Error(w, `{"error":{"code":"UNAUTHORIZED"}}`, http.StatusUnauthorized)
 			return
@@ -36,12 +37,12 @@ func TestRequirePermissionDenied(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := context.WithValue(req.Context(), UserIDKey, "user-1")
+	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, "user-1")
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
 	mw := func(w http.ResponseWriter, r *http.Request) {
-		userID := GetUserID(r)
+		userID := ctxutil.GetUserID(r)
 		if userID == "" {
 			http.Error(w, `{"error":{"code":"UNAUTHORIZED"}}`, http.StatusUnauthorized)
 			return
@@ -71,7 +72,7 @@ func TestRequirePermissionWildcard(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := context.WithValue(req.Context(), UserIDKey, "user-1")
+	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, "user-1")
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
@@ -101,7 +102,7 @@ func TestRequirePermissionAllowed(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := context.WithValue(req.Context(), UserIDKey, "user-1")
+	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, "user-1")
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 

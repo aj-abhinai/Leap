@@ -28,8 +28,14 @@ func TestHashPasswordEmpty(t *testing.T) {
 }
 
 func TestGenerateRandomToken(t *testing.T) {
-	t1 := generateRandomToken()
-	t2 := generateRandomToken()
+	t1, err := generateRandomToken()
+	if err != nil {
+		t.Fatalf("generateRandomToken failed: %v", err)
+	}
+	t2, err := generateRandomToken()
+	if err != nil {
+		t.Fatalf("generateRandomToken failed: %v", err)
+	}
 	if t1 == "" || t2 == "" {
 		t.Error("tokens should not be empty")
 	}

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crm/internal/ctxutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,7 +10,7 @@ import (
 
 func TestGetUserIDEmpty(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	id := GetUserID(req)
+	id := ctxutil.GetUserID(req)
 	if id != "" {
 		t.Errorf("expected empty user ID, got %q", id)
 	}
@@ -17,9 +18,9 @@ func TestGetUserIDEmpty(t *testing.T) {
 
 func TestGetUserIDWithValue(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := context.WithValue(req.Context(), UserIDKey, "test-user-123")
+	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, "test-user-123")
 	req = req.WithContext(ctx)
-	id := GetUserID(req)
+	id := ctxutil.GetUserID(req)
 	if id != "test-user-123" {
 		t.Errorf("expected 'test-user-123', got %q", id)
 	}

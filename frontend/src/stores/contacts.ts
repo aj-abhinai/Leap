@@ -33,5 +33,14 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  return { contacts, total, loading, fetchContacts }
+  async function fetchTotal() {
+    try {
+      const params = new URLSearchParams()
+      params.set('per_page', '1')
+      const res = await apiClient.get(`/api/contacts?${params}`)
+      total.value = res.meta?.total || 0
+    } catch {}
+  }
+
+  return { contacts, total, loading, fetchContacts, fetchTotal }
 })

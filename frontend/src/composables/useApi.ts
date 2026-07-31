@@ -1,13 +1,13 @@
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 
-interface ApiResponse {
-  data: any
+interface ApiResponse<T = any> {
+  data: T
   error?: { code: string; message: string }
   meta?: { page: number; per_page: number; total: number }
 }
 
-async function request(method: string, url: string, body?: any): Promise<ApiResponse> {
+async function request<T = any>(method: string, url: string, body?: any): Promise<ApiResponse<T>> {
   const auth = useAuthStore()
   const router = useRouter()
 
@@ -48,8 +48,8 @@ async function request(method: string, url: string, body?: any): Promise<ApiResp
 }
 
 export const apiClient = {
-  get: (url: string) => request('GET', url),
-  post: (url: string, body?: any) => request('POST', url, body),
-  patch: (url: string, body?: any) => request('PATCH', url, body),
-  delete: (url: string) => request('DELETE', url),
+  get: <T = any>(url: string) => request<T>('GET', url),
+  post: <T = any>(url: string, body?: any) => request<T>('POST', url, body),
+  patch: <T = any>(url: string, body?: any) => request<T>('PATCH', url, body),
+  delete: <T = any>(url: string) => request<T>('DELETE', url),
 }

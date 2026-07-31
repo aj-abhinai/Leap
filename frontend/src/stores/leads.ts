@@ -39,5 +39,14 @@ export const useLeadsStore = defineStore('leads', () => {
     }
   }
 
-  return { leads, total, loading, fetchLeads }
+  async function fetchTotal() {
+    try {
+      const params = new URLSearchParams()
+      params.set('per_page', '1')
+      const res = await apiClient.get(`/api/leads?${params}`)
+      total.value = res.meta?.total || 0
+    } catch {}
+  }
+
+  return { leads, total, loading, fetchLeads, fetchTotal }
 })

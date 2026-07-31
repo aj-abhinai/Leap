@@ -84,7 +84,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
-	r.Use(chimiddleware.Logger)
+	r.Use(middleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"*"},
@@ -100,6 +100,7 @@ func main() {
 		r.Use(middleware.Auth(authSvc))
 
 		r.Post("/api/auth/logout", authH.Logout)
+		r.Get("/api/auth/me", authH.Me)
 
 		r.Get("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:read", contactH.List))
 		r.Post("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Create))

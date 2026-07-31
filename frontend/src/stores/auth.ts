@@ -46,8 +46,21 @@ export const useAuthStore = defineStore('auth', () => {
     const json = await res.json()
     if (json.error) throw new Error(json.error.message)
     saveTokens(json.data)
-    user.value = { id: '', name: email, email }
+    await fetchUser()
     return json.data
+  }
+
+  async function fetchUser() {
+    if (!accessToken.value) return
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${accessToken.value}` },
+      })
+      if (res.ok) {
+        const json = await res.json()
+        user.value = json.data
+      }
+    } catch {}
   }
 
   async function refresh() {
@@ -84,5 +97,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('refresh_token')
   }
 
-  return { user, accessToken, refreshToken, isAuthenticated, loadTokens, login, refresh, logout, saveTokens }
+  return { user, accessToken, refreshToken, isAuthenticated, loadTokens, login, refresh, logout, saveTokens, fetchUser }
 })

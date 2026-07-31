@@ -19,7 +19,7 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	pipelines, err := h.svc.List()
 	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusOK, pipelines, nil, nil)
@@ -37,7 +37,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.svc.CreatePipeline(req)
 	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusCreated, p, nil, nil)
@@ -52,7 +52,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.svc.UpdatePipeline(id, req)
 	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusOK, p, nil, nil)
@@ -61,7 +61,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.DeletePipeline(id); err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Pipeline deleted"}, nil, nil)
@@ -80,7 +80,7 @@ func (h *Handler) CreateStage(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := h.svc.CreateStage(pipelineID, req)
 	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusCreated, st, nil, nil)
@@ -95,7 +95,7 @@ func (h *Handler) UpdateStage(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := h.svc.UpdateStage(stageID, req)
 	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusOK, st, nil, nil)
@@ -104,7 +104,7 @@ func (h *Handler) UpdateStage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteStage(w http.ResponseWriter, r *http.Request) {
 	stageID := chi.URLParam(r, "stage_id")
 	if err := h.svc.DeleteStage(stageID); err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Stage deleted"}, nil, nil)

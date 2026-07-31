@@ -37,8 +37,7 @@ func seedSuperadmin(db *sql.DB, cfg config.Auth) error {
 	password := getEnv("SUPERADMIN_PASSWORD", "admin")
 
 	var exists bool
-	err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists)
-	if err != nil {
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists); err != nil {
 		return err
 	}
 	if exists {
@@ -86,7 +85,9 @@ func seedSuperadminRole(db *sql.DB) error {
 	email := getEnv("SUPERADMIN_EMAIL", "admin@crm.local")
 
 	var exists bool
-	db.QueryRow(`SELECT EXISTS(SELECT 1 FROM roles WHERE name = 'superadmin')`).Scan(&exists)
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM roles WHERE name = 'superadmin')`).Scan(&exists); err != nil {
+		return err
+	}
 	if exists {
 		return nil
 	}
@@ -112,7 +113,9 @@ func seedSuperadminRole(db *sql.DB) error {
 
 func seedDefaultPipeline(db *sql.DB) error {
 	var exists bool
-	db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pipelines WHERE name = 'Default Pipeline')`).Scan(&exists)
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pipelines WHERE name = 'Default Pipeline')`).Scan(&exists); err != nil {
+		return err
+	}
 	if exists {
 		return nil
 	}

@@ -1,9 +1,11 @@
 package contact
 
 import (
+	"crm/internal/util"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 type Service struct {
@@ -49,7 +51,7 @@ func (s *Service) List(page, perPage int, search string) ([]Contact, int, error)
 	}
 	defer rows.Close()
 
-	var contacts []Contact
+	contacts := []Contact{}
 	for rows.Next() {
 		var c Contact
 		if err := rows.Scan(&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt); err != nil {
@@ -76,7 +78,7 @@ func (s *Service) Create(req CreateRequest) (*Contact, error) {
 	var c Contact
 	err := s.db.QueryRow(
 		`INSERT INTO contacts (name, email, phone, location, age) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
-		req.Name, nullStr(req.Email), nullStr(req.Phone), nullStr(req.Location), req.Age,
+		req.Name, util.NullStr(req.Email), util.NullStr(req.Phone), util.NullStr(req.Location), req.Age,
 	).Scan(&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create contact: %w", err)
@@ -101,7 +103,7 @@ func (s *Service) Update(id string, req UpdateRequest) (*Contact, error) {
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
-		id, req.Name, strPtr(req.Email), strPtr(req.Phone), strPtr(req.Location), req.Age,
+		id, req.Name, util.StrPtr(req.Email), util.StrPtr(req.Phone), util.StrPtr(req.Location), req.Age,
 	).Scan(&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("update contact: %w", err)
@@ -124,10 +126,12 @@ func (s *Service) Delete(id string) error {
 }
 
 func (s *Service) logActivity(resourceID, resourceType, action, changes string) {
-	s.db.Exec(
+	if _, err := s.db.Exec(
 		`INSERT INTO audit_logs (description, resource_type, resource_id, action, changes) VALUES ($1, $2, $3, $4, $5)`,
 		action+" "+resourceType+" "+resourceID, resourceType, resourceID, action, changes,
-	)
+	); err != nil {
+		slog.Error("log activity", "error", err, "resource_type", resourceType, "resource_id", resourceID)
+	}
 }
 
 func diffContact(old, new *Contact) string {
@@ -152,19 +156,5 @@ func diffContact(old, new *Contact) string {
 	}
 	b, _ := json.Marshal(diff)
 	return string(b)
-}
-
-func nullStr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func strPtr(s *string) *string {
-	if s == nil || *s == "" {
-		return nil
-	}
-	return s
 }
 

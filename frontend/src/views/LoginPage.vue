@@ -11,8 +11,8 @@ import { Loader2 } from '@lucide/vue'
 const router = useRouter()
 const auth = useAuthStore()
 
-const email = ref('admin@crm.local')
-const password = ref('admin')
+const email = ref('')
+const password = ref('')
 const error = ref('')
 const loading = ref(false)
 

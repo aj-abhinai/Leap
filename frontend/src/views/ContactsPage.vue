@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { useContactsStore, type Contact } from '@/stores/contacts'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
@@ -21,8 +21,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { Label } from '@/components/ui/label'
-import { Plus, Pencil, Trash2, Loader2 } from '@lucide/vue'
+import { Plus, Pencil, Trash2 } from '@lucide/vue'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +33,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import ContactForm from '@/components/contacts/ContactForm.vue'
 
 const store = useContactsStore()
 const search = ref('')
@@ -42,16 +42,11 @@ const perPage = 20
 
 const drawerOpen = ref(false)
 const editingContact = ref<Contact | null>(null)
-const formName = ref('')
-const formEmail = ref('')
-const formPhone = ref('')
-const formLocation = ref('')
-const formAge = ref<number | undefined>(undefined)
-const formError = ref('')
-const saving = ref(false)
 
 const deletingId = ref<string | null>(null)
 const deleteDialogOpen = ref(false)
+
+const totalPages = computed(() => Math.ceil(store.total / perPage) || 1)
 
 onMounted(() => loadContacts())
 
@@ -66,58 +61,22 @@ function onSearch() {
 
 function openCreate() {
   editingContact.value = null
-  formName.value = ''
-  formEmail.value = ''
-  formPhone.value = ''
-  formLocation.value = ''
-  formAge.value = undefined
-  formError.value = ''
   drawerOpen.value = true
 }
 
 function openEdit(contact: Contact) {
   editingContact.value = contact
-  formName.value = contact.name
-  formEmail.value = contact.email || ''
-  formPhone.value = contact.phone || ''
-  formLocation.value = contact.location || ''
-  formAge.value = contact.age
-  formError.value = ''
   drawerOpen.value = true
 }
 
-async function handleSave() {
-  formError.value = ''
-  if (!formName.value) {
-    formError.value = 'Name is required'
-    return
+async function handleSave(body: Record<string, any>) {
+  if (editingContact.value) {
+    await apiClient.patch(`/api/contacts/${editingContact.value.id}`, body)
+  } else {
+    await apiClient.post('/api/contacts', body)
   }
-  saving.value = true
-  try {
-    if (editingContact.value) {
-      await apiClient.patch(`/api/contacts/${editingContact.value.id}`, {
-        name: formName.value,
-        email: formEmail.value || null,
-        phone: formPhone.value || null,
-        location: formLocation.value || null,
-        age: formAge.value || null,
-      })
-    } else {
-      await apiClient.post('/api/contacts', {
-        name: formName.value,
-        email: formEmail.value || null,
-        phone: formPhone.value || null,
-        location: formLocation.value || null,
-        age: formAge.value || null,
-      })
-    }
-    drawerOpen.value = false
-    loadContacts()
-  } catch (e: any) {
-    formError.value = e.message || 'Save failed'
-  } finally {
-    saving.value = false
-  }
+  drawerOpen.value = false
+  loadContacts()
 }
 
 async function handleDelete() {
@@ -128,10 +87,6 @@ async function handleDelete() {
     deleteDialogOpen.value = false
     loadContacts()
   } catch {}
-}
-
-function totalPages() {
-  return Math.ceil(store.total / perPage) || 1
 }
 </script>
 
@@ -157,33 +112,10 @@ function totalPages() {
               <SheetTitle>{{ editingContact ? 'Edit Contact' : 'Add Contact' }}</SheetTitle>
               <SheetDescription>Fill in the contact details below.</SheetDescription>
             </SheetHeader>
-            <div class="mt-4 space-y-4">
-              <div class="space-y-2">
-                <Label for="name">Name *</Label>
-                <Input id="name" v-model="formName" placeholder="Full name" />
-              </div>
-              <div class="space-y-2">
-                <Label for="email">Email</Label>
-                <Input id="email" v-model="formEmail" type="email" placeholder="Email address" />
-              </div>
-              <div class="space-y-2">
-                <Label for="phone">Phone</Label>
-                <Input id="phone" v-model="formPhone" placeholder="Phone number" />
-              </div>
-              <div class="space-y-2">
-                <Label for="location">Location</Label>
-                <Input id="location" v-model="formLocation" placeholder="Location" />
-              </div>
-              <div class="space-y-2">
-                <Label for="age">Age</Label>
-                <Input id="age" v-model.number="formAge" type="number" placeholder="Age" />
-              </div>
-              <div v-if="formError" class="text-sm text-destructive">{{ formError }}</div>
-              <Button @click="handleSave" :disabled="saving" class="w-full">
-                <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-                {{ editingContact ? 'Update' : 'Create' }}
-              </Button>
-            </div>
+            <ContactForm
+              :editing-contact="editingContact"
+              @save="handleSave"
+            />
           </SheetContent>
         </Sheet>
       </div>
@@ -254,13 +186,13 @@ function totalPages() {
       </div>
       <div class="flex items-center justify-between">
         <span class="text-sm text-muted-foreground">
-          Page {{ page }} of {{ totalPages() }} ({{ store.total }} total)
+          Page {{ page }} of {{ totalPages }} ({{ store.total }} total)
         </span>
         <div class="flex gap-2">
           <Button variant="outline" :disabled="page <= 1" @click="page--; loadContacts()">
             Previous
           </Button>
-          <Button variant="outline" :disabled="page >= totalPages()" @click="page++; loadContacts()">
+          <Button variant="outline" :disabled="page >= totalPages" @click="page++; loadContacts()">
             Next
           </Button>
         </div>

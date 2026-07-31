@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crm/internal/ctxutil"
 	"crm/internal/respond"
 	"encoding/json"
 	"net/http"
@@ -49,11 +50,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.Refresh(req.RefreshToken)
 	if err != nil {
 		if ae, ok := err.(*AuthError); ok {
-			status := http.StatusUnauthorized
-			if ae.Code == "TOKEN_REVOKED" {
-				status = http.StatusUnauthorized
-			}
-			respond.JSON(w, status, nil, &respond.Error{Code: ae.Code, Message: ae.Message}, nil)
+			respond.JSON(w, http.StatusUnauthorized, nil, &respond.Error{Code: ae.Code, Message: ae.Message}, nil)
 		} else {
 			respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "Refresh failed"}, nil)
 		}
@@ -74,4 +71,14 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 	h.svc.Logout(req.RefreshToken)
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Logged out"}, nil, nil)
+}
+
+func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
+	userID := ctxutil.GetUserID(r)
+	u, err := h.svc.GetUser(userID)
+	if err != nil {
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "Failed to load user"}, nil)
+		return
+	}
+	respond.JSON(w, http.StatusOK, u, nil, nil)
 }

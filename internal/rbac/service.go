@@ -21,7 +21,7 @@ func (s *Service) ListPermissions() ([]Permission, error) {
 		return nil, fmt.Errorf("list permissions: %w", err)
 	}
 	defer rows.Close()
-	var perms []Permission
+	perms := []Permission{}
 	for rows.Next() {
 		var p Permission
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt); err != nil {
@@ -38,7 +38,7 @@ func (s *Service) ListRoles() ([]Role, error) {
 		return nil, fmt.Errorf("list roles: %w", err)
 	}
 	defer rows.Close()
-	var roles []Role
+	roles := []Role{}
 	for rows.Next() {
 		var r Role
 		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt); err != nil {
@@ -99,7 +99,7 @@ func (s *Service) GetUserPermissions(userID string) ([]string, error) {
 		return nil, fmt.Errorf("get user permissions: %w", err)
 	}
 	defer rows.Close()
-	var perms []string
+	perms := []string{}
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
@@ -123,7 +123,7 @@ func (s *Service) GetRolePermissions(roleID string) ([]Permission, error) {
 		return nil, fmt.Errorf("get role permissions: %w", err)
 	}
 	defer rows.Close()
-	var perms []Permission
+	perms := []Permission{}
 	for rows.Next() {
 		var p Permission
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt); err != nil {
@@ -154,7 +154,7 @@ func (s *Service) GetUserRoles(userID string) ([]Role, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var roles []Role
+	roles := []Role{}
 	for rows.Next() {
 		var r Role
 		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt); err != nil {
@@ -171,17 +171,54 @@ func (s *Service) ListUsers() ([]UserInfo, error) {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
 	defer rows.Close()
-	var users []UserInfo
+	users := []UserInfo{}
+	userIDs := []string{}
 	for rows.Next() {
 		var u UserInfo
 		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt); err != nil {
 			return nil, err
 		}
-		roles, _ := s.GetUserRoles(u.ID)
-		u.Roles = roles
 		users = append(users, u)
+		userIDs = append(userIDs, u.ID)
+	}
+	if len(userIDs) == 0 {
+		return users, nil
+	}
+	roleMap, err := s.getUserRolesBatch(userIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range users {
+		users[i].Roles = roleMap[users[i].ID]
 	}
 	return users, nil
+}
+
+func (s *Service) getUserRolesBatch(userIDs []string) (map[string][]Role, error) {
+	rows, err := s.db.Query(`
+		SELECT ur.user_id, r.id, r.name, COALESCE(r.description, ''), r.created_at, r.updated_at
+		FROM roles r
+		JOIN user_roles ur ON r.id = ur.role_id
+		WHERE ur.user_id = ANY($1)
+		ORDER BY r.name
+	`, userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get user roles batch: %w", err)
+	}
+	defer rows.Close()
+	roleMap := map[string][]Role{}
+	for rows.Next() {
+		var userID string
+		var r Role
+		if err := rows.Scan(&userID, &r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		roleMap[userID] = append(roleMap[userID], r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return roleMap, nil
 }
 
 func (s *Service) CreateUser(name, email, password string) (*UserInfo, error) {

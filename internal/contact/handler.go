@@ -30,7 +30,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	contacts, total, err := h.svc.List(page, perPage, search)
 	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusOK, contacts, nil, &respond.Meta{Page: page, PerPage: perPage, Total: total})
@@ -48,7 +48,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.svc.Create(req)
 	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusCreated, c, nil, nil)
@@ -63,7 +63,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.svc.Update(id, req)
 	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusOK, c, nil, nil)
@@ -72,7 +72,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.Delete(id); err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: err.Error()}, nil)
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Contact deleted"}, nil, nil)

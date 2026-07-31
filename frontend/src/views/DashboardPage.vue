@@ -1,25 +1,22 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { apiClient } from '@/composables/useApi'
+import { onMounted } from 'vue'
+import { useContactsStore } from '@/stores/contacts'
+import { useLeadsStore } from '@/stores/leads'
+import { useActivityStore } from '@/stores/activity'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Users, FolderOpen, CheckCircle2 } from '@lucide/vue'
-import { useActivityStore, type ActivityEntry } from '@/stores/activity'
 
-const totalContacts = ref(0)
-const totalLeads = ref(0)
+const contactsStore = useContactsStore()
+const leadsStore = useLeadsStore()
 const activity = useActivityStore()
 
 onMounted(async () => {
-  try {
-    const contactsRes = await apiClient.get('/api/contacts?per_page=1')
-    totalContacts.value = contactsRes.meta?.total || 0
-  } catch {}
-  try {
-    const leadsRes = await apiClient.get('/api/leads?per_page=1')
-    totalLeads.value = leadsRes.meta?.total || 0
-  } catch {}
-  activity.fetchActivity(1, 10)
+  await Promise.all([
+    contactsStore.fetchTotal(),
+    leadsStore.fetchTotal(),
+    activity.fetchActivity(1, 10),
+  ])
 })
 </script>
 
@@ -33,7 +30,7 @@ onMounted(async () => {
             <Users class="size-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">{{ totalContacts }}</div>
+            <div class="text-2xl font-bold">{{ contactsStore.total }}</div>
           </CardContent>
         </Card>
         <Card>
@@ -42,7 +39,7 @@ onMounted(async () => {
             <FolderOpen class="size-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">{{ totalLeads }}</div>
+            <div class="text-2xl font-bold">{{ leadsStore.total }}</div>
           </CardContent>
         </Card>
         <Card>

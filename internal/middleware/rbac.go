@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crm/internal/ctxutil"
 	"crm/internal/rbac"
 	"crm/internal/respond"
 	"net/http"
@@ -8,7 +9,7 @@ import (
 
 func RequirePermission(rbacSvc *rbac.Service, permission string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID := GetUserID(r)
+		userID := ctxutil.GetUserID(r)
 		if userID == "" {
 			respond.JSON(w, http.StatusUnauthorized, nil, &respond.Error{Code: "UNAUTHORIZED", Message: "Not authenticated"}, nil)
 			return

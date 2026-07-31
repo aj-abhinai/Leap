@@ -1,8 +1,10 @@
 package lead
 
 import (
+	"crm/internal/util"
 	"database/sql"
 	"fmt"
+	"log/slog"
 )
 
 type Service struct {
@@ -61,7 +63,7 @@ func (s *Service) List(pipelineID, stageID string, page, perPage int) ([]Lead, i
 	}
 	defer rows.Close()
 
-	var leads []Lead
+	leads := []Lead{}
 	for rows.Next() {
 		var l Lead
 		if err := rows.Scan(&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.StageName, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt); err != nil {
@@ -94,7 +96,7 @@ func (s *Service) Create(req CreateRequest) (*Lead, error) {
 		INSERT INTO leads (name, email, phone, contact_id, pipeline_id, stage_id, value, notes, assigned_to)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
-		req.Name, nullStr(req.Email), nullStr(req.Phone), req.ContactID, req.PipelineID, req.StageID, req.Value, nullStr(req.Notes), req.AssignedTo,
+		req.Name, util.NullStr(req.Email), util.NullStr(req.Phone), req.ContactID, req.PipelineID, req.StageID, req.Value, util.NullStr(req.Notes), req.AssignedTo,
 	).Scan(&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create lead: %w", err)
@@ -127,7 +129,7 @@ func (s *Service) Update(id string, req UpdateRequest) (*Lead, error) {
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
-		id, req.Name, req.Email, req.Phone, req.ContactID, req.PipelineID, req.StageID, req.Value, req.Notes, req.AssignedTo,
+		id, req.Name, util.StrPtr(req.Email), util.StrPtr(req.Phone), req.ContactID, req.PipelineID, req.StageID, req.Value, util.StrPtr(req.Notes), req.AssignedTo,
 	).Scan(&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("update lead: %w", err)
@@ -173,15 +175,10 @@ func (s *Service) Delete(id string) error {
 }
 
 func (s *Service) logActivity(resourceID, resourceType, action, desc string) {
-	s.db.Exec(
+	if _, err := s.db.Exec(
 		`INSERT INTO audit_logs (description, resource_type, resource_id, action) VALUES ($1, $2, $3, $4)`,
 		desc, resourceType, resourceID, action,
-	)
-}
-
-func nullStr(s string) *string {
-	if s == "" {
-		return nil
+	); err != nil {
+		slog.Error("log activity", "error", err, "resource_type", resourceType, "resource_id", resourceID)
 	}
-	return &s
 }

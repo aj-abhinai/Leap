@@ -73,7 +73,10 @@ func (s *Service) generateTokenPair(userID string) (*TokenResponse, error) {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	refreshToken := generateRandomToken()
+	refreshToken, err := generateRandomToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate refresh token: %w", err)
+	}
 	refreshHash := hashToken(refreshToken)
 	_, err = s.db.Exec(
 		`INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
@@ -115,7 +118,22 @@ func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 		return "", ErrInvalidToken
 	}
 	sub, _ := claims["sub"].(string)
+	if sub == "" {
+		return "", ErrInvalidToken
+	}
 	return sub, nil
+}
+
+func (s *Service) GetUser(userID string) (*User, error) {
+	var u User
+	err := s.db.QueryRow(
+		`SELECT id, name, email, COALESCE(avatar_url, ''), created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL`,
+		userID,
+	).Scan(&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
 }
 
 func HashPassword(password string, cost int) (string, error) {
@@ -123,10 +141,12 @@ func HashPassword(password string, cost int) (string, error) {
 	return string(bytes), err
 }
 
-func generateRandomToken() string {
+func generateRandomToken() (string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func hashToken(token string) string {
