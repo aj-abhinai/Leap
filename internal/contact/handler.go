@@ -2,6 +2,7 @@ package contact
 
 import (
 	"crm/internal/respond"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -76,4 +77,18 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Contact deleted"}, nil, nil)
+}
+
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c, err := h.svc.Get(id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respond.JSON(w, http.StatusNotFound, nil, &respond.Error{Code: "NOT_FOUND", Message: "Contact not found"}, nil)
+			return
+		}
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
+		return
+	}
+	respond.JSON(w, http.StatusOK, c, nil, nil)
 }

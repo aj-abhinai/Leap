@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"crm/internal/ctxutil"
 	"crm/internal/respond"
 	"encoding/json"
 	"net/http"
@@ -176,4 +177,14 @@ func (h *Handler) RemoveUserRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Role removed"}, nil, nil)
+}
+
+func (h *Handler) MePermissions(w http.ResponseWriter, r *http.Request) {
+	userID := ctxutil.GetUserID(r)
+	perms, err := h.svc.GetUserPermissions(userID)
+	if err != nil {
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "Failed to load permissions"}, nil)
+		return
+	}
+	respond.JSON(w, http.StatusOK, perms, nil, nil)
 }

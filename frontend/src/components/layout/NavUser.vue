@@ -64,7 +64,7 @@ function handleLogout() {
           <DropdownMenuLabel>My Account</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem as-child>
-            <router-link to="/settings">
+            <router-link to="/profile">
               <User class="mr-2 size-4" />
               <span>Profile</span>
             </router-link>

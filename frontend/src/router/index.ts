@@ -39,6 +39,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/SettingsPage.vue'),
     meta: { title: 'Settings' },
   },
+  {
+    path: '/profile',
+    name: 'Profile',
+    component: () => import('@/views/ProfilePage.vue'),
+    meta: { title: 'Profile' },
+  },
 ]
 
 const router = createRouter({

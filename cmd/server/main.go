@@ -101,9 +101,12 @@ func main() {
 
 		r.Post("/api/auth/logout", authH.Logout)
 		r.Get("/api/auth/me", authH.Me)
+		r.Patch("/api/auth/me", authH.UpdateProfile)
+		r.Get("/api/auth/me/permissions", rbacH.MePermissions)
 
 		r.Get("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:read", contactH.List))
 		r.Post("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Create))
+		r.Get("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:read", contactH.Get))
 		r.Patch("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Update))
 		r.Delete("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:delete", contactH.Delete))
 

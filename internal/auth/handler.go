@@ -82,3 +82,18 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	}
 	respond.JSON(w, http.StatusOK, u, nil, nil)
 }
+
+func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	userID := ctxutil.GetUserID(r)
+	var req UpdateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(w, http.StatusBadRequest, nil, &respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"}, nil)
+		return
+	}
+	u, err := h.svc.UpdateProfile(userID, req)
+	if err != nil {
+		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "Failed to update profile"}, nil)
+		return
+	}
+	respond.JSON(w, http.StatusOK, u, nil, nil)
+}

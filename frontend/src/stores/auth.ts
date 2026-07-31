@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { apiClient } from '@/composables/useApi'
 
 interface User {
   id: string
   name: string
   email: string
+  phone?: string
   avatar_url?: string
 }
 
@@ -97,5 +99,11 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('refresh_token')
   }
 
-  return { user, accessToken, refreshToken, isAuthenticated, loadTokens, login, refresh, logout, saveTokens, fetchUser }
+  async function updateProfile(name: string, phone: string) {
+    const res = await apiClient.patch('/api/auth/me', { name, phone })
+    user.value = res.data
+    return res.data
+  }
+
+  return { user, accessToken, refreshToken, isAuthenticated, loadTokens, login, refresh, logout, saveTokens, fetchUser, updateProfile }
 })

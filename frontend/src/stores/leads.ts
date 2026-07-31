@@ -8,6 +8,7 @@ export interface Lead {
   email?: string
   phone?: string
   contact_id?: string
+  contact_name?: string
   pipeline_id: string
   stage_id: string
   stage_name?: string

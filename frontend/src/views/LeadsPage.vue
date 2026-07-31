@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { apiClient } from '@/composables/useApi'
 import { usePipelineStore } from '@/stores/pipeline'
 import { useLeadsStore, type Lead } from '@/stores/leads'
@@ -23,9 +24,10 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import LeadKanban from '@/components/leads/LeadKanban.vue'
-import LeadForm from '@/components/leads/LeadForm.vue'
+import LeadForm, { type PrefillContact } from '@/components/leads/LeadForm.vue'
 import { Plus, Layers } from '@lucide/vue'
 
+const route = useRoute()
 const pipelineStore = usePipelineStore()
 const leadsStore = useLeadsStore()
 
@@ -46,12 +48,31 @@ const kanbanColumns = computed(() => {
 const drawerOpen = ref(false)
 const editingLead = ref<Lead | null>(null)
 const initialStageId = ref<string | undefined>(undefined)
+const prefillContact = ref<PrefillContact | null>(null)
 
 onMounted(async () => {
   await pipelineStore.fetchPipelines()
   if (pipelineStore.pipelines.length > 0) {
     selectedPipelineId.value = pipelineStore.pipelines[0].id
     loadLeads()
+  }
+  const contactIdQuery = route.query.contact as string | undefined
+  const contactId = contactIdQuery || route.query.contact_id as string | undefined
+  if (contactId) {
+    try {
+      const res = await apiClient.get(`/api/contacts/${contactId}`)
+      const c = res.data as { id: string; name: string; email?: string; phone?: string }
+      prefillContact.value = {
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+      }
+      if (pipelineStore.pipelines.length > 0 && pipelineStore.pipelines[0].stages?.length) {
+        initialStageId.value = pipelineStore.pipelines[0].stages[0].id
+      }
+      drawerOpen.value = true
+    } catch {}
   }
 })
 
@@ -66,6 +87,7 @@ async function loadLeads() {
 
 function openCreate(stageId?: string) {
   editingLead.value = null
+  prefillContact.value = null
   initialStageId.value = stageId
   drawerOpen.value = true
 }
@@ -144,10 +166,12 @@ async function deleteLead(leadId: string) {
               <SheetDescription>Enter lead details below.</SheetDescription>
             </SheetHeader>
             <LeadForm
+              :key="editingLead?.id ?? 'create'"
               :editing-lead="editingLead"
               :stages="selectedPipeline?.stages || []"
               :pipeline-id="selectedPipelineId"
               :initial-stage-id="initialStageId"
+              :prefill-contact="prefillContact"
               @save="handleSave"
               @delete="deleteLead"
             />

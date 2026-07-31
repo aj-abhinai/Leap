@@ -2,20 +2,13 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiClient } from '@/composables/useApi'
 
-interface Permission {
-  id: string
-  name: string
-  description: string
-  created_at: string
-}
-
 export const useRBACStore = defineStore('rbac', () => {
   const permissions = ref<string[]>([])
 
   async function fetchPermissions() {
     try {
-      const res = await apiClient.get<Permission[]>('/api/permissions')
-      permissions.value = res.data.map((p) => p.name)
+      const res = await apiClient.get<string[]>('/api/auth/me/permissions')
+      permissions.value = res.data
     } catch {
       permissions.value = []
     }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useActivityStore } from '@/stores/activity'
+import { useRBACStore } from '@/stores/rbac'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -17,10 +18,23 @@ import { Badge, type BadgeVariants } from '@/components/ui/badge'
 import SettingsTabUsers from '@/components/settings/SettingsTabUsers.vue'
 import SettingsTabRoles from '@/components/settings/SettingsTabRoles.vue'
 import SettingsTabPipelines from '@/components/settings/SettingsTabPipelines.vue'
-import { RefreshCw, User, Shield, Layers, Activity, UserCircle } from '@lucide/vue'
+import { RefreshCw, User, Shield, Layers, Activity } from '@lucide/vue'
 
 const activity = useActivityStore()
+const rbac = useRBACStore()
 const activityPage = ref(1)
+
+const permissionsLoaded = ref(false)
+
+onMounted(async () => {
+  await rbac.fetchPermissions()
+  permissionsLoaded.value = true
+})
+
+function canOrLoading(permission: string): boolean {
+  if (!permissionsLoaded.value) return true
+  return rbac.can(permission)
+}
 
 function loadActivity() {
   activity.fetchActivity(activityPage.value, 20)
@@ -41,17 +55,13 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
 <template>
   <LayoutShell>
     <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
-      <Tabs defaultValue="profile" class="w-full">
+      <Tabs defaultValue="pipelines" class="w-full">
         <TabsList class="mb-4 w-full justify-start rounded-lg border bg-muted/50 p-1">
-          <TabsTrigger value="profile" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            <UserCircle class="size-4" />
-            <span class="hidden sm:inline">Profile</span>
-          </TabsTrigger>
-          <TabsTrigger value="users" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <TabsTrigger v-show="canOrLoading('rbac:manage')" value="users" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <User class="size-4" />
             <span class="hidden sm:inline">Users</span>
           </TabsTrigger>
-          <TabsTrigger value="roles" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <TabsTrigger v-show="canOrLoading('rbac:manage')" value="roles" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Shield class="size-4" />
             <span class="hidden sm:inline">Roles</span>
           </TabsTrigger>
@@ -59,30 +69,17 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
             <Layers class="size-4" />
             <span class="hidden sm:inline">Pipelines</span>
           </TabsTrigger>
-          <TabsTrigger value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <TabsTrigger v-show="canOrLoading('activity:read')" value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Activity class="size-4" />
             <span class="hidden sm:inline">Activity</span>
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="profile" class="mt-0">
-          <Card>
-            <CardHeader>
-              <CardTitle>Profile Settings</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p class="text-sm text-muted-foreground">
-                Your account settings. User and role management is available on other tabs.
-              </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="users" class="mt-0">
+        <TabsContent v-if="canOrLoading('rbac:manage')" value="users" class="mt-0">
           <SettingsTabUsers />
         </TabsContent>
 
-        <TabsContent value="roles" class="mt-0">
+        <TabsContent v-if="canOrLoading('rbac:manage')" value="roles" class="mt-0">
           <SettingsTabRoles />
         </TabsContent>
 
@@ -90,7 +87,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
           <SettingsTabPipelines />
         </TabsContent>
 
-        <TabsContent value="activity" class="mt-0">
+        <TabsContent v-if="canOrLoading('activity:read')" value="activity" class="mt-0">
           <Card>
             <CardHeader class="flex flex-row items-center justify-between">
               <CardTitle>Activity Log</CardTitle>

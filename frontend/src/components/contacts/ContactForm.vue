@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { type Contact } from '@/stores/contacts'
+import { contactSchema } from '@/lib/validation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,18 +25,25 @@ const saving = ref(false)
 
 async function handleSave() {
   formError.value = ''
-  if (!formName.value) {
-    formError.value = 'Name is required'
+  const result = contactSchema.safeParse({
+    name: formName.value,
+    email: formEmail.value || undefined,
+    phone: formPhone.value || undefined,
+    location: formLocation.value || undefined,
+    age: formAge.value || undefined,
+  })
+  if (!result.success) {
+    formError.value = result.error.errors[0]?.message || 'Validation failed'
     return
   }
   saving.value = true
   try {
     emit('save', {
-      name: formName.value,
-      email: formEmail.value || null,
-      phone: formPhone.value || null,
-      location: formLocation.value || null,
-      age: formAge.value || null,
+      name: result.data.name,
+      email: result.data.email || null,
+      phone: result.data.phone || null,
+      location: result.data.location || null,
+      age: result.data.age || null,
     })
   } catch (e: any) {
     formError.value = e.message || 'Save failed'

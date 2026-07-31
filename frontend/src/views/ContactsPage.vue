@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { apiClient } from '@/composables/useApi'
 import { useContactsStore, type Contact } from '@/stores/contacts'
 import { toast } from 'vue-sonner'
@@ -23,7 +24,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { Plus, Pencil, Trash2, Search, Users, ChevronLeft, ChevronRight } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Search, Users, ChevronLeft, ChevronRight, FolderKanban } from '@lucide/vue'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +38,7 @@ import {
 import ContactForm from '@/components/contacts/ContactForm.vue'
 
 const store = useContactsStore()
+const router = useRouter()
 const search = ref('')
 const page = ref(1)
 const perPage = 20
@@ -174,6 +176,7 @@ function getAvatarColor(name: string): string {
               <SheetDescription>Fill in the contact details below.</SheetDescription>
             </SheetHeader>
             <ContactForm
+              :key="editingContact?.id ?? 'create'"
               :editing-contact="editingContact"
               @save="handleSave"
             />
@@ -229,6 +232,14 @@ function getAvatarColor(name: string): string {
               <TableCell class="text-muted-foreground">{{ c.age || '—' }}</TableCell>
               <TableCell>
                 <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    @click="router.push({ name: 'Leads', query: { contact: c.id } })"
+                    title="Create lead from contact"
+                  >
+                    <FolderKanban class="size-3.5" />
+                  </Button>
                   <Button variant="ghost" size="icon-sm" @click="openEdit(c)">
                     <Pencil class="size-3.5" />
                   </Button>

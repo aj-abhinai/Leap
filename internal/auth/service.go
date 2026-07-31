@@ -127,11 +127,28 @@ func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 func (s *Service) GetUser(userID string) (*User, error) {
 	var u User
 	err := s.db.QueryRow(
-		`SELECT id, name, email, COALESCE(avatar_url, ''), created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL`,
+		`SELECT id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL`,
 		userID,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err
+	}
+	return &u, nil
+}
+
+func (s *Service) UpdateProfile(userID string, req UpdateProfileRequest) (*User, error) {
+	var u User
+	err := s.db.QueryRow(`
+		UPDATE users SET
+			name = COALESCE($2, name),
+			phone = COALESCE($3, phone),
+			updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at, updated_at`,
+		userID, req.Name, req.Phone,
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("update profile: %w", err)
 	}
 	return &u, nil
 }
