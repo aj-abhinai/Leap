@@ -38,28 +38,48 @@ func (s *Service) Login(email, password string) (*TokenResponse, error) {
 }
 
 func (s *Service) Refresh(refreshToken string) (*TokenResponse, error) {
+	hash := hashToken(refreshToken)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("refresh: %w", err)
+	}
+	defer tx.Rollback()
+
 	var userID string
-	var tokenHash string
 	var revoked bool
 	var expiresAt time.Time
-	hash := hashToken(refreshToken)
-	err := s.db.QueryRow(
-		`SELECT user_id, token_hash, revoked, expires_at FROM refresh_tokens WHERE token_hash = $1`,
+	err = tx.QueryRow(
+		`SELECT user_id, revoked, expires_at FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE`,
 		hash,
-	).Scan(&userID, &tokenHash, &revoked, &expiresAt)
-	if err != nil {
+	).Scan(&userID, &revoked, &expiresAt)
+	if err == sql.ErrNoRows {
 		return nil, ErrInvalidToken
+	}
+	if err != nil {
+		return nil, fmt.Errorf("refresh: %w", err)
 	}
 	if revoked || time.Now().After(expiresAt) {
 		return nil, ErrTokenRevoked
 	}
-	s.db.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)
+	_, err = tx.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)
+	if err != nil {
+		return nil, fmt.Errorf("refresh: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("refresh: %w", err)
+	}
 	return s.generateTokenPair(userID)
 }
 
 func (s *Service) Logout(refreshToken string) error {
 	hash := hashToken(refreshToken)
 	_, err := s.db.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)
+	return err
+}
+
+func (s *Service) RevokeUserTokens(userID string) error {
+	_, err := s.db.Exec(`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1`, userID)
 	return err
 }
 
@@ -98,6 +118,7 @@ func (s *Service) createJWT(userID string, expiresAt time.Time) (string, error) 
 		"sub": userID,
 		"exp": expiresAt.Unix(),
 		"iat": time.Now().Unix(),
+		"iss": s.cfg.JWTIssuer,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(s.cfg.JWTSecret))
@@ -105,11 +126,8 @@ func (s *Service) createJWT(userID string, expiresAt time.Time) (string, error) 
 
 func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
 		return []byte(s.cfg.JWTSecret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil {
 		return "", ErrInvalidToken
 	}
@@ -119,6 +137,9 @@ func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 	}
 	sub, _ := claims["sub"].(string)
 	if sub == "" {
+		return "", ErrInvalidToken
+	}
+	if iss, ok := claims["iss"].(string); ok && iss != s.cfg.JWTIssuer {
 		return "", ErrInvalidToken
 	}
 	return sub, nil

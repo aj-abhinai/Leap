@@ -31,6 +31,7 @@ type DB struct {
 
 type Auth struct {
 	JWTSecret       string        `toml:"jwt_secret"`
+	JWTIssuer       string        `toml:"jwt_issuer"`
 	AccessTokenTTL  time.Duration `toml:"access_token_ttl"`
 	RefreshTokenTTL time.Duration `toml:"refresh_token_ttl"`
 	BcryptCost      int           `toml:"bcrypt_cost"`

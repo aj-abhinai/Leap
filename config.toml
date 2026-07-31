@@ -12,6 +12,7 @@ sslmode = "disable"
 
 [auth]
 jwt_secret = "change-me-in-production"
+jwt_issuer = "crm"
 access_token_ttl = "15m"
 refresh_token_ttl = "168h"
 bcrypt_cost = 12
