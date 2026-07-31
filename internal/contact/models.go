@@ -46,3 +46,17 @@ type ListResponse struct {
 	Contacts []Contact `json:"contacts"`
 	Total    int       `json:"total"`
 }
+
+type Note struct {
+	ID        string    `json:"id"`
+	ContactID string    `json:"contact_id"`
+	UserID    *string   `json:"user_id,omitempty"`
+	UserName  string    `json:"user_name,omitempty"`
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type CreateNoteRequest struct {
+	Note string `json:"note"`
+}

@@ -39,6 +39,7 @@ import {
 import ContactForm from '@/components/contacts/ContactForm.vue'
 import ContactCompactCard from '@/components/contacts/ContactCompactCard.vue'
 import ContactSpreadsheet from '@/components/contacts/ContactSpreadsheet.vue'
+import CsvImport from '@/components/contacts/CsvImport.vue'
 
 const store = useContactsStore()
 const router = useRouter()
@@ -72,29 +73,7 @@ onMounted(() => {
 
 watch(viewMode, (v) => localStorage.setItem('crm-contact-view', v))
 
-const store = useContactsStore()
-const router = useRouter()
-const search = ref('')
-const page = ref(1)
-const perPage = 20
-
-const drawerOpen = ref(false)
-const editingContact = ref<Contact | null>(null)
-
-const deletingId = ref<string | null>(null)
-const deleteDialogOpen = ref(false)
-
-const totalPages = computed(() => Math.ceil(store.total / perPage) || 1)
-
-const deletingContactName = computed(() => {
-  if (!deletingId.value) return ''
-  const contact = store.contacts.find(c => c.id === deletingId.value)
-  return contact?.name || ''
-})
-
-onMounted(() => {
-  loadContacts().catch(() => {})
-})
+const importOpen = ref(false)
 
 async function loadContacts() {
   await store.fetchContacts(page.value, perPage, search.value)
@@ -199,6 +178,9 @@ function getAvatarColor(name: string): string {
           />
         </div>
         <Button variant="outline" size="sm" @click="onSearch">Search</Button>
+        <Button variant="outline" size="sm" @click="importOpen = true">
+          Import CSV
+        </Button>
         <div class="flex items-center gap-1">
           <Button variant="ghost" size="icon-sm" :class="{ 'bg-muted': viewMode === 'table' }" @click="viewMode = 'table'" title="Table view">
             <List class="size-4" />
@@ -380,5 +362,6 @@ function getAvatarColor(name: string): string {
         </div>
       </div>
     </div>
+    <CsvImport :open="importOpen" @close="importOpen = false; loadContacts()" />
   </LayoutShell>
 </template>

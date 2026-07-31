@@ -110,6 +110,7 @@ func main() {
 
 		r.Get("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:read", contactH.List))
 		r.Post("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Create))
+		r.Post("/api/contacts/bulk", middleware.RequirePermission(rbacSvc, "contact:write", contactH.BulkCreate))
 		r.Get("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:read", contactH.Get))
 		r.Patch("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Update))
 		r.Delete("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:delete", contactH.Delete))
