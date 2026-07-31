@@ -28,7 +28,6 @@ import LeadForm, { type PrefillContact } from '@/components/leads/LeadForm.vue'
 import LeadActivity from '@/components/leads/LeadActivity.vue'
 import LeadActivityForm from '@/components/leads/LeadActivityForm.vue'
 import { Plus, Layers } from '@lucide/vue'
-import { toast } from 'vue-sonner'
 
 const route = useRoute()
 const pipelineStore = usePipelineStore()

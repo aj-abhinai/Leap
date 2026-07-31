@@ -31,7 +31,7 @@ const formEmail = ref(props.editingContact?.email || '')
 const formPhone = ref(props.editingContact?.phone || '')
 const formLocation = ref(props.editingContact?.location || '')
 const formAge = ref<number | undefined>(props.editingContact?.age)
-const formStatusId = ref(props.editingContact?.status?.id || '')
+const formStatusId = ref(props.editingContact?.status?.id || '__none__')
 const selectedTags = ref<string[]>(props.editingContact?.tags?.map(t => t.id) || [])
 const formError = ref('')
 const saving = ref(false)
@@ -71,7 +71,7 @@ async function handleSave() {
       location: result.data.location || null,
       age: result.data.age || null,
       tag_ids: selectedTags.value,
-      status_id: formStatusId.value || null,
+      status_id: formStatusId.value && formStatusId.value !== '__none__' ? formStatusId.value : null,
     })
   } catch (e: any) {
     formError.value = e.message || 'Save failed'
@@ -110,7 +110,7 @@ async function handleSave() {
           <SelectValue placeholder="Select status" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">None</SelectItem>
+          <SelectItem value="__none__">None</SelectItem>
           <SelectItem v-for="s in settings.statuses" :key="s.id" :value="s.id">
             {{ s.name }}
           </SelectItem>

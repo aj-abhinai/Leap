@@ -113,7 +113,8 @@ function handleDragChange(evt: { added?: { element: Lead }; moved?: { element: L
                     Move to {{ s.name }}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
-              </DropdownMenu>
+                </DropdownMenu>
+              </div>
             </div>
             <div v-if="lead.email" class="mt-0.5 text-xs text-muted-foreground truncate">{{ lead.email }}</div>
             <div v-if="lead.contact_name" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
@@ -140,7 +141,6 @@ function handleDragChange(evt: { added?: { element: Lead }; moved?: { element: L
             <Plus class="mr-1 size-3" /> Add one
           </Button>
         </div>
-      </div>
     </div>
   </div>
 </template>

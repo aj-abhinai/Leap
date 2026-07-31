@@ -51,6 +51,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/ProfilePage.vue'),
     meta: { title: 'Profile' },
   },
+  {
+    path: '/reminders',
+    name: 'Reminders',
+    component: () => import('@/views/RemindersPage.vue'),
+    meta: { title: 'Reminders' },
+  },
 ]
 
 const router = createRouter({

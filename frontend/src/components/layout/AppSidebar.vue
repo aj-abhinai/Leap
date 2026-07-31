@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/sidebar'
 import NavMain from './NavMain.vue'
 import NavUser from './NavUser.vue'
+import NotificationPopover from '@/components/notifications/NotificationPopover.vue'
 
 const navItems = [
   {
@@ -55,6 +56,11 @@ const navItems = [
     <SidebarFooter>
       <SidebarSeparator />
       <SidebarMenu>
+        <SidebarMenuItem>
+          <div class="flex items-center justify-center">
+            <NotificationPopover />
+          </div>
+        </SidebarMenuItem>
         <SidebarMenuItem>
           <SidebarMenuButton as-child tooltip="Settings">
             <router-link to="/settings" class="flex items-center gap-2">
