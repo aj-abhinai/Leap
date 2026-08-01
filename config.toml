@@ -11,11 +11,15 @@ name = "crm"
 sslmode = "disable"
 
 [auth]
-jwt_secret = "change-me-in-production"
+jwt_secret = "dev-only-jwt-secret-0123456789abcdef"
 jwt_issuer = "crm"
 access_token_ttl = "15m"
 refresh_token_ttl = "168h"
 bcrypt_cost = 12
+
+[superadmin]
+email = "dev@crm.local"
+password = "dev-admin-password"
 
 [log]
 level = "info"

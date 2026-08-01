@@ -8,11 +8,21 @@ services:
     ports:
       - "9000:9000"
     environment:
+      # Point these at an existing PostgreSQL VM to use it instead of the bundled db service.
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-crm}
       DB_PASSWORD: ${DB_PASSWORD:-crm}
+      DB_NAME: ${DB_NAME:-crm}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-admin@crm.local}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-admin}
     command: ["./crm", "--config", "config.toml"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
     depends_on:
       db:
         condition: service_healthy

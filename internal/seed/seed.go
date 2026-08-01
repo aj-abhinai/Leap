@@ -6,17 +6,16 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"os"
 )
 
-func Seed(db *sql.DB, cfg config.Auth) error {
-	if err := seedSuperadmin(db, cfg); err != nil {
+func Seed(db *sql.DB, authCfg config.Auth, superadmin config.Superadmin) error {
+	if err := seedSuperadmin(db, authCfg, superadmin); err != nil {
 		return fmt.Errorf("seed superadmin: %w", err)
 	}
 	if err := seedPermissions(db); err != nil {
 		return fmt.Errorf("seed permissions: %w", err)
 	}
-	if err := seedSuperadminRole(db); err != nil {
+	if err := seedSuperadminRole(db, superadmin); err != nil {
 		return fmt.Errorf("seed superadmin role: %w", err)
 	}
 	if err := seedDefaultPipeline(db); err != nil {
@@ -28,16 +27,9 @@ func Seed(db *sql.DB, cfg config.Auth) error {
 	return nil
 }
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func seedSuperadmin(db *sql.DB, cfg config.Auth) error {
-	email := getEnv("SUPERADMIN_EMAIL", "admin@crm.local")
-	password := getEnv("SUPERADMIN_PASSWORD", "admin")
+func seedSuperadmin(db *sql.DB, cfg config.Auth, superadmin config.Superadmin) error {
+	email := superadmin.Email
+	password := superadmin.Password
 
 	var exists bool
 	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists); err != nil {
@@ -89,8 +81,8 @@ func seedPermissions(db *sql.DB) error {
 	return nil
 }
 
-func seedSuperadminRole(db *sql.DB) error {
-	email := getEnv("SUPERADMIN_EMAIL", "admin@crm.local")
+func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
+	email := superadmin.Email
 
 	var exists bool
 	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM roles WHERE name = 'superadmin')`).Scan(&exists); err != nil {

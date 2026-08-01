@@ -46,7 +46,63 @@ Go to `http://localhost:9000` and login with the superadmin credentials from you
 just build
 ```
 
-The binary is at `bin/crm`.
+The binary is at `bin/crm` — it contains the frontend and migrations packed via
+[stuffbin](https://github.com/knadh/stuffbin), so it runs anywhere without extra asset
+directories. Unstuffed development builds automatically fall back to the local
+`frontend/dist` and `migrations` directories.
+
+---
+
+## Deployment
+
+### Option 1 — downloaded binary + existing PostgreSQL
+
+```shell
+# 1. Generate a config file (refuses to overwrite an existing file)
+./crm --new-config config.toml
+# 2. Edit config.toml — replace every placeholder secret (the server
+#    refuses to start with placeholder/empty secrets)
+# 3. Start PostgreSQL externally and run
+./crm
+```
+
+Migrations run automatically and idempotently at startup. Secrets can alternatively be
+supplied via environment variables, which override `config.toml`:
+
+| Environment variable | Overrides |
+|---|---|
+| `APP_PORT` | `[app] port` |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSLMODE` | `[db] *` |
+| `JWT_SECRET` / `JWT_ISSUER` | `[auth] jwt_secret` / `jwt_issuer` |
+| `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | `[superadmin] *` |
+
+### Option 2 — default Docker Compose (bundled PostgreSQL)
+
+```shell
+cp .env.example .env
+# Edit .env — set JWT_SECRET and superadmin credentials (placeholders fail fast)
+docker compose -f docker/docker-compose.yml up -d
+```
+
+Go to `http://localhost:9000` and login with the superadmin credentials from your `.env`.
+
+### Using an existing PostgreSQL VM with Docker
+
+Stop/remove the bundled `db` service, then pass connection variables instead:
+
+```shell
+DB_HOST=10.0.0.5 DB_PORT=5432 DB_USER=crm DB_PASSWORD=secret \
+DB_NAME=crm docker compose -f docker/docker-compose.yml up -d app
+```
+
+The same stuffed binary is used for Docker and standalone downloads — the container needs
+no separate `frontend/dist` or `migrations` directories. PostgreSQL itself is never
+bundled into the application.
+
+### Health endpoints
+
+- `GET /healthz` — 200 when the process is alive
+- `GET /readyz` — 200 when the database ping succeeds, 503 otherwise
 
 ---
 
@@ -87,12 +143,16 @@ The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `l
 | `[db]` | `password` | `crm` | Database password |
 | `[db]` | `name` | `crm` | Database name |
 | `[db]` | `sslmode` | `disable` | SSL mode |
-| `[auth]` | `jwt_secret` | — | **Required.** Change in production. |
+| `[auth]` | `jwt_secret` | dev placeholder | **Required.** At least 32 characters, never a placeholder. |
 | `[auth]` | `access_token_ttl` | `15m` | Access token lifetime |
 | `[auth]` | `refresh_token_ttl` | `168h` | Refresh token lifetime |
 | `[auth]` | `bcrypt_cost` | `12` | Password hash cost |
+| `[superadmin]` | `email` | dev placeholder | **Required.** Seeded superadmin email |
+| `[superadmin]` | `password` | dev placeholder | **Required.** At least 12 characters, never a placeholder |
 
-Secrets (`DB_PASSWORD`, `JWT_SECRET`, superadmin credentials) can also be set via environment variables — see `.env.example`.
+All secrets can be overridden via environment variables — see `.env.example` and the
+Deployment section. The application refuses to start with placeholder or empty secrets in
+every environment.
 
 ---
 

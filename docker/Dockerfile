@@ -11,13 +11,18 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /build/dist ./frontend/dist
-RUN CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=unknown' -X 'main.versionString=v0.1.0'" -o crm ./cmd/server/
+RUN CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=unknown' -X 'main.versionString=v0.1.0'" -o crm ./cmd/server/ \
+    && go install github.com/knadh/stuffbin/stuffbin@latest \
+    && "$(go env GOPATH)/bin/stuffbin" -a stuff -in crm -out crm.stuffed frontend/dist:/frontend/dist migrations:/migrations \
+    && mv crm.stuffed crm
 
 FROM alpine:latest
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S -g 10001 crm \
+    && adduser -S -D -H -u 10001 -G crm crm
 WORKDIR /crm
 COPY --from=backend /build/crm .
-COPY --from=backend /build/migrations ./migrations
 COPY config.toml .
+USER crm
 EXPOSE 9000
 ENTRYPOINT ["./crm"]

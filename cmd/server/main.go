@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"crm/internal/activity"
+	"crm/internal/assets"
 	"crm/internal/auth"
 	"crm/internal/config"
 	"crm/internal/contact"
 	"crm/internal/db"
+	"crm/internal/health"
 	"crm/internal/lead"
 	"crm/internal/middleware"
 	"crm/internal/pipeline"
@@ -27,7 +29,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -38,13 +40,30 @@ var (
 
 func main() {
 	configPath := flag.String("config", "config.toml", "Path to config file")
+	newConfigPath := flag.String("new-config", "", "Write a config template to this path and exit (refuses to overwrite)")
 	flag.Parse()
+
+	if *newConfigPath != "" {
+		if err := config.WriteTemplate(*newConfigPath); err != nil {
+			slog.Error("failed to write config template", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("config template written", "path", *newConfigPath)
+		return
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	appAssets, err := assets.Load()
+	if err != nil {
+		slog.Error("failed to load assets", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("assets resolved", "stuffed", appAssets.Stuffed())
 
 	slog.Info("starting "+cfg.App.Name, "version", versionString, "build", buildString)
 
@@ -55,12 +74,12 @@ func main() {
 	}
 	defer database.Close()
 
-	if err := runMigrations(cfg.DB.DSN()); err != nil {
+	if err := runMigrations(cfg.DB.DSN(), appAssets); err != nil {
 		slog.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}
 
-	if err := seed.Seed(database, cfg.Auth); err != nil {
+	if err := seed.Seed(database, cfg.Auth, cfg.Superadmin); err != nil {
 		slog.Error("failed to seed data", "error", err)
 		os.Exit(1)
 	}
@@ -91,12 +110,16 @@ func main() {
 	r.Use(chimiddleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(chimiddleware.Recoverer)
+	r.Use(middleware.SecurityHeaders)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
 		MaxAge:         300,
 	}))
+
+	r.Get("/healthz", health.Live)
+	r.Get("/readyz", health.Ready(database))
 
 	r.Post("/api/auth/login", authH.Login)
 	r.Post("/api/auth/refresh", authH.Refresh)
@@ -175,6 +198,10 @@ func main() {
 		r.Delete("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "contact:write", tagH.Delete))
 	})
 
+	r.Get("/", appAssets.ServeFrontend)
+	r.Get("/assets/*", appAssets.ServeFrontend)
+	r.NotFound(appAssets.ServeFrontend)
+
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.App.Port),
 		Handler:      r,
@@ -204,8 +231,12 @@ func main() {
 	slog.Info("server stopped")
 }
 
-func runMigrations(dsn string) error {
-	m, err := migrate.New("file://migrations", dsn)
+func runMigrations(dsn string, appAssets *assets.Assets) error {
+	src, err := iofs.New(appAssets.Migrations(), "migrations")
+	if err != nil {
+		return fmt.Errorf("migrate source: %w", err)
+	}
+	m, err := migrate.NewWithSourceInstance("iofs", src, dsn)
 	if err != nil {
 		return fmt.Errorf("migrate init: %w", err)
 	}

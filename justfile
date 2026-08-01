@@ -33,6 +33,10 @@ dev-backend:
       echo "ERROR: Postgres did not become ready in 30s"
       exit 1
     fi
+    # Explicit local-only secrets so the fail-fast validation passes.
+    export JWT_SECRET="${JWT_SECRET:-dev-only-jwt-secret-0123456789abcdef}"
+    export SUPERADMIN_EMAIL="${SUPERADMIN_EMAIL:-dev@crm.local}"
+    export SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-dev-admin-password}"
     go run ./cmd/server/ -config {{config}}
 
 # Same as dev-backend
@@ -58,7 +62,8 @@ build-backend:
     @echo "Building backend..."
     CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=dev' -X 'main.versionString=v0.1.0'" -o {{bin}} ./cmd/server/
     @echo "Packing frontend into binary..."
-    stuffbin stuff -a {{bin}} -i frontend/dist:/frontend/dist -i migrations:/migrations
+    MSYS_NO_PATHCONV=1 stuffbin -a stuff -in {{bin}} -out {{bin}}.stuffed frontend/dist:/frontend/dist migrations:/migrations
+    mv {{bin}}.stuffed {{bin}}
 
 # Build frontend production bundle
 build-ui:
