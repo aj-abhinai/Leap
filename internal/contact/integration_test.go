@@ -1,10 +1,15 @@
 package contact
 
 import (
+	"bytes"
 	"crm/internal/testdb"
 	"crm/internal/util"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -240,6 +245,249 @@ func TestAuditFailureDoesNotFailUpdateIntegration(t *testing.T) {
 	}
 	if updated.Name != "Alice Updated" {
 		t.Errorf("name = %q, want %q", updated.Name, "Alice Updated")
+	}
+}
+
+func TestBulkCreateDeduplicatesNormalizedPhoneIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "Existing", Phone: "98765 43210"}); err != nil {
+		t.Fatalf("create existing contact: %v", err)
+	}
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Phone: "9876543210"},
+		{Name: "Bob", Phone: "+91-98765-43210"},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 0 {
+		t.Errorf("imported = %d, want 0 (both rows duplicate the existing phone)", resp.Imported)
+	}
+	if resp.Failed != 2 {
+		t.Errorf("failed = %d, want 2", resp.Failed)
+	}
+	for _, e := range resp.Errors {
+		if e.Message != "phone matches an existing contact" {
+			t.Errorf("row %d message = %q, want phone duplicate reason", e.Row, e.Message)
+		}
+	}
+}
+
+func TestBulkCreateDeduplicatesNormalizedEmailIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "Existing", Email: "alice@example.com"}); err != nil {
+		t.Fatalf("create existing contact: %v", err)
+	}
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Email: "  ALICE@Example.COM "},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 0 || resp.Failed != 1 {
+		t.Errorf("imported/failed = %d/%d, want 0/1", resp.Imported, resp.Failed)
+	}
+	if resp.Errors[0].Message != "email matches an existing contact" {
+		t.Errorf("message = %q, want email duplicate reason", resp.Errors[0].Message)
+	}
+}
+
+func TestBulkCreateCombinedDuplicateReasonIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "Existing", Phone: "9876543210", Email: "alice@example.com"}); err != nil {
+		t.Fatalf("create existing contact: %v", err)
+	}
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Phone: "9876543210", Email: "alice@example.com"},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 0 || resp.Failed != 1 {
+		t.Errorf("imported/failed = %d/%d, want 0/1", resp.Imported, resp.Failed)
+	}
+	if resp.Errors[0].Message != "phone and email match an existing contact" {
+		t.Errorf("message = %q, want combined reason", resp.Errors[0].Message)
+	}
+}
+
+func TestBulkCreateSkipsSameFileDuplicateIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Phone: "9876543210"},
+		{Name: "Alice Again", Phone: "987 654 3210"},
+		{Name: "Bob", Phone: "1112223333"},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 2 {
+		t.Errorf("imported = %d, want 2", resp.Imported)
+	}
+	if resp.Failed != 1 {
+		t.Errorf("failed = %d, want 1", resp.Failed)
+	}
+	if resp.Errors[0].Message != "phone matches an existing contact" {
+		t.Errorf("message = %q, want same-file duplicate reason", resp.Errors[0].Message)
+	}
+}
+
+func TestBulkCreateImportsFreshRowsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Phone: "9876543210", Email: "alice@example.com", Location: "Pune"},
+		{Name: "Bob", Phone: "1112223333"},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 2 || resp.Failed != 0 {
+		t.Errorf("imported/failed = %d/%d, want 2/0", resp.Imported, resp.Failed)
+	}
+
+	contacts, total, err := svc.list(1, 20, "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if total != 2 || len(contacts) != 2 {
+		t.Errorf("total = %d, want 2", total)
+	}
+}
+
+func TestBulkCreateSharedTagsResolvedOnceIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var hotID, vipID string
+	if err := db.QueryRow(`INSERT INTO tags (name, type) VALUES ('Hot', 'tag') RETURNING id`).Scan(&hotID); err != nil {
+		t.Fatalf("seed tag: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO tags (name, type) VALUES ('VIP', 'tag') RETURNING id`).Scan(&vipID); err != nil {
+		t.Fatalf("seed tag: %v", err)
+	}
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Tags: []string{"Hot", "VIP"}},
+		{Name: "Bob", Tags: []string{"Hot"}},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 2 || resp.Failed != 0 {
+		t.Errorf("imported/failed = %d/%d, want 2/0", resp.Imported, resp.Failed)
+	}
+
+	var count int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM contact_tags ct JOIN contacts c ON c.id = ct.contact_id WHERE c.name = 'Alice'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("count alice tags: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("Alice has %d tags, want 2", count)
+	}
+}
+
+func TestBulkCreateNeverExposesRawErrorsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "Existing", Phone: "9876543210"}); err != nil {
+		t.Fatalf("create existing: %v", err)
+	}
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: ""},
+		{Name: "Alice", Phone: "9876543210"},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if len(resp.Errors) != 2 {
+		t.Fatalf("errors = %+v, want 2 sanitized row errors", resp.Errors)
+	}
+	want := []string{"name is required", "phone matches an existing contact"}
+	for i, e := range resp.Errors {
+		if e.Message != want[i] {
+			t.Errorf("row %d message = %q, want %q", e.Row, e.Message, want[i])
+		}
+		if strings.Contains(strings.ToLower(e.Message), "pq:") || strings.Contains(strings.ToLower(e.Message), "sql") {
+			t.Errorf("row %d message %q leaks raw database details", e.Row, e.Message)
+		}
+	}
+}
+
+func TestCreateContactReturnsDuplicateWarningIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "Existing", Phone: "98765 43210"}); err != nil {
+		t.Fatalf("create existing: %v", err)
+	}
+
+	created, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210"})
+	if err != nil {
+		t.Fatalf("manual create should succeed despite duplicate: %v", err)
+	}
+	if len(created.Warnings) != 1 || created.Warnings[0] != "phone matches an existing contact" {
+		t.Errorf("warnings = %+v, want phone duplicate warning", created.Warnings)
+	}
+
+	clean, err := svc.create(CreateRequest{Name: "Bob", Phone: "1112223333"})
+	if err != nil {
+		t.Fatalf("create clean contact: %v", err)
+	}
+	if len(clean.Warnings) != 0 {
+		t.Errorf("warnings = %+v, want none", clean.Warnings)
+	}
+}
+
+func TestBulkCreateRejectsOver500RowsHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	contacts := make([]BulkContact, 501)
+	for i := range contacts {
+		contacts[i] = BulkContact{Name: "Row"}
+	}
+	body, _ := json.Marshal(BulkCreateRequest{Contacts: contacts})
+	req := httptest.NewRequest(http.MethodPost, "/api/contacts/bulk", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	h.BulkCreate(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for >500 rows, got %d", rr.Code)
+	}
+}
+
+func TestBulkCreateRejectsOversizedBodyHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	contacts := make([]BulkContact, 300)
+	for i := range contacts {
+		contacts[i] = BulkContact{Name: "Row", Location: strings.Repeat("x", 10*1024)}
+	}
+	body, _ := json.Marshal(BulkCreateRequest{Contacts: contacts})
+	req := httptest.NewRequest(http.MethodPost, "/api/contacts/bulk", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	h.BulkCreate(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for >2MB body, got %d", rr.Code)
 	}
 }
 

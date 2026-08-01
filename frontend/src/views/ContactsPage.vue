@@ -102,8 +102,11 @@ async function handleSave(body: Record<string, any>) {
       await apiClient.patch(`/api/contacts/${editingContact.value.id}`, body)
       toast.success('Contact updated')
     } else {
-      await apiClient.post('/api/contacts', body)
+      const res = await apiClient.post('/api/contacts', body)
       toast.success('Contact created')
+      if (res.data?.warnings?.length) {
+        toast.warning(res.data.warnings.join('; '))
+      }
     }
     drawerOpen.value = false
     loadContacts().catch(() => {})

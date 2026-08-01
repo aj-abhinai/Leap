@@ -11,6 +11,7 @@ type Contact struct {
 	Age       *int       `json:"age,omitempty"`
 	Tags      []TagRef   `json:"tags,omitempty"`
 	Status    *TagRef    `json:"status,omitempty"`
+	Warnings  []string   `json:"warnings,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`

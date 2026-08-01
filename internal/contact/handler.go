@@ -94,6 +94,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	var req BulkCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.JSON(

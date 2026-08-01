@@ -47,6 +47,10 @@ function onFileSelect(e: Event) {
     error.value = 'Please select a CSV file'
     return
   }
+  if (file.size > 2 * 1024 * 1024) {
+    error.value = 'File must be 2 MB or smaller'
+    return
+  }
   const reader = new FileReader()
   reader.onload = (ev) => {
     const text = ev.target?.result as string

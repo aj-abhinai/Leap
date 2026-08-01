@@ -162,8 +162,14 @@ func (s *Service) get(id string) (*Contact, error) {
 }
 
 func (s *Service) create(req CreateRequest) (*Contact, error) {
+	keys, err := s.loadContactKeys()
+	if err != nil {
+		slog.Error("load contact keys for duplicate check", "error", err)
+		keys = contactKeys{phones: map[string]bool{}, emails: map[string]bool{}}
+	}
+
 	var c Contact
-	err := s.db.QueryRow(
+	err = s.db.QueryRow(
 		`INSERT INTO contacts (name, email, phone, location, age, status_id)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
@@ -185,6 +191,9 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
 	if err != nil {
 		return nil, err
+	}
+	if reason := keys.duplicateReason(req.Phone, req.Email); reason != "" {
+		populated[0].Warnings = []string{reason}
 	}
 	return &populated[0], nil
 }
