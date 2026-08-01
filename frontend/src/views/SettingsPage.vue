@@ -18,8 +18,9 @@ import { Badge, type BadgeVariants } from '@/components/ui/badge'
 import SettingsTabUsers from '@/components/settings/SettingsTabUsers.vue'
 import SettingsTabRoles from '@/components/settings/SettingsTabRoles.vue'
 import SettingsTabPipelines from '@/components/settings/SettingsTabPipelines.vue'
+import SettingsTabPrograms from '@/components/settings/SettingsTabPrograms.vue'
 import SettingsTabGeneral from '@/components/settings/SettingsTabGeneral.vue'
-import { RefreshCw, User, Shield, Layers, Activity, Settings } from '@lucide/vue'
+import { RefreshCw, User, Shield, Layers, BookOpen, Activity, Settings } from '@lucide/vue'
 import { formatDateTime } from '@/utils/time'
 
 const activity = useActivityStore()
@@ -75,6 +76,10 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
             <Layers class="size-4" />
             <span class="hidden sm:inline">Pipelines</span>
           </TabsTrigger>
+          <TabsTrigger v-show="canOrLoading('program:manage')" value="programs" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+            <BookOpen class="size-4" />
+            <span class="hidden sm:inline">Programs</span>
+          </TabsTrigger>
           <TabsTrigger v-show="canOrLoading('activity:read')" value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Activity class="size-4" />
             <span class="hidden sm:inline">Activity</span>
@@ -95,6 +100,10 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
 
         <TabsContent value="pipelines" class="mt-0">
           <SettingsTabPipelines />
+        </TabsContent>
+
+        <TabsContent v-if="canOrLoading('program:manage')" value="programs" class="mt-0">
+          <SettingsTabPrograms />
         </TabsContent>
 
         <TabsContent v-if="canOrLoading('activity:read')" value="activity" class="mt-0">

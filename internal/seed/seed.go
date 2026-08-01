@@ -64,6 +64,7 @@ func seedPermissions(db *sql.DB) error {
 		{Name: "lead:delete", Desc: "Delete leads"},
 		{Name: "lead:move_stage", Desc: "Move leads between pipeline stages"},
 		{Name: "pipeline:manage", Desc: "Create/edit pipelines and stages"},
+		{Name: "program:manage", Desc: "Create/edit programs and catalog prices"},
 		{Name: "rbac:manage", Desc: "Manage users, roles, permissions"},
 		{Name: "activity:read", Desc: "View audit log"},
 		{Name: "activity:manage", Desc: "Manage lead activities"},

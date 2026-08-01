@@ -13,6 +13,7 @@ interface LeadInfo {
   name: string
   pipeline_id: string
   stage_name?: string
+  program_name?: string
   value?: number
   assigned_to?: string
   created_at: string
@@ -62,11 +63,14 @@ async function fetchLeads() {
           <div class="flex items-start justify-between">
             <div class="min-w-0">
               <div class="font-medium text-sm truncate">{{ lead.name }}</div>
-              <div class="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-                <span>Pipeline</span>
-                <ChevronRight class="size-3" />
-                <Badge variant="outline" class="text-xs px-1.5">{{ lead.stage_name || '—' }}</Badge>
-              </div>
+            <div class="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+              <span>Pipeline</span>
+              <ChevronRight class="size-3" />
+              <Badge variant="outline" class="text-xs px-1.5">{{ lead.stage_name || '—' }}</Badge>
+            </div>
+            <div v-if="lead.program_name" class="mt-1 text-xs text-muted-foreground">
+              {{ lead.program_name }}
+            </div>
             </div>
             <div v-if="lead.value" class="text-sm font-semibold text-primary">
               {{ formatCurrency(lead.value) }}

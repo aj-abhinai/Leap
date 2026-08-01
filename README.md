@@ -8,6 +8,7 @@
 
 - **Contact management** — Track name, email, phone, location, and age for every contact.
 - **Pipeline-based leads** — Configurable pipelines with custom stages. Drag leads between stages on a kanban board.
+- **Program catalog** — Fixed-price programs with a settings tab; lead values are price snapshots at creation time and never rewrite when catalog prices change.
 - **Dynamic RBAC** — Create custom roles with granular permissions. Superadmin bootstraps on first run.
 - **Activity logs** — Every mutation is tracked with who did what and when.
 - **Secure sessions** — Short-lived access tokens in memory; the refresh token lives in an HttpOnly cookie, with CSRF protection on cookie-authenticated requests.

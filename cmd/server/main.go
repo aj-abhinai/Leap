@@ -12,6 +12,7 @@ import (
 	"crm/internal/lead"
 	"crm/internal/middleware"
 	"crm/internal/pipeline"
+	"crm/internal/program"
 	"crm/internal/ratelimit"
 	"crm/internal/rbac"
 	"crm/internal/seed"
@@ -97,6 +98,9 @@ func main() {
 	pipelineSvc := pipeline.NewService(database)
 	pipelineH := pipeline.NewHandler(pipelineSvc)
 
+	programSvc := program.NewService(database)
+	programH := program.NewHandler(programSvc)
+
 	leadSvc := lead.NewService(database)
 	leadH := lead.NewHandler(leadSvc)
 
@@ -168,6 +172,13 @@ func main() {
 		r.Post("/api/pipelines", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Create))
 		r.Patch("/api/pipelines/{id}", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Update))
 		r.Delete("/api/pipelines/{id}", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Delete))
+
+		r.Get("/api/programs", middleware.RequirePermission(rbacSvc, "lead:read", programH.ListActive))
+		r.Get("/api/programs/manage", middleware.RequirePermission(rbacSvc, "program:manage", programH.ListAll))
+		r.Post("/api/programs", middleware.RequirePermission(rbacSvc, "program:manage", programH.Create))
+		r.Patch("/api/programs/{id}", middleware.RequirePermission(rbacSvc, "program:manage", programH.Update))
+		r.Delete("/api/programs/{id}", middleware.RequirePermission(rbacSvc, "program:manage", programH.Archive))
+		r.Post("/api/programs/{id}/restore", middleware.RequirePermission(rbacSvc, "program:manage", programH.Restore))
 
 		r.Post("/api/pipelines/{id}/stages", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.CreateStage))
 		r.Patch("/api/stages/{stage_id}", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.UpdateStage))

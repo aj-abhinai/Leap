@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, MoreHorizontal, ChevronRight, Link, ListChecks } from '@lucide/vue'
+import { Plus, MoreHorizontal, ChevronRight, Link, ListChecks, BookOpen } from '@lucide/vue'
 import { formatCurrency } from '@/utils/format'
 
 const props = defineProps<{
@@ -129,6 +129,10 @@ function handleDragChange(evt: { added?: { element: Lead }; moved?: { element: L
             <div v-if="lead.contact_name" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
               <Link class="size-3" />
               <span class="truncate">{{ lead.contact_name }}</span>
+            </div>
+            <div v-if="lead.program_name" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+              <BookOpen class="size-3" />
+              <span class="truncate">{{ lead.program_name }}</span>
             </div>
             <div v-if="lead.value" class="mt-1.5 font-semibold text-primary">
               {{ formatCurrency(lead.value) }}

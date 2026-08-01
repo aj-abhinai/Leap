@@ -12,6 +12,8 @@ type Lead struct {
 	PipelineID  string     `json:"pipeline_id"`
 	StageID     string     `json:"stage_id"`
 	StageName   string     `json:"stage_name,omitempty"`
+	ProgramID   *string    `json:"program_id,omitempty"`
+	ProgramName string     `json:"program_name,omitempty"`
 	Value       *float64   `json:"value,omitempty"`
 	Notes       string     `json:"notes,omitempty"`
 	AssignedTo  *string    `json:"assigned_to,omitempty"`
@@ -27,6 +29,7 @@ type CreateRequest struct {
 	ContactID  *string  `json:"contact_id,omitempty"`
 	PipelineID string   `json:"pipeline_id"`
 	StageID    string   `json:"stage_id"`
+	ProgramID  *string  `json:"program_id,omitempty"`
 	Value      *float64 `json:"value,omitempty"`
 	Notes      string   `json:"notes,omitempty"`
 	AssignedTo *string  `json:"assigned_to,omitempty"`
@@ -39,6 +42,7 @@ type UpdateRequest struct {
 	ContactID  *string  `json:"contact_id,omitempty"`
 	PipelineID *string  `json:"pipeline_id,omitempty"`
 	StageID    *string  `json:"stage_id,omitempty"`
+	ProgramID  *string  `json:"program_id,omitempty"`
 	Value      *float64 `json:"value,omitempty"`
 	Notes      *string  `json:"notes,omitempty"`
 	AssignedTo *string  `json:"assigned_to,omitempty"`

@@ -12,6 +12,8 @@ export interface Lead {
   pipeline_id: string
   stage_id: string
   stage_name?: string
+  program_id?: string
+  program_name?: string
   value?: number
   notes?: string
   assigned_to?: string

@@ -2,6 +2,7 @@ package lead
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -52,6 +53,27 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+func respondLeadMutationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive):
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+			nil,
+		)
+	default:
+		respond.JSON(
+			w,
+			http.StatusInternalServerError,
+			nil,
+			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
+			nil,
+		)
+	}
+}
+
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -77,13 +99,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := ctxutil.GetUserID(r)
 	l, err := h.svc.create(req, userID)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondLeadMutationError(w, err)
 		return
 	}
 	respond.JSON(
@@ -111,13 +127,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	l, err := h.svc.update(id, req, userID)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondLeadMutationError(w, err)
 		return
 	}
 	respond.JSON(

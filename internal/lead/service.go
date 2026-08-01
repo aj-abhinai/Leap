@@ -3,8 +3,14 @@ package lead
 import (
 	"crm/internal/util"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
+)
+
+var (
+	ErrCustomValueRejected = errors.New("lead value is set from the program catalog price")
+	ErrProgramNotActive    = errors.New("program not found or archived")
 )
 
 type Service struct {
@@ -54,10 +60,11 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 	selectQuery := fmt.Sprintf(
 		`SELECT l.id, l.name, COALESCE(l.email, ''), COALESCE(l.phone, ''),
 			l.contact_id, COALESCE(c.name, ''), l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
-			COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
+			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
 		FROM leads l
 		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
 		LEFT JOIN contacts c ON l.contact_id = c.id
+		LEFT JOIN programs p ON l.program_id = p.id
 		%s
 		ORDER BY l.created_at DESC
 		LIMIT $%d OFFSET $%d`,
@@ -76,7 +83,8 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 		var l Lead
 		if err := rows.Scan(
 			&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.ContactName, &l.PipelineID, &l.StageID,
-			&l.StageName, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+			&l.StageName, &l.Value, &l.ProgramID, &l.ProgramName, &l.Notes, &l.AssignedTo,
+			&l.CreatedAt, &l.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -90,14 +98,16 @@ func (s *Service) get(id string) (*Lead, error) {
 	err := s.db.QueryRow(
 		`SELECT l.id, l.name, COALESCE(l.email, ''), COALESCE(l.phone, ''),
 			l.contact_id, COALESCE(c.name, ''), l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
-			COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
+			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
 		FROM leads l
 		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
 		LEFT JOIN contacts c ON l.contact_id = c.id
+		LEFT JOIN programs p ON l.program_id = p.id
 		WHERE l.id = $1 AND l.deleted_at IS NULL`, id,
 	).Scan(
 		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.ContactName, &l.PipelineID, &l.StageID,
-		&l.StageName, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+		&l.StageName, &l.Value, &l.ProgramID, &l.ProgramName, &l.Notes, &l.AssignedTo,
+		&l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -106,24 +116,32 @@ func (s *Service) get(id string) (*Lead, error) {
 }
 
 func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
+	if req.Value != nil {
+		return nil, ErrCustomValueRejected
+	}
+	programPrice, err := s.snapshotPrice(req.ProgramID)
+	if err != nil {
+		return nil, err
+	}
 	var l Lead
-	err := s.db.QueryRow(
-		`INSERT INTO leads (name, email, phone, contact_id, pipeline_id, stage_id, value, notes, assigned_to)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	err = s.db.QueryRow(
+		`INSERT INTO leads (name, email, phone, contact_id, pipeline_id, stage_id, program_id, value, notes, assigned_to)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id,
-			value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
+			program_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
 		req.Name,
 		util.NullStr(req.Email),
 		util.NullStr(req.Phone),
 		req.ContactID,
 		req.PipelineID,
 		req.StageID,
-		req.Value,
+		req.ProgramID,
+		programPrice,
 		util.NullStr(req.Notes),
 		req.AssignedTo,
 	).Scan(
-		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.Value,
-		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.ProgramID,
+		&l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create lead: %w", err)
@@ -136,9 +154,25 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 }
 
 func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, error) {
+	if req.Value != nil {
+		return nil, ErrCustomValueRejected
+	}
 	old, err := s.get(id)
 	if err != nil {
 		return nil, err
+	}
+
+	var programPrice *float64
+	if req.ProgramID != nil {
+		if old.ProgramID != nil && *old.ProgramID == *req.ProgramID {
+			programPrice = old.Value
+		} else {
+			price, err := s.activeProgramPrice(*req.ProgramID)
+			if err != nil {
+				return nil, err
+			}
+			programPrice = &price
+		}
 	}
 
 	var l Lead
@@ -150,13 +184,14 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 			contact_id = COALESCE($5, contact_id),
 			pipeline_id = COALESCE($6, pipeline_id),
 			stage_id = COALESCE($7, stage_id),
-			value = COALESCE($8, value),
-			notes = COALESCE($9, notes),
-			assigned_to = COALESCE($10, assigned_to),
+			program_id = COALESCE($8, program_id),
+			value = COALESCE($9, value),
+			notes = COALESCE($10, notes),
+			assigned_to = COALESCE($11, assigned_to),
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id,
-			value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
+			program_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
 		id,
 		req.Name,
 		util.StrPtr(req.Email),
@@ -164,12 +199,13 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		req.ContactID,
 		req.PipelineID,
 		req.StageID,
-		req.Value,
+		req.ProgramID,
+		programPrice,
 		util.StrPtr(req.Notes),
 		req.AssignedTo,
 	).Scan(
-		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.Value,
-		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.ProgramID,
+		&l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update lead: %w", err)
@@ -207,6 +243,13 @@ func (s *Service) populateNames(l *Lead) error {
 		return err
 	}
 	l.StageName = stageName
+	if l.ProgramID != nil {
+		var programName string
+		if err := s.db.QueryRow(`SELECT name FROM programs WHERE id = $1`, *l.ProgramID).Scan(&programName); err != nil {
+			return fmt.Errorf("load program name: %w", err)
+		}
+		l.ProgramName = programName
+	}
 	if l.ContactID == nil {
 		return nil
 	}
@@ -216,6 +259,36 @@ func (s *Service) populateNames(l *Lead) error {
 	}
 	l.ContactName = contactName
 	return nil
+}
+
+// snapshotPrice resolves the catalog price of an optional program so it can be
+// stored as the lead's immutable value snapshot.
+func (s *Service) snapshotPrice(programID *string) (*float64, error) {
+	if programID == nil {
+		return nil, nil
+	}
+	price, err := s.activeProgramPrice(*programID)
+	if err != nil {
+		return nil, err
+	}
+	return &price, nil
+}
+
+// activeProgramPrice rejects archived or unknown programs so historical
+// catalog entries can never be attached to new leads.
+func (s *Service) activeProgramPrice(programID string) (float64, error) {
+	var price float64
+	err := s.db.QueryRow(
+		`SELECT price FROM programs WHERE id = $1 AND deleted_at IS NULL`,
+		programID,
+	).Scan(&price)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrProgramNotActive
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load program price: %w", err)
+	}
+	return price, nil
 }
 
 func (s *Service) stageName(stageID string) (string, error) {
