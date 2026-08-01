@@ -85,7 +85,7 @@ func main() {
 	}
 
 	authSvc := auth.NewService(database, cfg.Auth)
-	authH := auth.NewHandler(authSvc)
+	authH := auth.NewHandler(authSvc, cfg.Auth.AccessTokenTTL, cfg.Auth.RefreshTokenTTL, cfg.Auth.SecureCookies)
 
 	rbacSvc := rbac.NewService(database)
 	rbacH := rbac.NewHandler(rbacSvc)
@@ -114,7 +114,7 @@ func main() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
+		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		MaxAge:         300,
 	}))
 
@@ -122,12 +122,12 @@ func main() {
 	r.Get("/readyz", health.Ready(database))
 
 	r.Post("/api/auth/login", authH.Login)
-	r.Post("/api/auth/refresh", authH.Refresh)
+	r.With(middleware.CSRF).Post("/api/auth/refresh", authH.Refresh)
+	r.With(middleware.CSRF).Post("/api/auth/logout", authH.Logout)
 
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(authSvc))
 
-		r.Post("/api/auth/logout", authH.Logout)
 		r.Get("/api/auth/me", authH.Me)
 		r.Patch("/api/auth/me", authH.UpdateProfile)
 		r.Get("/api/auth/me/permissions", rbacH.MePermissions)

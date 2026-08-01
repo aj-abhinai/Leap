@@ -10,6 +10,7 @@
 - **Pipeline-based leads** — Configurable pipelines with custom stages. Drag leads between stages on a kanban board.
 - **Dynamic RBAC** — Create custom roles with granular permissions. Superadmin bootstraps on first run.
 - **Activity logs** — Every mutation is tracked with who did what and when.
+- **Secure sessions** — Short-lived access tokens in memory; the refresh token lives in an HttpOnly cookie, with CSRF protection on cookie-authenticated requests.
 - **Single binary** — Go backend embeds the Vue frontend via stuffbin. Deploy with one `docker compose` command.
 
 ---
@@ -74,6 +75,7 @@ supplied via environment variables, which override `config.toml`:
 | `APP_PORT` | `[app] port` |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSLMODE` | `[db] *` |
 | `JWT_SECRET` / `JWT_ISSUER` | `[auth] jwt_secret` / `jwt_issuer` |
+| `COOKIE_SECURE` | `[auth] secure_cookies` — set `true` when serving over HTTPS |
 | `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | `[superadmin] *` |
 
 ### Option 2 — default Docker Compose (bundled PostgreSQL)
@@ -147,6 +149,7 @@ The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `l
 | `[auth]` | `access_token_ttl` | `15m` | Access token lifetime |
 | `[auth]` | `refresh_token_ttl` | `168h` | Refresh token lifetime |
 | `[auth]` | `bcrypt_cost` | `12` | Password hash cost |
+| `[auth]` | `secure_cookies` | `false` | Add the `Secure` flag to auth cookies; set `true` behind HTTPS |
 | `[superadmin]` | `email` | dev placeholder | **Required.** Seeded superadmin email |
 | `[superadmin]` | `password` | dev placeholder | **Required.** At least 12 characters, never a placeholder |
 

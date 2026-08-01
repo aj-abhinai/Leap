@@ -9,7 +9,7 @@ const theme = useThemeStore()
 
 onMounted(() => {
   theme.init()
-  auth.loadTokens()
+  auth.bootstrap()
 })
 </script>
 

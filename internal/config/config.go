@@ -38,6 +38,7 @@ type Auth struct {
 	AccessTokenTTL  time.Duration `toml:"access_token_ttl"`
 	RefreshTokenTTL time.Duration `toml:"refresh_token_ttl"`
 	BcryptCost      int           `toml:"bcrypt_cost"`
+	SecureCookies   bool          `toml:"secure_cookies"`
 }
 
 type Superadmin struct {
@@ -103,6 +104,13 @@ func applyEnvironment(cfg *Config) error {
 	setString(&cfg.Auth.JWTIssuer, "JWT_ISSUER")
 	setString(&cfg.Superadmin.Email, "SUPERADMIN_EMAIL")
 	setString(&cfg.Superadmin.Password, "SUPERADMIN_PASSWORD")
+	if value := os.Getenv("COOKIE_SECURE"); value != "" {
+		secure, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("COOKIE_SECURE must be a boolean, got %q", value)
+		}
+		cfg.Auth.SecureCookies = secure
+	}
 	return nil
 }
 
@@ -172,6 +180,7 @@ jwt_issuer = "crm"
 access_token_ttl = "15m"
 refresh_token_ttl = "168h"
 bcrypt_cost = 12
+secure_cookies = false
 
 [superadmin]
 email = "replace-admin@example.test"

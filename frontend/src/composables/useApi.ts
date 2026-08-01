@@ -24,7 +24,7 @@ async function request<T = any>(method: string, url: string, body?: any): Promis
     body: body ? JSON.stringify(body) : undefined,
   })
 
-  if (res.status === 401 && auth.refreshToken) {
+  if (res.status === 401) {
     try {
       await auth.refresh()
       headers['Authorization'] = `Bearer ${auth.accessToken}`
@@ -34,7 +34,7 @@ async function request<T = any>(method: string, url: string, body?: any): Promis
         body: body ? JSON.stringify(body) : undefined,
       })
     } catch {
-      auth.logout()
+      await auth.logout()
       router.push('/login')
       throw new Error('Session expired')
     }

@@ -49,17 +49,23 @@ func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {
 	var userID string
 	var revoked bool
 	var expiresAt time.Time
+	var userDeleted bool
 	err = tx.QueryRow(
-		`SELECT user_id, revoked, expires_at FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE`,
+		`SELECT rt.user_id, rt.revoked, rt.expires_at, (u.deleted_at IS NOT NULL)
+		FROM refresh_tokens rt
+		JOIN users u ON u.id = rt.user_id
+		WHERE rt.token_hash = $1
+		FOR UPDATE OF rt`,
 		hash,
-	).Scan(&userID, &revoked, &expiresAt)
+	).Scan(&userID, &revoked, &expiresAt, &userDeleted)
 	if err == sql.ErrNoRows {
 		return nil, ErrInvalidToken
 	}
 	if err != nil {
 		return nil, fmt.Errorf("refresh: %w", err)
 	}
-	if revoked || time.Now().After(expiresAt) {
+	if revoked || time.Now().After(expiresAt) || userDeleted {
+		_, _ = tx.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)
 		return nil, ErrTokenRevoked
 	}
 	_, err = tx.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)

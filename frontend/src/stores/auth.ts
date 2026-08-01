@@ -10,46 +10,37 @@ interface User {
   avatar_url?: string
 }
 
-interface TokenPair {
+interface LoginResponse {
   access_token: string
-  refresh_token: string
   expires_at: number
+}
+
+const REFRESH_COOKIE = 'crm_refresh'
+const CSRF_COOKIE = 'crm_csrf'
+
+function getCookie(name: string): string {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+function csrfHeaders(): Record<string, string> {
+  const token = getCookie(CSRF_COOKIE)
+  return token ? { 'X-CSRF-Token': token } : {}
 }
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const accessToken = ref<string | null>(null)
-  const refreshToken = ref<string | null>(null)
 
   const isAuthenticated = computed(() => !!accessToken.value)
 
-  function loadTokens() {
-    const at = localStorage.getItem('access_token')
-    const rt = localStorage.getItem('refresh_token')
-    if (at && rt) {
-      accessToken.value = at
-      refreshToken.value = rt
-    }
-  }
-
-  function saveTokens(tokens: TokenPair) {
+  function setAccess(tokens: LoginResponse) {
     accessToken.value = tokens.access_token
-    refreshToken.value = tokens.refresh_token
-    localStorage.setItem('access_token', tokens.access_token)
-    localStorage.setItem('refresh_token', tokens.refresh_token)
   }
 
-  async function login(email: string, password: string) {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
-    const json = await res.json()
-    if (json.error) throw new Error(json.error.message)
-    saveTokens(json.data)
-    await fetchUser()
-    return json.data
+  function clear() {
+    accessToken.value = null
+    user.value = null
   }
 
   async function fetchUser() {
@@ -65,38 +56,65 @@ export const useAuthStore = defineStore('auth', () => {
     } catch {}
   }
 
-  async function refresh() {
-    if (!refreshToken.value) throw new Error('No refresh token')
+  let refreshPromise: Promise<LoginResponse> | null = null
+
+  async function refresh(): Promise<LoginResponse> {
+    if (!refreshPromise) {
+      refreshPromise = doRefresh().finally(() => {
+        refreshPromise = null
+      })
+    }
+    return refreshPromise
+  }
+
+  async function doRefresh(): Promise<LoginResponse> {
     const res = await fetch('/api/auth/refresh', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken.value }),
+      headers: { ...csrfHeaders() },
     })
     const json = await res.json()
-    if (json.error) {
-      logout()
-      throw new Error(json.error.message)
+    if (!res.ok || json.error) {
+      clear()
+      throw new Error(json.error?.message ?? 'Session expired')
     }
-    saveTokens(json.data)
+    setAccess(json.data)
+    return json.data
+  }
+
+  async function login(email: string, password: string) {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+    const json = await res.json()
+    if (json.error) throw new Error(json.error.message)
+    setAccess(json.data)
+    await fetchUser()
     return json.data
   }
 
   async function logout() {
-    if (refreshToken.value) {
-      fetch('/api/auth/logout', {
+    try {
+      await fetch('/api/auth/logout', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken.value}`,
-        },
-        body: JSON.stringify({ refresh_token: refreshToken.value }),
-      }).catch(() => {})
+        headers: { ...csrfHeaders() },
+      })
+    } catch {}
+    clear()
+  }
+
+  async function bootstrap() {
+    if (!getCookie(REFRESH_COOKIE)) {
+      clear()
+      return
     }
-    user.value = null
-    accessToken.value = null
-    refreshToken.value = null
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
+    try {
+      await refresh()
+      await fetchUser()
+    } catch {
+      clear()
+    }
   }
 
   async function updateProfile(name: string, phone: string) {
@@ -105,5 +123,5 @@ export const useAuthStore = defineStore('auth', () => {
     return res.data
   }
 
-  return { user, accessToken, refreshToken, isAuthenticated, loadTokens, login, refresh, logout, saveTokens, fetchUser, updateProfile }
+  return { user, accessToken, isAuthenticated, login, refresh, logout, bootstrap, fetchUser, updateProfile }
 })

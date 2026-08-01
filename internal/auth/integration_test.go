@@ -102,6 +102,25 @@ func TestRefreshUnknownTokenIntegration(t *testing.T) {
 	}
 }
 
+func TestRefreshRejectedAfterUserDeactivationIntegration(t *testing.T) {
+	db := testdb.New(t)
+	userID := seedUser(t, db, "alice@example.com", "correct-horse")
+	svc := NewService(db, authTestConfig())
+
+	resp, err := svc.login("alice@example.com", "correct-horse")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1`, userID); err != nil {
+		t.Fatalf("deactivate user: %v", err)
+	}
+
+	_, err = svc.refresh(resp.RefreshToken)
+	if !errors.Is(err, ErrTokenRevoked) {
+		t.Errorf("expected ErrTokenRevoked after deactivation, got %v", err)
+	}
+}
+
 func TestAccessTokenValidationIntegration(t *testing.T) {
 	db := testdb.New(t)
 	userID := seedUser(t, db, "alice@example.com", "correct-horse")

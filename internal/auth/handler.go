@@ -3,17 +3,29 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
 )
 
 type Handler struct {
-	svc *Service
+	svc  *Service
+	cfg  cookieConfig
+	ttls TokenTTLs
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+type TokenTTLs struct {
+	Access  time.Duration
+	Refresh time.Duration
+}
+
+func NewHandler(svc *Service, accessTTL, refreshTTL time.Duration, secureCookies bool) *Handler {
+	return &Handler{
+		svc:  svc,
+		cfg:  cookieConfig{secure: secureCookies},
+		ttls: TokenTTLs{Access: accessTTL, Refresh: refreshTTL},
+	}
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
@@ -59,39 +71,36 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.cfg.setRefreshCookie(w, resp.RefreshToken, h.ttls.Refresh)
+	h.cfg.setCSRFCookie(w)
 	respond.JSON(
 		w,
 		http.StatusOK,
-		resp,
+		map[string]any{
+			"access_token": resp.AccessToken,
+			"expires_at":   resp.ExpiresAt,
+		},
 		nil,
 		nil,
 	)
 }
 
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
-	var req RefreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	cookie, err := r.Cookie(RefreshCookieName)
+	if err != nil || cookie.Value == "" {
+		h.cfg.clearRefreshCookie(w)
 		respond.JSON(
 			w,
-			http.StatusBadRequest,
+			http.StatusUnauthorized,
 			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			&respond.Error{Code: "UNAUTHORIZED", Message: "Refresh token is required"},
 			nil,
 		)
 		return
 	}
-	if req.RefreshToken == "" {
-		respond.JSON(
-			w,
-			http.StatusBadRequest,
-			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: "Refresh token is required"},
-			nil,
-		)
-		return
-	}
-	resp, err := h.svc.refresh(req.RefreshToken)
+	resp, err := h.svc.refresh(cookie.Value)
 	if err != nil {
+		h.cfg.clearRefreshCookie(w)
 		if ae, ok := err.(*AuthError); ok {
 			respond.JSON(
 				w,
@@ -111,38 +120,25 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.cfg.setRefreshCookie(w, resp.RefreshToken, h.ttls.Refresh)
 	respond.JSON(
 		w,
 		http.StatusOK,
-		resp,
+		map[string]any{
+			"access_token": resp.AccessToken,
+			"expires_at":   resp.ExpiresAt,
+		},
 		nil,
 		nil,
 	)
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	var req RefreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.JSON(
-			w,
-			http.StatusBadRequest,
-			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
-			nil,
-		)
-		return
+	if cookie, err := r.Cookie(RefreshCookieName); err == nil && cookie.Value != "" {
+		_ = h.svc.logout(cookie.Value)
 	}
-	if req.RefreshToken == "" {
-		respond.JSON(
-			w,
-			http.StatusOK,
-			map[string]string{"message": "Logged out"},
-			nil,
-			nil,
-		)
-		return
-	}
-	h.svc.logout(req.RefreshToken)
+	h.cfg.clearRefreshCookie(w)
+	h.cfg.clearCSRFCookie(w)
 	respond.JSON(
 		w,
 		http.StatusOK,

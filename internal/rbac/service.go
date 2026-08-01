@@ -231,12 +231,25 @@ func (s *Service) createUser(name, email, password string) (*UserInfo, error) {
 }
 
 func (s *Service) deleteUser(id string) error {
-	_, err := s.db.Exec(`DELETE FROM user_roles WHERE user_id = $1`, id)
+	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return fmt.Errorf("delete user: %w", err)
 	}
-	_, err = s.db.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1`, id)
-	return err
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM user_roles WHERE user_id = $1`, id); err != nil {
+		return fmt.Errorf("delete user roles: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("soft-delete user: %w", err)
+	}
+	if _, err := tx.Exec(
+		`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND NOT revoked`,
+		id,
+	); err != nil {
+		return fmt.Errorf("revoke sessions: %w", err)
+	}
+	return tx.Commit()
 }
 
 type UserInfo struct {
