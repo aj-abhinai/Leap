@@ -1,0 +1,79 @@
+package ratelimit
+
+import (
+	"crm/internal/respond"
+	"net"
+	"net/http"
+	"sync"
+	"time"
+)
+
+type entry struct {
+	count       int
+	windowStart time.Time
+}
+
+// Limiter is a process-local fixed-window limiter keyed by client IP. The app
+// is single-instance, so no external store is needed.
+type Limiter struct {
+	mu       sync.Mutex
+	limit    int
+	window   time.Duration
+	requests map[string]*entry
+}
+
+func New(limit int, window time.Duration) *Limiter {
+	return &Limiter{limit: limit, window: window, requests: map[string]*entry{}}
+}
+
+// keyOf derives a per-IP bucket key from the real client IP populated by chi's
+// RealIP middleware.
+func keyOf(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return host
+}
+
+func (l *Limiter) Allow(key string) bool {
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.requests) > 10_000 {
+		l.pruneLocked(now)
+	}
+	e, ok := l.requests[key]
+	if !ok || now.Sub(e.windowStart) >= l.window {
+		l.requests[key] = &entry{count: 1, windowStart: now}
+		return true
+	}
+	e.count++
+	return e.count <= l.limit
+}
+
+// pruneLocked drops entries whose window elapsed; callers must hold the mutex.
+func (l *Limiter) pruneLocked(now time.Time) {
+	for key, e := range l.requests {
+		if now.Sub(e.windowStart) >= l.window {
+			delete(l.requests, key)
+		}
+	}
+}
+
+func (l *Limiter) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !l.Allow(keyOf(r)) {
+			w.Header().Set("Retry-After", "60")
+			respond.JSON(
+				w,
+				http.StatusTooManyRequests,
+				nil,
+				&respond.Error{Code: "RATE_LIMITED", Message: "Too many requests, try again in a minute"},
+				nil,
+			)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

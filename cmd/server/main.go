@@ -12,6 +12,7 @@ import (
 	"crm/internal/lead"
 	"crm/internal/middleware"
 	"crm/internal/pipeline"
+	"crm/internal/ratelimit"
 	"crm/internal/rbac"
 	"crm/internal/seed"
 	"crm/internal/tag"
@@ -121,8 +122,11 @@ func main() {
 	r.Get("/healthz", health.Live)
 	r.Get("/readyz", health.Ready(database))
 
-	r.Post("/api/auth/login", authH.Login)
-	r.With(middleware.CSRF).Post("/api/auth/refresh", authH.Refresh)
+	loginLimiter := ratelimit.New(10, time.Minute)
+	refreshLimiter := ratelimit.New(30, time.Minute)
+
+	r.With(loginLimiter.Middleware).Post("/api/auth/login", authH.Login)
+	r.With(middleware.CSRF, refreshLimiter.Middleware).Post("/api/auth/refresh", authH.Refresh)
 	r.With(middleware.CSRF).Post("/api/auth/logout", authH.Logout)
 
 	r.Group(func(r chi.Router) {
