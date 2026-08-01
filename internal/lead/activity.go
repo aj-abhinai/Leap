@@ -61,6 +61,20 @@ func (s *Service) deleteActivity(activityID string) error {
 	return nil
 }
 
+// dismissReminder marks an activity as reminded and reports whether a row
+// actually existed; a missing id is a clean (false, nil) instead of an error.
+func (s *Service) dismissReminder(activityID string) (bool, error) {
+	res, err := s.db.Exec(`UPDATE lead_activities SET is_reminded = true WHERE id = $1`, activityID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 func (s *Service) getPendingReminders() ([]Activity, error) {
 	rows, err := s.db.Query(`
 		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
@@ -70,7 +84,8 @@ func (s *Service) getPendingReminders() ([]Activity, error) {
 		LEFT JOIN users u ON u.id = la.user_id
 		LEFT JOIN lead_stages ls ON ls.id = la.stage_id
 		WHERE la.remind_at <= $1 AND NOT la.is_reminded AND NOT la.is_done
-		ORDER BY la.remind_at ASC`,
+		ORDER BY la.remind_at ASC
+		LIMIT 100`,
 		time.Now(),
 	)
 	if err != nil {

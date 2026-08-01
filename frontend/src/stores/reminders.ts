@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiClient } from '@/composables/useApi'
+import { toast } from 'vue-sonner'
 
 export interface Reminder {
   id: string
@@ -35,8 +36,13 @@ export const useRemindersStore = defineStore('reminders', () => {
   }
 
   async function dismissReminder(id: string) {
-    await apiClient.patch(`/api/reminders/${id}`)
-    await fetchReminders()
+    try {
+      await apiClient.patch(`/api/reminders/${id}`)
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to dismiss reminder')
+    } finally {
+      await fetchReminders()
+    }
   }
 
   return { reminders, loading, pendingCount, fetchReminders, dismissReminder }

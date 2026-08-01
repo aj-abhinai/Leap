@@ -265,13 +265,23 @@ func (h *Handler) PendingReminders(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DismissReminder(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	_, err := h.svc.db.Exec(`UPDATE lead_activities SET is_reminded = true WHERE id = $1`, id)
+	dismissed, err := h.svc.dismissReminder(id)
 	if err != nil {
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,
 			nil,
 			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
+			nil,
+		)
+		return
+	}
+	if !dismissed {
+		respond.JSON(
+			w,
+			http.StatusNotFound,
+			nil,
+			&respond.Error{Code: "NOT_FOUND", Message: "Reminder not found"},
 			nil,
 		)
 		return

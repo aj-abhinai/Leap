@@ -157,8 +157,8 @@ func main() {
 			middleware.RequirePermission(rbacSvc, "lead:write", leadH.DeleteActivity),
 		)
 
-		r.Get("/api/reminders", leadH.PendingReminders)
-		r.Patch("/api/reminders/{id}", leadH.DismissReminder)
+		r.Get("/api/reminders", middleware.RequirePermission(rbacSvc, "lead:read", leadH.PendingReminders))
+		r.Patch("/api/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
 
 		r.Get("/api/pipelines", pipelineH.List)
 		r.Post("/api/pipelines", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Create))
