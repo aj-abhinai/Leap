@@ -74,7 +74,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	l, err := h.svc.create(req)
+	userID := ctxutil.GetUserID(r)
+	l, err := h.svc.create(req, userID)
 	if err != nil {
 		respond.JSON(
 			w,
@@ -96,6 +97,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	userID := ctxutil.GetUserID(r)
 	var req UpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.JSON(
@@ -107,7 +109,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	l, err := h.svc.update(id, req)
+	l, err := h.svc.update(id, req, userID)
 	if err != nil {
 		respond.JSON(
 			w,
@@ -129,7 +131,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.svc.delete(id); err != nil {
+	userID := ctxutil.GetUserID(r)
+	if err := h.svc.delete(id, userID); err != nil {
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,

@@ -189,7 +189,7 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 	return &populated[0], nil
 }
 
-func (s *Service) update(id string, req UpdateRequest) (*Contact, error) {
+func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact, error) {
 	old, err := s.get(id)
 	if err != nil {
 		return nil, err
@@ -239,24 +239,31 @@ func (s *Service) update(id string, req UpdateRequest) (*Contact, error) {
 
 	changes := diffContact(old, &c)
 	if changes != "" {
-		s.logActivity(id, "contact", "update", changes)
+		s.logActivity(id, "contact", "update", changes, userID)
 	}
 	return &c, nil
 }
 
-func (s *Service) delete(id string) error {
+func (s *Service) delete(id string, userID string) error {
 	_, err := s.db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
-	s.logActivity(id, "contact", "delete", `{"action":"deleted"}`)
+	s.logActivity(id, "contact", "delete", `{"action":"deleted"}`, userID)
 	return nil
 }
 
-func (s *Service) logActivity(resourceID, resourceType, action, changes string) {
+func (s *Service) logActivity(resourceID, resourceType, action, changes, userID string) {
+	userName := ""
+	if userID != "" {
+		if err := s.db.QueryRow(`SELECT name FROM users WHERE id = $1`, userID).Scan(&userName); err != nil {
+			slog.Error("resolve audit actor name", "error", err, "user_id", userID)
+		}
+	}
 	if _, err := s.db.Exec(
-		`INSERT INTO audit_logs (description, resource_type, resource_id, action, changes) VALUES ($1, $2, $3, $4, $5)`,
-		action+" "+resourceType+" "+resourceID, resourceType, resourceID, action, changes,
+		`INSERT INTO audit_logs (description, resource_type, resource_id, action, changes, user_id, user_name)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''))`,
+		action+" "+resourceType+" "+resourceID, resourceType, resourceID, changes, userID, userName,
 	); err != nil {
 		slog.Error("log activity", "error", err, "resource_type", resourceType, "resource_id", resourceID)
 	}

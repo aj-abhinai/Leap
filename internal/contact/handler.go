@@ -190,7 +190,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	c, err := h.svc.update(id, req)
+	userID := ctxutil.GetUserID(r)
+	c, err := h.svc.update(id, req, userID)
 	if err != nil {
 		respond.JSON(
 			w,
@@ -212,7 +213,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.svc.delete(id); err != nil {
+	userID := ctxutil.GetUserID(r)
+	if err := h.svc.delete(id, userID); err != nil {
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,
@@ -300,7 +302,8 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteNote(w http.ResponseWriter, r *http.Request) {
 	contactID := chi.URLParam(r, "id")
 	noteID := chi.URLParam(r, "note_id")
-	if err := h.svc.deleteNote(contactID, noteID); err != nil {
+	userID := ctxutil.GetUserID(r)
+	if err := h.svc.deleteNote(contactID, noteID, userID); err != nil {
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,

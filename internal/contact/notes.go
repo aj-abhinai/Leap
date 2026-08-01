@@ -45,16 +45,16 @@ func (s *Service) createNote(contactID, userID, note string) (*Note, error) {
 		preview = preview[:50]
 	}
 	changes, _ := json.Marshal(map[string]string{"note": preview})
-	s.logActivity(contactID, "contact_note", "create", string(changes))
+	s.logActivity(contactID, "contact_note", "create", string(changes), userID)
 	return &n, nil
 }
 
-func (s *Service) deleteNote(contactID, noteID string) error {
+func (s *Service) deleteNote(contactID, noteID, userID string) error {
 	_, err := s.db.Exec(`DELETE FROM contact_notes WHERE id = $1 AND contact_id = $2`, noteID, contactID)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}
 	changes, _ := json.Marshal(map[string]string{"note_id": noteID})
-	s.logActivity(contactID, "contact_note", "delete", string(changes))
+	s.logActivity(contactID, "contact_note", "delete", string(changes), userID)
 	return nil
 }

@@ -105,7 +105,7 @@ func (s *Service) get(id string) (*Lead, error) {
 	return &l, nil
 }
 
-func (s *Service) create(req CreateRequest) (*Lead, error) {
+func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 	var l Lead
 	err := s.db.QueryRow(
 		`INSERT INTO leads (name, email, phone, contact_id, pipeline_id, stage_id, value, notes, assigned_to)
@@ -131,11 +131,11 @@ func (s *Service) create(req CreateRequest) (*Lead, error) {
 	if err := s.populateNames(&l); err != nil {
 		return nil, err
 	}
-	s.logActivity(l.ID, "lead", "create", "")
+	s.logActivity(l.ID, "lead", "create", "", userID)
 	return &l, nil
 }
 
-func (s *Service) update(id string, req UpdateRequest) (*Lead, error) {
+func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, error) {
 	old, err := s.get(id)
 	if err != nil {
 		return nil, err
@@ -188,16 +188,16 @@ func (s *Service) update(id string, req UpdateRequest) (*Lead, error) {
 		}
 		desc = fmt.Sprintf("Moved lead from %q to %q", oldStage, l.StageName)
 	}
-	s.logActivity(l.ID, "lead", action, desc)
+	s.logActivity(l.ID, "lead", action, desc, userID)
 	return &l, nil
 }
 
-func (s *Service) delete(id string) error {
+func (s *Service) delete(id string, userID string) error {
 	_, err := s.db.Exec(`UPDATE leads SET deleted_at = now() WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
-	s.logActivity(id, "lead", "delete", "deleted")
+	s.logActivity(id, "lead", "delete", "deleted", userID)
 	return nil
 }
 
@@ -226,10 +226,17 @@ func (s *Service) stageName(stageID string) (string, error) {
 	return name, nil
 }
 
-func (s *Service) logActivity(resourceID, resourceType, action, desc string) {
+func (s *Service) logActivity(resourceID, resourceType, action, desc, userID string) {
+	userName := ""
+	if userID != "" {
+		if err := s.db.QueryRow(`SELECT name FROM users WHERE id = $1`, userID).Scan(&userName); err != nil {
+			slog.Error("resolve audit actor name", "error", err, "user_id", userID)
+		}
+	}
 	if _, err := s.db.Exec(
-		`INSERT INTO audit_logs (description, resource_type, resource_id, action) VALUES ($1, $2, $3, $4)`,
-		desc, resourceType, resourceID, action,
+		`INSERT INTO audit_logs (description, resource_type, resource_id, action, user_id, user_name)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''))`,
+		desc, resourceType, resourceID, action, userID, userName,
 	); err != nil {
 		slog.Error("log activity", "error", err, "resource_type", resourceType, "resource_id", resourceID)
 	}

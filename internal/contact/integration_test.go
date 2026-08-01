@@ -118,7 +118,7 @@ func TestUpdateContactIntegration(t *testing.T) {
 	}
 
 	newName := "Alice Updated"
-	updated, err := svc.update(created.ID, UpdateRequest{Name: &newName, Phone: util.StrPtr(&created.Phone)})
+	updated, err := svc.update(created.ID, UpdateRequest{Name: &newName, Phone: util.StrPtr(&created.Phone)}, "")
 	if err != nil {
 		t.Fatalf("update contact: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestSoftDeleteContactIntegration(t *testing.T) {
 		t.Fatalf("create second contact: %v", err)
 	}
 
-	if err := svc.delete(created.ID); err != nil {
+	if err := svc.delete(created.ID, ""); err != nil {
 		t.Fatalf("delete contact: %v", err)
 	}
 
@@ -160,6 +160,100 @@ func TestSoftDeleteContactIntegration(t *testing.T) {
 	}
 
 	assertAuditRow(t, db, created.ID, "delete")
+}
+
+func TestUpdateContactStoresActorIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	userID := seedTestUser(t, db, "alice@example.com")
+	created, err := svc.create(CreateRequest{Name: "Alice Example"})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	newName := "Alice Updated"
+	if _, err := svc.update(created.ID, UpdateRequest{Name: &newName}, userID); err != nil {
+		t.Fatalf("update contact: %v", err)
+	}
+
+	var gotUserID, gotUserName sql.NullString
+	err = db.QueryRow(
+		`SELECT user_id, user_name FROM audit_logs WHERE resource_type = 'contact' AND resource_id = $1 AND action = 'update'`,
+		created.ID,
+	).Scan(&gotUserID, &gotUserName)
+	if err != nil {
+		t.Fatalf("query audit_logs: %v", err)
+	}
+	if !gotUserID.Valid || gotUserID.String != userID {
+		t.Errorf("user_id = %+v, want %q", gotUserID, userID)
+	}
+	if !gotUserName.Valid || gotUserName.String != "Test User" {
+		t.Errorf("user_name = %+v, want %q", gotUserName, "Test User")
+	}
+}
+
+func TestDeleteContactWithoutActorStoresNullActorIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{Name: "Alice Example"})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+	if err := svc.delete(created.ID, ""); err != nil {
+		t.Fatalf("delete contact: %v", err)
+	}
+
+	var gotUserID, gotUserName sql.NullString
+	err = db.QueryRow(
+		`SELECT user_id, user_name FROM audit_logs WHERE resource_type = 'contact' AND resource_id = $1 AND action = 'delete'`,
+		created.ID,
+	).Scan(&gotUserID, &gotUserName)
+	if err != nil {
+		t.Fatalf("query audit_logs: %v", err)
+	}
+	if gotUserID.Valid {
+		t.Errorf("user_id = %+v, want NULL for system action", gotUserID)
+	}
+	if gotUserName.Valid {
+		t.Errorf("user_name = %+v, want NULL for system action", gotUserName)
+	}
+}
+
+func TestAuditFailureDoesNotFailUpdateIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{Name: "Alice Example"})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE audit_logs`); err != nil {
+		t.Fatalf("drop audit_logs: %v", err)
+	}
+
+	newName := "Alice Updated"
+	updated, err := svc.update(created.ID, UpdateRequest{Name: &newName}, "")
+	if err != nil {
+		t.Fatalf("update should succeed even when audit logging fails: %v", err)
+	}
+	if updated.Name != "Alice Updated" {
+		t.Errorf("name = %q, want %q", updated.Name, "Alice Updated")
+	}
+}
+
+func seedTestUser(t *testing.T, db *sql.DB, email string) string {
+	t.Helper()
+	var id string
+	err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Test User', $1, 'hash') RETURNING id`,
+		email,
+	).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	return id
 }
 
 func assertAuditRow(t *testing.T, db *sql.DB, resourceID, action string) {
