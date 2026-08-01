@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { shallowRef, watch, onMounted } from 'vue'
 import { Bell } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -7,7 +7,7 @@ import { useRemindersStore } from '@/stores/reminders'
 import NotificationPanel from './NotificationPanel.vue'
 
 const store = useRemindersStore()
-const isOpen = ref(false)
+const isOpen = shallowRef(false)
 
 onMounted(() => store.fetchReminders())
 

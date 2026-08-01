@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -29,12 +29,12 @@ interface User {
   created_at: string
 }
 
-const users = ref<User[]>([])
-const newUserName = ref('')
-const newUserEmail = ref('')
-const newUserPassword = ref('')
-const newUserError = ref('')
-const creatingUser = ref(false)
+const users = shallowRef<User[]>([])
+const newUserName = shallowRef('')
+const newUserEmail = shallowRef('')
+const newUserPassword = shallowRef('')
+const newUserError = shallowRef('')
+const creatingUser = shallowRef(false)
 
 onMounted(() => loadUsers())
 
@@ -42,7 +42,9 @@ async function loadUsers() {
   try {
     const res = await apiClient.get('/api/users')
     users.value = res.data
-  } catch {}
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to load users')
+  }
 }
 
 async function createUser() {

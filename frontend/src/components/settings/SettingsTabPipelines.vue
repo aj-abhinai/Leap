@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -15,11 +15,11 @@ interface Pipeline {
   stages?: { id: string; name: string; order: number }[]
 }
 
-const pipelines = ref<Pipeline[]>([])
-const newPipelineName = ref('')
-const newPipelineDesc = ref('')
-const newPipelineError = ref('')
-const creatingPipeline = ref(false)
+const pipelines = shallowRef<Pipeline[]>([])
+const newPipelineName = shallowRef('')
+const newPipelineDesc = shallowRef('')
+const newPipelineError = shallowRef('')
+const creatingPipeline = shallowRef(false)
 
 onMounted(() => loadPipelines())
 
@@ -27,7 +27,9 @@ async function loadPipelines() {
   try {
     const res = await apiClient.get('/api/pipelines')
     pipelines.value = res.data
-  } catch {}
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to load pipelines')
+  }
 }
 
 async function createPipeline() {

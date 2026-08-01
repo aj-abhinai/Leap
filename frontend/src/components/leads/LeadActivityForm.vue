@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -20,12 +20,12 @@ const emit = defineEmits<{
   saved: []
 }>()
 
-const activityType = ref('note')
-const description = ref('')
-const scheduledAt = ref('')
-const remindAt = ref('')
-const saving = ref(false)
-const error = ref('')
+const activityType = shallowRef('note')
+const description = shallowRef('')
+const scheduledAt = shallowRef('')
+const remindAt = shallowRef('')
+const saving = shallowRef(false)
+const error = shallowRef('')
 
 const showScheduled = computed(() =>
   activityType.value === 'call_scheduled' || activityType.value === 'call_rescheduled'

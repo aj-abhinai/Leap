@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onMounted, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ChevronRight, FolderKanban } from '@lucide/vue'
+import { formatCurrency } from '@/utils/format'
+import { formatDate } from '@/utils/time'
 
 interface LeadInfo {
   id: string
@@ -20,8 +22,8 @@ const props = defineProps<{
   contactId: string
 }>()
 
-const leads = ref<LeadInfo[]>([])
-const loading = ref(false)
+const leads = shallowRef<LeadInfo[]>([])
+const loading = shallowRef(false)
 
 onMounted(() => fetchLeads())
 
@@ -35,11 +37,6 @@ async function fetchLeads() {
   } finally {
     loading.value = false
   }
-}
-
-function formatCurrency(value?: number) {
-  if (!value) return ''
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
 }
 </script>
 
@@ -76,7 +73,7 @@ function formatCurrency(value?: number) {
             </div>
           </div>
           <div class="mt-1 text-xs text-muted-foreground">
-            Created {{ new Date(lead.created_at).toLocaleDateString() }}
+            Created {{ formatDate(lead.created_at) }}
           </div>
         </CardContent>
       </Card>

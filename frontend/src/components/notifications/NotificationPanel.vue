@@ -1,54 +1,14 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useRemindersStore, type Reminder } from '@/stores/reminders'
+import { useRemindersStore } from '@/stores/reminders'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { BellOff, Phone, MessageCircle, NotepadText, X } from '@lucide/vue'
+import { BellOff, X } from '@lucide/vue'
+import { formatReminderText, formatReminderTime, reminderIcon } from '@/utils/reminders'
+import { timeAgo } from '@/utils/time'
 
 const emit = defineEmits<{ close: [] }>()
 const store = useRemindersStore()
-
-onMounted(() => store.fetchReminders())
-
-function getIcon(type: string) {
-  switch (type) {
-    case 'call_scheduled': return Phone
-    case 'call_rescheduled': return Phone
-    case 'wa_message': return MessageCircle
-    default: return NotepadText
-  }
-}
-
-function formatReminderText(r: Reminder): string {
-  switch (r.type) {
-    case 'call_scheduled': return `Call scheduled: ${r.description || 'Follow-up call'}`
-    case 'call_rescheduled': return `Call rescheduled: ${r.description || 'Follow-up call'}`
-    case 'wa_message': return `WhatsApp: ${r.description || 'Send message'}`
-    default: return r.description || 'Reminder'
-  }
-}
-
-function formatTime(r: Reminder): string {
-  if (r.scheduled_at) {
-    return `Scheduled for ${new Date(r.scheduled_at).toLocaleString()}`
-  }
-  if (r.remind_at) {
-    return `Reminder at ${new Date(r.remind_at).toLocaleString()}`
-  }
-  return ''
-}
-
-function relativeTime(date: string): string {
-  const diff = Date.now() - new Date(date).getTime()
-  const minutes = Math.floor(Math.abs(diff) / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
 </script>
 
 <template>
@@ -77,11 +37,11 @@ function relativeTime(date: string): string {
           class="group relative px-3 py-2.5 hover:bg-muted/50 cursor-pointer transition-colors"
         >
           <div class="flex gap-2.5">
-            <component :is="getIcon(reminder.type)" class="flex-shrink-0 h-4 w-4 mt-0.5 text-muted-foreground" />
+            <component :is="reminderIcon(reminder.type)" class="flex-shrink-0 h-4 w-4 mt-0.5 text-muted-foreground" />
             <div class="flex-1 min-w-0">
               <p class="text-xs font-medium">{{ formatReminderText(reminder) }}</p>
-              <p v-if="formatTime(reminder)" class="text-xs text-muted-foreground mt-0.5">{{ formatTime(reminder) }}</p>
-              <p class="text-xs text-muted-foreground/70 mt-0.5">{{ relativeTime(reminder.created_at) }}</p>
+              <p v-if="formatReminderTime(reminder)" class="text-xs text-muted-foreground mt-0.5">{{ formatReminderTime(reminder) }}</p>
+              <p class="text-xs text-muted-foreground/70 mt-0.5">{{ timeAgo(reminder.created_at) }}</p>
             </div>
             <div class="flex items-start opacity-0 group-hover:opacity-100 transition-opacity">
               <Button variant="ghost" size="sm" class="h-5 w-5 p-0 hover:text-destructive" @click.stop="store.dismissReminder(reminder.id)">

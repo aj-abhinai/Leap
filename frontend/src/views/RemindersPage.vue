@@ -1,34 +1,17 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
-import { useRemindersStore, type Reminder } from '@/stores/reminders'
+import { useRemindersStore } from '@/stores/reminders'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { BellOff, Phone, MessageCircle, NotepadText, X } from '@lucide/vue'
+import { BellOff, X } from '@lucide/vue'
+import { formatReminderText, reminderIcon } from '@/utils/reminders'
 import { formatDateTime } from '@/utils/time'
 
 const store = useRemindersStore()
 
 onMounted(() => store.fetchReminders())
-
-function getIcon(type: string) {
-  switch (type) {
-    case 'call_scheduled': return Phone
-    case 'call_rescheduled': return Phone
-    case 'wa_message': return MessageCircle
-    default: return NotepadText
-  }
-}
-
-function formatText(r: Reminder): string {
-  switch (r.type) {
-    case 'call_scheduled': return `Call scheduled: ${r.description || 'Follow-up call'}`
-    case 'call_rescheduled': return `Call rescheduled: ${r.description || 'Follow-up call'}`
-    case 'wa_message': return `WhatsApp: ${r.description || 'Send message'}`
-    default: return r.description || 'Reminder'
-  }
-}
 </script>
 
 <template>
@@ -51,9 +34,9 @@ function formatText(r: Reminder): string {
           <CardContent class="p-4">
             <div class="flex items-start justify-between gap-3">
               <div class="flex items-start gap-3">
-                <component :is="getIcon(reminder.type)" class="size-5 mt-0.5 text-muted-foreground shrink-0" />
+                <component :is="reminderIcon(reminder.type)" class="size-5 mt-0.5 text-muted-foreground shrink-0" />
                 <div>
-                  <p class="font-medium text-sm">{{ formatText(reminder) }}</p>
+                  <p class="font-medium text-sm">{{ formatReminderText(reminder) }}</p>
                   <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
                     <span v-if="reminder.scheduled_at">Scheduled: {{ formatDateTime(reminder.scheduled_at) }}</span>
                     <span v-if="reminder.remind_at" class="text-amber-600">Reminder: {{ formatDateTime(reminder.remind_at) }}</span>

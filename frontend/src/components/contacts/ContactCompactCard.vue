@@ -3,6 +3,7 @@ import { type Contact } from '@/stores/contacts'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Phone } from '@lucide/vue'
+import { getAvatarColor, getInitials } from '@/utils/avatar'
 
 defineProps<{
   contact: Contact
@@ -11,31 +12,6 @@ defineProps<{
 const emit = defineEmits<{
   click: []
 }>()
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map(n => n.charAt(0))
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
-}
-
-function getAvatarColor(name: string): string {
-  const colors = [
-    'bg-blue-100 text-blue-700',
-    'bg-emerald-100 text-emerald-700',
-    'bg-amber-100 text-amber-700',
-    'bg-violet-100 text-violet-700',
-    'bg-rose-100 text-rose-700',
-    'bg-cyan-100 text-cyan-700',
-  ]
-  let hash = 0
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  return colors[Math.abs(hash) % colors.length]
-}
 </script>
 
 <template>

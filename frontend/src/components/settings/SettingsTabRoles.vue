@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -22,12 +22,12 @@ interface Role {
   permissions?: { id: string; name: string }[]
 }
 
-const roles = ref<Role[]>([])
-const allPermissions = ref<Permission[]>([])
-const newRoleName = ref('')
-const newRoleDesc = ref('')
-const newRoleError = ref('')
-const creatingRole = ref(false)
+const roles = shallowRef<Role[]>([])
+const allPermissions = shallowRef<Permission[]>([])
+const newRoleName = shallowRef('')
+const newRoleDesc = shallowRef('')
+const newRoleError = shallowRef('')
+const creatingRole = shallowRef(false)
 
 onMounted(() => {
   loadRoles()
@@ -38,14 +38,18 @@ async function loadRoles() {
   try {
     const res = await apiClient.get('/api/roles')
     roles.value = res.data
-  } catch {}
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to load roles')
+  }
 }
 
 async function loadPermissions() {
   try {
     const res = await apiClient.get('/api/permissions')
     allPermissions.value = res.data
-  } catch {}
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to load permissions')
+  }
 }
 
 async function createRole() {
@@ -92,8 +96,8 @@ async function deleteRole(roleId: string) {
   }
 }
 
-function roleHasPermission(role: any, permId: string): boolean {
-  return role.permissions?.some((p: any) => p.id === permId) || false
+function roleHasPermission(role: Role, permId: string): boolean {
+  return role.permissions?.some((p) => p.id === permId) || false
 }
 </script>
 

@@ -20,6 +20,7 @@ import SettingsTabRoles from '@/components/settings/SettingsTabRoles.vue'
 import SettingsTabPipelines from '@/components/settings/SettingsTabPipelines.vue'
 import SettingsTabGeneral from '@/components/settings/SettingsTabGeneral.vue'
 import { RefreshCw, User, Shield, Layers, Activity, Settings } from '@lucide/vue'
+import { formatDateTime } from '@/utils/time'
 
 const activity = useActivityStore()
 const rbac = useRBACStore()
@@ -129,7 +130,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
                       </Badge>
                     </TableCell>
                     <TableCell class="text-right text-xs text-muted-foreground tabular-nums">
-                      {{ new Date(e.created_at).toLocaleString() }}
+                      {{ formatDateTime(e.created_at) }}
                     </TableCell>
                   </TableRow>
                 </TableBody>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { shallowRef, useTemplateRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Download, Upload } from '@lucide/vue'
+import { parseCSV } from '@/utils/csv'
 
 defineProps<{
   open: boolean
@@ -28,36 +29,14 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const step = ref<'upload' | 'preview' | 'result'>('upload')
-const fileInput = ref<HTMLInputElement | null>(null)
-const error = ref('')
-const headers = ref<string[]>([])
-const rows = ref<string[][]>([])
-const preview = ref<string[][]>([])
-const importing = ref(false)
-const result = ref<{ imported: number; failed: number; errors?: { row: number; message: string }[] } | null>(null)
-
-function parseCSV(text: string): { headers: string[]; rows: string[][] } {
-  const clean = text.replace(/^\uFEFF/, '')
-  const lines = clean.trim().split('\n').map(l => l.trim()).filter(l => l)
-  if (lines.length === 0) return { headers: [], rows: [] }
-  const h = lines[0].split(',').map(hh => hh.trim().toLowerCase())
-  const r: string[][] = []
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]
-    const result: string[] = []
-    let current = ''
-    let inQuotes = false
-    for (const ch of line) {
-      if (ch === '"') { inQuotes = !inQuotes }
-      else if (ch === ',' && !inQuotes) { result.push(current.trim()); current = '' }
-      else { current += ch }
-    }
-    result.push(current.trim())
-    r.push(result)
-  }
-  return { headers: h, rows: r }
-}
+const step = shallowRef<'upload' | 'preview' | 'result'>('upload')
+const fileInput = useTemplateRef<HTMLInputElement>('fileInput')
+const error = shallowRef('')
+const headers = shallowRef<string[]>([])
+const rows = shallowRef<string[][]>([])
+const preview = shallowRef<string[][]>([])
+const importing = shallowRef(false)
+const result = shallowRef<{ imported: number; failed: number; errors?: { row: number; message: string }[] } | null>(null)
 
 function onFileSelect(e: Event) {
   error.value = ''
@@ -86,6 +65,14 @@ function onFileSelect(e: Event) {
     step.value = 'preview'
   }
   reader.readAsText(file)
+}
+
+function handleDrop(e: DragEvent) {
+  const files = e.dataTransfer?.files
+  const input = fileInput.value
+  if (!files?.length || !input) return
+  input.files = files
+  onFileSelect({ target: input } as unknown as Event)
 }
 
 function triggerUpload() {
@@ -157,7 +144,7 @@ function close() {
           class="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
           @click="triggerUpload"
           @dragover.prevent
-          @drop.prevent="(e) => { const files = e.dataTransfer?.files; if (files?.length) { const dt = new DataTransfer(); dt.items.add(files[0]); if (fileInput) { fileInput.files = dt.files; onFileSelect({ target: fileInput } as any) } } }"
+          @drop.prevent="handleDrop"
         >
           <input ref="fileInput" type="file" accept=".csv" class="hidden" @change="onFileSelect" />
           <Upload class="size-8 text-muted-foreground/40 mx-auto mb-2" />

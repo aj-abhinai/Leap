@@ -16,3 +16,7 @@ export function timeAgo(dateStr: string): string {
 export function formatDateTime(date: string): string {
   return new Date(date).toLocaleString()
 }
+
+export function formatDate(date: string): string {
+  return new Date(date).toLocaleDateString()
+}

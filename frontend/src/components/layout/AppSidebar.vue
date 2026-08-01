@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Settings } from '@lucide/vue'
+import type { Component } from 'vue'
+import { Settings, LayoutDashboard, Users, Folder } from '@lucide/vue'
 import {
   Sidebar,
   SidebarContent,
@@ -14,21 +15,21 @@ import NavMain from './NavMain.vue'
 import NavUser from './NavUser.vue'
 import NotificationPopover from '@/components/notifications/NotificationPopover.vue'
 
-const navItems = [
+const navItems: { title: string; url: string; icon: Component }[] = [
   {
     title: 'Dashboard',
     url: '/',
-    icon: 'LayoutDashboard',
+    icon: LayoutDashboard,
   },
   {
     title: 'Contacts',
     url: '/contacts',
-    icon: 'Users',
+    icon: Users,
   },
   {
     title: 'Leads',
     url: '/leads',
-    icon: 'Folder',
+    icon: Folder,
   },
 ]
 </script>

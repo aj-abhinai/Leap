@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onMounted, ref, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from 'vue-sonner'
@@ -16,6 +16,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Plus, MoreHorizontal, Trash2 } from '@lucide/vue'
+import { formatDateTime } from '@/utils/time'
 
 interface Note {
   id: string
@@ -30,13 +31,13 @@ interface Note {
 const props = defineProps<{ contactId: string }>()
 
 const auth = useAuthStore()
-const notes = ref<Note[]>([])
-const loading = ref(false)
-const isAdding = ref(false)
-const newNote = ref('')
-const saving = ref(false)
-const noteToDelete = ref<string | null>(null)
-const deleteDialogOpen = ref(false)
+const notes = shallowRef<Note[]>([])
+const loading = shallowRef(false)
+const isAdding = shallowRef(false)
+const newNote = shallowRef('')
+const saving = shallowRef(false)
+const noteToDelete = shallowRef<string | null>(null)
+const deleteDialogOpen = shallowRef(false)
 
 onMounted(() => fetchNotes())
 
@@ -86,10 +87,6 @@ async function handleDelete() {
   }
 }
 
-function formatDate(date: string): string {
-  return new Date(date).toLocaleString()
-}
-
 function canDelete(note: Note): boolean {
   return note.user_id === auth.user?.id
 }
@@ -118,17 +115,17 @@ function canDelete(note: Note): boolean {
       </div>
     </div>
 
-    <div v-if="notes.length === 0 && !loading && !isAdding" class="rounded-lg border border-dashed p-8 text-center">
+    <div v-if="!loading && !isAdding && notes.length === 0" class="rounded-lg border border-dashed p-8 text-center">
       <p class="text-sm text-muted-foreground">No notes yet. Add the first one.</p>
     </div>
 
-    <div v-else class="space-y-3">
+    <div v-else-if="!loading" class="space-y-3">
       <Card v-for="note in notes" :key="note.id">
         <CardHeader class="pb-1 pt-3 px-4">
           <div class="flex items-center justify-between">
             <div class="text-sm">
               <span class="font-medium">{{ note.user_name || 'Unknown' }}</span>
-              <span class="text-muted-foreground"> &middot; {{ formatDate(note.created_at) }}</span>
+              <span class="text-muted-foreground"> &middot; {{ formatDateTime(note.created_at) }}</span>
             </div>
             <DropdownMenu v-if="canDelete(note)">
               <DropdownMenuTrigger as-child>

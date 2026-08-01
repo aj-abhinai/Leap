@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onMounted, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Card, CardContent } from '@/components/ui/card'
@@ -8,7 +8,9 @@ import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Phone, MessageCircle, NotepadText, MoreHorizontal, Trash2 } from '@lucide/vue'
+import { MoreHorizontal, Trash2 } from '@lucide/vue'
+import { reminderIcon } from '@/utils/reminders'
+import { formatDateTime } from '@/utils/time'
 
 interface Activity {
   id: string
@@ -28,8 +30,8 @@ interface Activity {
 
 const props = defineProps<{ leadId: string }>()
 
-const activities = ref<Activity[]>([])
-const loading = ref(false)
+const activities = shallowRef<Activity[]>([])
+const loading = shallowRef(false)
 
 onMounted(() => fetchActivities())
 
@@ -55,15 +57,6 @@ async function deleteActivity(id: string) {
   }
 }
 
-function getIcon(type: string) {
-  switch (type) {
-    case 'call_scheduled': return Phone
-    case 'call_rescheduled': return Phone
-    case 'wa_message': return MessageCircle
-    default: return NotepadText
-  }
-}
-
 function typeLabel(type: string): string {
   const map: Record<string, string> = {
     call_scheduled: 'Call Scheduled',
@@ -73,10 +66,6 @@ function typeLabel(type: string): string {
     other: 'Other',
   }
   return map[type] || type
-}
-
-function formatDate(date: string): string {
-  return new Date(date).toLocaleString()
 }
 
 defineExpose({ fetchActivities })
@@ -97,7 +86,7 @@ defineExpose({ fetchActivities })
         <CardContent class="p-3">
           <div class="flex items-start justify-between gap-2">
             <div class="flex items-start gap-2 min-w-0">
-              <component :is="getIcon(a.type)" class="size-4 mt-0.5 text-muted-foreground shrink-0" />
+              <component :is="reminderIcon(a.type)" class="size-4 mt-0.5 text-muted-foreground shrink-0" />
               <div>
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-medium">{{ typeLabel(a.type) }}</span>
@@ -106,13 +95,13 @@ defineExpose({ fetchActivities })
                 <p v-if="a.description" class="text-sm mt-0.5">{{ a.description }}</p>
                 <div class="flex flex-wrap gap-2 mt-1">
                   <span v-if="a.scheduled_at" class="text-xs text-muted-foreground">
-                    Scheduled: {{ formatDate(a.scheduled_at) }}
+                    Scheduled: {{ formatDateTime(a.scheduled_at) }}
                   </span>
                   <span v-if="a.remind_at" class="text-xs text-amber-600">
-                    Reminder: {{ formatDate(a.remind_at) }}
+                    Reminder: {{ formatDateTime(a.remind_at) }}
                   </span>
                 </div>
-                <span class="text-xs text-muted-foreground/70 mt-0.5 block">{{ formatDate(a.created_at) }}</span>
+                <span class="text-xs text-muted-foreground/70 mt-0.5 block">{{ formatDateTime(a.created_at) }}</span>
               </div>
             </div>
             <DropdownMenu>

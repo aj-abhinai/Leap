@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { type Lead } from '@/stores/leads'
 import { type Stage } from '@/stores/pipeline'
 import draggable from 'vuedraggable'
@@ -11,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Plus, MoreHorizontal, ChevronRight, Link, ListChecks } from '@lucide/vue'
+import { formatCurrency } from '@/utils/format'
 
 const props = defineProps<{
   columns: (Stage & { leads: Lead[] })[]
@@ -40,9 +42,16 @@ function getStageColor(index: number): string {
   return stageColors[index % Object.keys(stageColors).length]
 }
 
-function formatCurrency(value?: number) {
-  if (!value) return ''
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
+const moveTargets = computed<Record<string, Stage[]>>(() => {
+  const map: Record<string, Stage[]> = {}
+  for (const col of props.columns) {
+    map[col.id] = props.stages.filter(s => s.id !== col.id)
+  }
+  return map
+})
+
+function onDragStart(stageId: string) {
+  dragSourceStageId = stageId
 }
 
 function handleDragChange(evt: { added?: { element: Lead }; moved?: { element: Lead } }, newStageId: string) {
@@ -81,7 +90,7 @@ function handleDragChange(evt: { added?: { element: Lead }; moved?: { element: L
         drag-class="shadow-xl rotate-1 z-50"
         :animation="200"
         :sort="false"
-        @start="dragSourceStageId = col.id"
+        @start="onDragStart(col.id)"
         @change="(evt: any) => handleDragChange(evt, col.id)"
       >
         <template #item="{ element: lead }">
@@ -98,21 +107,21 @@ function handleDragChange(evt: { added?: { element: Lead }; moved?: { element: L
                   <ListChecks class="size-3" />
                 </Button>
                 <DropdownMenu>
-                <DropdownMenuTrigger as-child @click.stop>
-                  <Button variant="ghost" size="icon-sm" class="size-6 -mr-1 -mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <MoreHorizontal class="size-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" class="w-40">
-                  <DropdownMenuItem
-                    v-for="s in stages.filter(s => s.id !== col.id)"
-                    :key="s.id"
-                    @click.stop="emit('moveStage', lead.id!, s.id)"
-                  >
-                    <ChevronRight class="mr-2 size-3.5" />
-                    Move to {{ s.name }}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
+                  <DropdownMenuTrigger as-child @click.stop>
+                    <Button variant="ghost" size="icon-sm" class="size-6 -mr-1 -mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <MoreHorizontal class="size-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" class="w-40">
+                    <DropdownMenuItem
+                      v-for="s in moveTargets[col.id]"
+                      :key="s.id"
+                      @click.stop="emit('moveStage', lead.id!, s.id)"
+                    >
+                      <ChevronRight class="mr-2 size-3.5" />
+                      Move to {{ s.name }}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
                 </DropdownMenu>
               </div>
             </div>

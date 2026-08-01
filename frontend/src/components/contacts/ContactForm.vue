@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onMounted, ref, shallowRef, watch } from 'vue'
 import { type Contact } from '@/stores/contacts'
 import { useSettingsStore } from '@/stores/settings'
 import { contactSchema } from '@/lib/validation'
@@ -26,18 +26,29 @@ const emit = defineEmits<{
 
 const settings = useSettingsStore()
 
-const formName = ref(props.editingContact?.name || '')
-const formEmail = ref(props.editingContact?.email || '')
-const formPhone = ref(props.editingContact?.phone || '')
-const formLocation = ref(props.editingContact?.location || '')
-const formAge = ref<number | undefined>(props.editingContact?.age)
-const formStatusId = ref(props.editingContact?.status?.id || '__none__')
+const formName = shallowRef(props.editingContact?.name || '')
+const formEmail = shallowRef(props.editingContact?.email || '')
+const formPhone = shallowRef(props.editingContact?.phone || '')
+const formLocation = shallowRef(props.editingContact?.location || '')
+const formAge = shallowRef<number | undefined>(props.editingContact?.age)
+const formStatusId = shallowRef(props.editingContact?.status?.id || '__none__')
 const selectedTags = ref<string[]>(props.editingContact?.tags?.map(t => t.id) || [])
-const formError = ref('')
-const saving = ref(false)
+const formError = shallowRef('')
+const saving = shallowRef(false)
 
 onMounted(() => {
   settings.fetchTags()
+})
+
+watch(() => props.editingContact, (c) => {
+  formName.value = c?.name || ''
+  formEmail.value = c?.email || ''
+  formPhone.value = c?.phone || ''
+  formLocation.value = c?.location || ''
+  formAge.value = c?.age
+  formStatusId.value = c?.status?.id || '__none__'
+  selectedTags.value = c?.tags?.map(t => t.id) || []
+  formError.value = ''
 })
 
 function toggleTag(tagId: string) {
@@ -63,21 +74,16 @@ async function handleSave() {
     return
   }
   saving.value = true
-  try {
-    emit('save', {
-      name: result.data.name,
-      email: result.data.email || null,
-      phone: result.data.phone || null,
-      location: result.data.location || null,
-      age: result.data.age || null,
-      tag_ids: selectedTags.value,
-      status_id: formStatusId.value && formStatusId.value !== '__none__' ? formStatusId.value : null,
-    })
-  } catch (e: any) {
-    formError.value = e.message || 'Save failed'
-  } finally {
-    saving.value = false
-  }
+  emit('save', {
+    name: result.data.name,
+    email: result.data.email || null,
+    phone: result.data.phone || null,
+    location: result.data.location || null,
+    age: result.data.age || null,
+    tag_ids: selectedTags.value,
+    status_id: formStatusId.value && formStatusId.value !== '__none__' ? formStatusId.value : null,
+  })
+  saving.value = false
 }
 </script>
 
