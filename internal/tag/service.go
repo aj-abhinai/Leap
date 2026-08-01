@@ -13,7 +13,7 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) List(tagType string) ([]Tag, error) {
+func (s *Service) list(tagType string) ([]Tag, error) {
 	rows, err := s.db.Query(
 		`SELECT id, name, type, COALESCE(color, ''), created_at FROM tags WHERE type = $1 ORDER BY name`,
 		tagType,
@@ -23,7 +23,7 @@ func (s *Service) List(tagType string) ([]Tag, error) {
 	}
 	defer rows.Close()
 
-	var tags []Tag
+	tags := []Tag{}
 	for rows.Next() {
 		var t Tag
 		if err := rows.Scan(&t.ID, &t.Name, &t.Type, &t.Color, &t.CreatedAt); err != nil {
@@ -34,7 +34,7 @@ func (s *Service) List(tagType string) ([]Tag, error) {
 	return tags, nil
 }
 
-func (s *Service) Create(req CreateRequest) (*Tag, error) {
+func (s *Service) create(req CreateRequest) (*Tag, error) {
 	var t Tag
 	err := s.db.QueryRow(
 		`INSERT INTO tags (name, type, color) VALUES ($1, $2, $3) RETURNING id, name, type, COALESCE(color, ''), created_at`,
@@ -46,7 +46,7 @@ func (s *Service) Create(req CreateRequest) (*Tag, error) {
 	return &t, nil
 }
 
-func (s *Service) Delete(id string) error {
+func (s *Service) delete(id string) error {
 	_, err := s.db.Exec(`DELETE FROM tags WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete tag: %w", err)

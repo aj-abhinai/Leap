@@ -15,7 +15,7 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) List(pipelineID, stageID, contactID string, page, perPage int) ([]Lead, int, error) {
+func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int) ([]Lead, int, error) {
 	var total int
 	baseWhere := "WHERE l.deleted_at IS NULL"
 	args := []any{}
@@ -51,8 +51,8 @@ func (s *Service) List(pipelineID, stageID, contactID string, page, perPage int)
 	}
 	offset := (page - 1) * perPage
 
-	selectQuery := fmt.Sprintf(`
-		SELECT l.id, l.name, COALESCE(l.email, ''), COALESCE(l.phone, ''),
+	selectQuery := fmt.Sprintf(
+		`SELECT l.id, l.name, COALESCE(l.email, ''), COALESCE(l.phone, ''),
 			l.contact_id, COALESCE(c.name, ''), l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
 			COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
 		FROM leads l
@@ -60,7 +60,9 @@ func (s *Service) List(pipelineID, stageID, contactID string, page, perPage int)
 		LEFT JOIN contacts c ON l.contact_id = c.id
 		%s
 		ORDER BY l.created_at DESC
-		LIMIT $%d OFFSET $%d`, baseWhere, argIdx, argIdx+1)
+		LIMIT $%d OFFSET $%d`,
+		baseWhere, argIdx, argIdx+1,
+	)
 	args = append(args, perPage, offset)
 
 	rows, err := s.db.Query(selectQuery, args...)
@@ -72,7 +74,10 @@ func (s *Service) List(pipelineID, stageID, contactID string, page, perPage int)
 	leads := []Lead{}
 	for rows.Next() {
 		var l Lead
-		if err := rows.Scan(&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.ContactName, &l.PipelineID, &l.StageID, &l.StageName, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.ContactName, &l.PipelineID, &l.StageID,
+			&l.StageName, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+		); err != nil {
 			return nil, 0, err
 		}
 		leads = append(leads, l)
@@ -80,55 +85,65 @@ func (s *Service) List(pipelineID, stageID, contactID string, page, perPage int)
 	return leads, total, nil
 }
 
-func (s *Service) Get(id string) (*Lead, error) {
+func (s *Service) get(id string) (*Lead, error) {
 	var l Lead
-	err := s.db.QueryRow(`
-		SELECT l.id, l.name, COALESCE(l.email, ''), COALESCE(l.phone, ''),
+	err := s.db.QueryRow(
+		`SELECT l.id, l.name, COALESCE(l.email, ''), COALESCE(l.phone, ''),
 			l.contact_id, COALESCE(c.name, ''), l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
 			COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
 		FROM leads l
 		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
 		LEFT JOIN contacts c ON l.contact_id = c.id
 		WHERE l.id = $1 AND l.deleted_at IS NULL`, id,
-	).Scan(&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.ContactName, &l.PipelineID, &l.StageID, &l.StageName, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt)
+	).Scan(
+		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.ContactName, &l.PipelineID, &l.StageID,
+		&l.StageName, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}
 	return &l, nil
 }
 
-func (s *Service) Create(req CreateRequest) (*Lead, error) {
+func (s *Service) create(req CreateRequest) (*Lead, error) {
 	var l Lead
-	err := s.db.QueryRow(`
-		INSERT INTO leads (name, email, phone, contact_id, pipeline_id, stage_id, value, notes, assigned_to)
+	err := s.db.QueryRow(
+		`INSERT INTO leads (name, email, phone, contact_id, pipeline_id, stage_id, value, notes, assigned_to)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
-		req.Name, util.NullStr(req.Email), util.NullStr(req.Phone), req.ContactID, req.PipelineID, req.StageID, req.Value, util.NullStr(req.Notes), req.AssignedTo,
-	).Scan(&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt)
+		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id,
+			value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
+		req.Name,
+		util.NullStr(req.Email),
+		util.NullStr(req.Phone),
+		req.ContactID,
+		req.PipelineID,
+		req.StageID,
+		req.Value,
+		util.NullStr(req.Notes),
+		req.AssignedTo,
+	).Scan(
+		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.Value,
+		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create lead: %w", err)
 	}
-	var stageName string
-	s.db.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, l.StageID).Scan(&stageName)
-	l.StageName = stageName
-	var contactName string
-	if l.ContactID != nil {
-		s.db.QueryRow(`SELECT name FROM contacts WHERE id = $1`, *l.ContactID).Scan(&contactName)
-		l.ContactName = contactName
+	if err := s.populateNames(&l); err != nil {
+		return nil, err
 	}
 	s.logActivity(l.ID, "lead", "create", "")
 	return &l, nil
 }
 
-func (s *Service) Update(id string, req UpdateRequest) (*Lead, error) {
-	old, err := s.Get(id)
+func (s *Service) update(id string, req UpdateRequest) (*Lead, error) {
+	old, err := s.get(id)
 	if err != nil {
 		return nil, err
 	}
 
 	var l Lead
-	err = s.db.QueryRow(`
-		UPDATE leads SET
+	err = s.db.QueryRow(
+		`UPDATE leads SET
 			name = COALESCE($2, name),
 			email = COALESCE($3, email),
 			phone = COALESCE($4, phone),
@@ -140,55 +155,75 @@ func (s *Service) Update(id string, req UpdateRequest) (*Lead, error) {
 			assigned_to = COALESCE($10, assigned_to),
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
-		id, req.Name, util.StrPtr(req.Email), util.StrPtr(req.Phone), req.ContactID, req.PipelineID, req.StageID, req.Value, util.StrPtr(req.Notes), req.AssignedTo,
-	).Scan(&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt)
+		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id,
+			value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
+		id,
+		req.Name,
+		util.StrPtr(req.Email),
+		util.StrPtr(req.Phone),
+		req.ContactID,
+		req.PipelineID,
+		req.StageID,
+		req.Value,
+		util.StrPtr(req.Notes),
+		req.AssignedTo,
+	).Scan(
+		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.Value,
+		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("update lead: %w", err)
 	}
-	var stageName string
-	s.db.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, l.StageID).Scan(&stageName)
-	l.StageName = stageName
-	var contactName string
-	if l.ContactID != nil {
-		s.db.QueryRow(`SELECT name FROM contacts WHERE id = $1`, *l.ContactID).Scan(&contactName)
-		l.ContactName = contactName
+	if err := s.populateNames(&l); err != nil {
+		return nil, err
 	}
 
 	action := "update"
 	desc := "Updated lead"
 	if old.StageID != l.StageID && old.StageID != "" {
 		action = "move_stage"
-		var oldStage string
-		s.db.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, old.StageID).Scan(&oldStage)
-		desc = fmt.Sprintf("Moved lead from '%s' to '%s'", oldStage, stageName)
+		oldStage, err := s.stageName(old.StageID)
+		if err != nil {
+			return nil, err
+		}
+		desc = fmt.Sprintf("Moved lead from %q to %q", oldStage, l.StageName)
 	}
 	s.logActivity(l.ID, "lead", action, desc)
 	return &l, nil
 }
 
-func (s *Service) MoveStage(leadID, newStageID string) error {
-	var oldStage string
-	s.db.QueryRow(`SELECT COALESCE(ls.name, '') FROM leads l LEFT JOIN lead_stages ls ON l.stage_id = ls.id WHERE l.id = $1`, leadID).Scan(&oldStage)
-
-	_, err := s.db.Exec(`UPDATE leads SET stage_id = $1, updated_at = now() WHERE id = $2`, newStageID, leadID)
-	if err != nil {
-		return err
-	}
-	var newStage string
-	s.db.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, newStageID).Scan(&newStage)
-	desc := fmt.Sprintf("Moved lead from '%s' to '%s'", oldStage, newStage)
-	s.logActivity(leadID, "lead", "move_stage", desc)
-	return nil
-}
-
-func (s *Service) Delete(id string) error {
+func (s *Service) delete(id string) error {
 	_, err := s.db.Exec(`UPDATE leads SET deleted_at = now() WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
 	s.logActivity(id, "lead", "delete", "deleted")
 	return nil
+}
+
+func (s *Service) populateNames(l *Lead) error {
+	stageName, err := s.stageName(l.StageID)
+	if err != nil {
+		return err
+	}
+	l.StageName = stageName
+	if l.ContactID == nil {
+		return nil
+	}
+	var contactName string
+	if err := s.db.QueryRow(`SELECT name FROM contacts WHERE id = $1`, *l.ContactID).Scan(&contactName); err != nil {
+		return fmt.Errorf("load contact name: %w", err)
+	}
+	l.ContactName = contactName
+	return nil
+}
+
+func (s *Service) stageName(stageID string) (string, error) {
+	var name string
+	if err := s.db.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, stageID).Scan(&name); err != nil {
+		return "", fmt.Errorf("load stage name: %w", err)
+	}
+	return name, nil
 }
 
 func (s *Service) logActivity(resourceID, resourceType, action, desc string) {

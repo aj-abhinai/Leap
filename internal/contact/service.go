@@ -16,14 +16,17 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) List(page, perPage int, search string) ([]Contact, int, error) {
+func (s *Service) list(page, perPage int, search string) ([]Contact, int, error) {
 	var total int
 	baseWhere := "WHERE deleted_at IS NULL"
 	args := []any{}
 	argIdx := 1
 
 	if search != "" {
-		baseWhere += fmt.Sprintf(" AND (name ILIKE $%d OR email ILIKE $%d OR phone ILIKE $%d)", argIdx, argIdx+1, argIdx+2)
+		baseWhere += fmt.Sprintf(
+			" AND (name ILIKE $%d OR email ILIKE $%d OR phone ILIKE $%d)",
+			argIdx, argIdx+1, argIdx+2,
+		)
 		searchTerm := "%" + search + "%"
 		args = append(args, searchTerm, searchTerm, searchTerm)
 		argIdx += 3
@@ -43,7 +46,13 @@ func (s *Service) List(page, perPage int, search string) ([]Contact, int, error)
 	}
 	offset := (page - 1) * perPage
 
-	selectQuery := fmt.Sprintf("SELECT id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at FROM contacts %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d", baseWhere, argIdx, argIdx+1)
+	selectQuery := fmt.Sprintf(
+		`SELECT id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at
+		FROM contacts %s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d`,
+		baseWhere, argIdx, argIdx+1,
+	)
 	args = append(args, perPage, offset)
 	rows, err := s.db.Query(selectQuery, args...)
 	if err != nil {
@@ -55,7 +64,9 @@ func (s *Service) List(page, perPage int, search string) ([]Contact, int, error)
 	contactIDs := []string{}
 	for rows.Next() {
 		var c Contact
-		if err := rows.Scan(&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		); err != nil {
 			return nil, 0, err
 		}
 		contacts = append(contacts, c)
@@ -63,58 +74,62 @@ func (s *Service) List(page, perPage int, search string) ([]Contact, int, error)
 	}
 
 	if len(contacts) > 0 {
-		s.populateTagsAndStatus(contacts, contactIDs)
+		if err := s.populateTagsAndStatus(contacts, contactIDs); err != nil {
+			return nil, 0, err
+		}
 	}
 
 	return contacts, total, nil
 }
 
-func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string) {
-	tagsByContact := make(map[string][]TagRef)
+func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string) error {
+	tagsByContact := make(map[string][]TagRef, len(contactIDs))
 	statusByContact := make(map[string]*TagRef)
 
 	for _, id := range contactIDs {
 		tagsByContact[id] = []TagRef{}
 	}
 
-	tagRows, err := s.db.Query(`
-		SELECT ct.contact_id, t.id, t.name, COALESCE(t.color, '')
+	tagRows, err := s.db.Query(
+		`SELECT ct.contact_id, t.id, t.name, COALESCE(t.color, '')
 		FROM contact_tags ct
 		JOIN tags t ON t.id = ct.tag_id
 		WHERE ct.contact_id = ANY($1)
 		ORDER BY t.name`,
 		contactIDs,
 	)
-	if err == nil {
-		defer tagRows.Close()
-		for tagRows.Next() {
-			var contactID string
-			var ref TagRef
-			if err := tagRows.Scan(&contactID, &ref.ID, &ref.Name, &ref.Color); err != nil {
-				continue
-			}
-			tagsByContact[contactID] = append(tagsByContact[contactID], ref)
+	if err != nil {
+		return fmt.Errorf("load contact tags: %w", err)
+	}
+	defer tagRows.Close()
+	for tagRows.Next() {
+		var contactID string
+		var ref TagRef
+		if err := tagRows.Scan(&contactID, &ref.ID, &ref.Name, &ref.Color); err != nil {
+			return fmt.Errorf("scan contact tag: %w", err)
 		}
+		tagsByContact[contactID] = append(tagsByContact[contactID], ref)
 	}
 
-	statusRows, err := s.db.Query(`
-		SELECT c.id, t.id, t.name, COALESCE(t.color, '')
+	statusRows, err := s.db.Query(
+		`SELECT c.id, t.id, t.name, COALESCE(t.color, '')
 		FROM contacts c
 		LEFT JOIN tags t ON t.id = c.status_id
 		WHERE c.id = ANY($1)`,
 		contactIDs,
 	)
-	if err == nil {
-		defer statusRows.Close()
-		for statusRows.Next() {
-			var contactID string
-			var ref TagRef
-			if err := statusRows.Scan(&contactID, &ref.ID, &ref.Name, &ref.Color); err != nil {
-				continue
-			}
-			if ref.ID != "" {
-				statusByContact[contactID] = &ref
-			}
+	if err != nil {
+		return fmt.Errorf("load contact statuses: %w", err)
+	}
+	defer statusRows.Close()
+	for statusRows.Next() {
+		var contactID string
+		var ref TagRef
+		if err := statusRows.Scan(&contactID, &ref.ID, &ref.Name, &ref.Color); err != nil {
+			return fmt.Errorf("scan contact status: %w", err)
+		}
+		if ref.ID != "" {
+			statusByContact[contactID] = &ref
 		}
 	}
 
@@ -122,48 +137,64 @@ func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string)
 		contacts[i].Tags = tagsByContact[contacts[i].ID]
 		contacts[i].Status = statusByContact[contacts[i].ID]
 	}
+	return nil
 }
 
-func (s *Service) Get(id string) (*Contact, error) {
+func (s *Service) get(id string) (*Contact, error) {
 	var c Contact
 	err := s.db.QueryRow(
-		`SELECT id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at FROM contacts WHERE id = $1 AND deleted_at IS NULL`,
+		`SELECT id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at
+		FROM contacts
+		WHERE id = $1 AND deleted_at IS NULL`,
 		id,
-	).Scan(&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt)
+	).Scan(
+		&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}
-	s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
+	if err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID}); err != nil {
+		return nil, err
+	}
 	return &c, nil
 }
 
-func (s *Service) Create(req CreateRequest) (*Contact, error) {
+func (s *Service) create(req CreateRequest) (*Contact, error) {
 	var c Contact
 	err := s.db.QueryRow(
-		`INSERT INTO contacts (name, email, phone, location, age, status_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
+		`INSERT INTO contacts (name, email, phone, location, age, status_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
 		req.Name, util.NullStr(req.Email), util.NullStr(req.Phone), util.NullStr(req.Location), req.Age, req.StatusID,
-	).Scan(&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt)
+	).Scan(
+		&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create contact: %w", err)
 	}
 
 	for _, tagID := range req.TagIDs {
-		_, _ = s.db.Exec(`INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, c.ID, tagID)
+		_, _ = s.db.Exec(
+			`INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			c.ID, tagID,
+		)
 	}
 
-	s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
+	if err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID}); err != nil {
+		return nil, err
+	}
 	return &c, nil
 }
 
-func (s *Service) Update(id string, req UpdateRequest) (*Contact, error) {
-	old, err := s.Get(id)
+func (s *Service) update(id string, req UpdateRequest) (*Contact, error) {
+	old, err := s.get(id)
 	if err != nil {
 		return nil, err
 	}
 
 	var c Contact
-	err = s.db.QueryRow(`
-		UPDATE contacts SET
+	err = s.db.QueryRow(
+		`UPDATE contacts SET
 			name = COALESCE($2, name),
 			email = COALESCE($3, email),
 			phone = COALESCE($4, phone),
@@ -173,8 +204,16 @@ func (s *Service) Update(id string, req UpdateRequest) (*Contact, error) {
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
-		id, req.Name, util.StrPtr(req.Email), util.StrPtr(req.Phone), util.StrPtr(req.Location), req.Age, req.StatusID,
-	).Scan(&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt)
+		id,
+		req.Name,
+		util.StrPtr(req.Email),
+		util.StrPtr(req.Phone),
+		util.StrPtr(req.Location),
+		req.Age,
+		req.StatusID,
+	).Scan(
+		&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("update contact: %w", err)
 	}
@@ -182,11 +221,16 @@ func (s *Service) Update(id string, req UpdateRequest) (*Contact, error) {
 	if req.TagIDs != nil {
 		_, _ = s.db.Exec(`DELETE FROM contact_tags WHERE contact_id = $1`, id)
 		for _, tagID := range req.TagIDs {
-			_, _ = s.db.Exec(`INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, tagID)
+			_, _ = s.db.Exec(
+				`INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				id, tagID,
+			)
 		}
 	}
 
-	s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
+	if err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID}); err != nil {
+		return nil, err
+	}
 
 	changes := diffContact(old, &c)
 	if changes != "" {
@@ -195,7 +239,7 @@ func (s *Service) Update(id string, req UpdateRequest) (*Contact, error) {
 	return &c, nil
 }
 
-func (s *Service) Delete(id string) error {
+func (s *Service) delete(id string) error {
 	_, err := s.db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, id)
 	if err != nil {
 		return err
@@ -275,4 +319,3 @@ func tagsChanged(old, new map[string]bool) bool {
 	}
 	return false
 }
-

@@ -28,6 +28,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 var (
@@ -91,10 +92,10 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		MaxAge:           300,
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
+		MaxAge:         300,
 	}))
 
 	r.Post("/api/auth/login", authH.Login)
@@ -114,6 +115,12 @@ func main() {
 		r.Get("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:read", contactH.Get))
 		r.Patch("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Update))
 		r.Delete("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:delete", contactH.Delete))
+		r.Get("/api/contacts/{id}/notes", middleware.RequirePermission(rbacSvc, "contact:read", contactH.ListNotes))
+		r.Post("/api/contacts/{id}/notes", middleware.RequirePermission(rbacSvc, "contact:write", contactH.CreateNote))
+		r.Delete(
+			"/api/contacts/{id}/notes/{note_id}",
+			middleware.RequirePermission(rbacSvc, "contact:write", contactH.DeleteNote),
+		)
 
 		r.Get("/api/leads", middleware.RequirePermission(rbacSvc, "lead:read", leadH.List))
 		r.Post("/api/leads", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Create))
@@ -122,7 +129,10 @@ func main() {
 
 		r.Get("/api/leads/{id}/activities", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListActivities))
 		r.Post("/api/leads/{id}/activities", middleware.RequirePermission(rbacSvc, "lead:write", leadH.CreateActivity))
-		r.Delete("/api/leads/{id}/activities/{activity_id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DeleteActivity))
+		r.Delete(
+			"/api/leads/{id}/activities/{activity_id}",
+			middleware.RequirePermission(rbacSvc, "lead:write", leadH.DeleteActivity),
+		)
 
 		r.Get("/api/reminders", leadH.PendingReminders)
 		r.Patch("/api/reminders/{id}", leadH.DismissReminder)
@@ -144,13 +154,19 @@ func main() {
 		r.Get("/api/permissions", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.ListPermissions))
 		r.Get("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.GetRolePermissions))
 		r.Post("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.AssignPermission))
-		r.Delete("/api/roles/{id}/permissions/{permission_id}", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.RemovePermission))
+		r.Delete(
+			"/api/roles/{id}/permissions/{permission_id}",
+			middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.RemovePermission),
+		)
 
 		r.Get("/api/users", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.ListUsers))
 		r.Post("/api/users", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.CreateUser))
 		r.Delete("/api/users/{id}", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.DeleteUser))
 		r.Post("/api/users/{id}/roles", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.AssignUserRole))
-		r.Delete("/api/users/{id}/roles/{role_id}", middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.RemoveUserRole))
+		r.Delete(
+			"/api/users/{id}/roles/{role_id}",
+			middleware.RequirePermission(rbacSvc, "rbac:manage", rbacH.RemoveUserRole),
+		)
 
 		r.Get("/api/activity", middleware.RequirePermission(rbacSvc, "activity:read", activityH.List))
 

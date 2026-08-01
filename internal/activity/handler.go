@@ -1,9 +1,10 @@
 package activity
 
 import (
-	"crm/internal/respond"
 	"net/http"
 	"strconv"
+
+	"crm/internal/respond"
 )
 
 type Handler struct {
@@ -30,10 +31,22 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		ResourceType: r.URL.Query().Get("resource_type"),
 	}
 
-	entries, total, err := h.svc.List(page, perPage, filters)
+	entries, total, err := h.svc.list(page, perPage, filters)
 	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
+		respond.JSON(
+			w,
+			http.StatusInternalServerError,
+			nil,
+			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
+			nil,
+		)
 		return
 	}
-	respond.JSON(w, http.StatusOK, entries, nil, &respond.Meta{Page: page, PerPage: perPage, Total: total})
+	respond.JSON(
+		w,
+		http.StatusOK,
+		entries,
+		nil,
+		&respond.Meta{Page: page, PerPage: perPage, Total: total},
+	)
 }

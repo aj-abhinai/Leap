@@ -21,12 +21,12 @@ type App struct {
 }
 
 type DB struct {
-	Host    string `toml:"host"`
-	Port    int    `toml:"port"`
-	User    string `toml:"user"`
+	Host     string `toml:"host"`
+	Port     int    `toml:"port"`
+	User     string `toml:"user"`
 	Password string `toml:"password"`
-	Name    string `toml:"name"`
-	SSLMode string `toml:"sslmode"`
+	Name     string `toml:"name"`
+	SSLMode  string `toml:"sslmode"`
 }
 
 type Auth struct {

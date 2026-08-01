@@ -61,24 +61,28 @@ func seedSuperadmin(db *sql.DB, cfg config.Auth) error {
 
 func seedPermissions(db *sql.DB) error {
 	perms := []struct {
-		name, desc string
+		Name string
+		Desc string
 	}{
-		{"contact:read", "View contacts"},
-		{"contact:write", "Create and update contacts"},
-		{"contact:delete", "Delete contacts"},
-		{"lead:read", "View leads"},
-		{"lead:write", "Create and update leads"},
-		{"lead:delete", "Delete leads"},
-		{"lead:move_stage", "Move leads between pipeline stages"},
-		{"pipeline:manage", "Create/edit pipelines and stages"},
-		{"rbac:manage", "Manage users, roles, permissions"},
-		{"activity:read", "View audit log"},
-		{"activity:manage", "Manage lead activities"},
+		{Name: "contact:read", Desc: "View contacts"},
+		{Name: "contact:write", Desc: "Create and update contacts"},
+		{Name: "contact:delete", Desc: "Delete contacts"},
+		{Name: "lead:read", Desc: "View leads"},
+		{Name: "lead:write", Desc: "Create and update leads"},
+		{Name: "lead:delete", Desc: "Delete leads"},
+		{Name: "lead:move_stage", Desc: "Move leads between pipeline stages"},
+		{Name: "pipeline:manage", Desc: "Create/edit pipelines and stages"},
+		{Name: "rbac:manage", Desc: "Manage users, roles, permissions"},
+		{Name: "activity:read", Desc: "View audit log"},
+		{Name: "activity:manage", Desc: "Manage lead activities"},
 	}
 	for _, p := range perms {
-		_, err := db.Exec(`INSERT INTO permissions (name, description) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING`, p.name, p.desc)
+		_, err := db.Exec(
+			`INSERT INTO permissions (name, description) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING`,
+			p.Name, p.Desc,
+		)
 		if err != nil {
-			return fmt.Errorf("seed permission %s: %w", p.name, err)
+			return fmt.Errorf("seed permission %s: %w", p.Name, err)
 		}
 	}
 	slog.Info("default permissions seeded")
@@ -99,15 +103,27 @@ func seedSuperadminRole(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(`INSERT INTO permissions (name, description) VALUES ('*', 'Wildcard - all permissions') ON CONFLICT (name) DO NOTHING`)
+	_, err = db.Exec(
+		`INSERT INTO permissions (name, description) VALUES ('*', 'Wildcard - all permissions')
+		ON CONFLICT (name) DO NOTHING`,
+	)
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(`INSERT INTO role_permissions (role_id, permission_id) SELECT r.id, p.id FROM roles r, permissions p WHERE r.name = 'superadmin' AND p.name = '*'`)
+	_, err = db.Exec(
+		`INSERT INTO role_permissions (role_id, permission_id)
+		SELECT r.id, p.id FROM roles r, permissions p
+		WHERE r.name = 'superadmin' AND p.name = '*'`,
+	)
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(`INSERT INTO user_roles (user_id, role_id) SELECT u.id, r.id FROM users u, roles r WHERE u.email = $1 AND r.name = 'superadmin' ON CONFLICT DO NOTHING`, email)
+	_, err = db.Exec(
+		`INSERT INTO user_roles (user_id, role_id)
+		SELECT u.id, r.id FROM users u, roles r
+		WHERE u.email = $1 AND r.name = 'superadmin' ON CONFLICT DO NOTHING`,
+		email,
+	)
 	if err != nil {
 		return err
 	}
@@ -117,20 +133,27 @@ func seedSuperadminRole(db *sql.DB) error {
 
 func seedDefaultPipeline(db *sql.DB) error {
 	var exists bool
-	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pipelines WHERE name = 'Default Pipeline')`).Scan(&exists); err != nil {
+	if err := db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM pipelines WHERE name = 'Default Pipeline')`,
+	).Scan(&exists); err != nil {
 		return err
 	}
 	if exists {
 		return nil
 	}
 	var pipelineID string
-	err := db.QueryRow(`INSERT INTO pipelines (name, description) VALUES ('Default Pipeline', 'Default sales pipeline') RETURNING id`).Scan(&pipelineID)
+	err := db.QueryRow(
+		`INSERT INTO pipelines (name, description) VALUES ('Default Pipeline', 'Default sales pipeline') RETURNING id`,
+	).Scan(&pipelineID)
 	if err != nil {
 		return err
 	}
 	stages := []string{"New", "Contacted", "Qualified", "Proposal", "Won", "Lost"}
 	for i, name := range stages {
-		_, err := db.Exec(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, $2, $3)`, pipelineID, name, i)
+		_, err := db.Exec(
+			`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, $2, $3)`,
+			pipelineID, name, i,
+		)
 		if err != nil {
 			return fmt.Errorf("seed stage %s: %w", name, err)
 		}

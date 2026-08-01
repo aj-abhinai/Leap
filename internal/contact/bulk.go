@@ -1,12 +1,5 @@
 package contact
 
-import (
-	"encoding/json"
-	"net/http"
-
-	"crm/internal/respond"
-)
-
 type BulkCreateRequest struct {
 	Contacts []BulkContact `json:"contacts"`
 }
@@ -30,7 +23,7 @@ type BulkRowError struct {
 	Message string `json:"message"`
 }
 
-func (s *Service) BulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error) {
+func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error) {
 	resp := &BulkCreateResponse{}
 	for i, c := range req.Contacts {
 		if c.Name == "" {
@@ -46,7 +39,7 @@ func (s *Service) BulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 				tagIDs = append(tagIDs, tagID)
 			}
 		}
-		_, err := s.Create(CreateRequest{
+		_, err := s.create(CreateRequest{
 			Name:     c.Name,
 			Email:    c.Email,
 			Phone:    c.Phone,
@@ -61,26 +54,4 @@ func (s *Service) BulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 		resp.Imported++
 	}
 	return resp, nil
-}
-
-func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
-	var req BulkCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.JSON(w, http.StatusBadRequest, nil, &respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"}, nil)
-		return
-	}
-	if len(req.Contacts) == 0 {
-		respond.JSON(w, http.StatusBadRequest, nil, &respond.Error{Code: "BAD_REQUEST", Message: "no contacts provided"}, nil)
-		return
-	}
-	if len(req.Contacts) > 500 {
-		respond.JSON(w, http.StatusBadRequest, nil, &respond.Error{Code: "BAD_REQUEST", Message: "maximum 500 contacts per import"}, nil)
-		return
-	}
-	resp, err := h.svc.BulkCreate(req)
-	if err != nil {
-		respond.JSON(w, http.StatusInternalServerError, nil, &respond.Error{Code: "INTERNAL", Message: "An internal error occurred"}, nil)
-		return
-	}
-	respond.JSON(w, http.StatusOK, resp, nil, nil)
 }

@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func Connect(cfg config.DB) (*sql.DB, error) {

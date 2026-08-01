@@ -14,7 +14,7 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) List(page, perPage int, filters ActivityFilters) ([]Entry, int, error) {
+func (s *Service) list(page, perPage int, filters ActivityFilters) ([]Entry, int, error) {
 	var total int
 	baseWhere := "WHERE 1=1"
 	args := []any{}
@@ -67,7 +67,17 @@ func (s *Service) List(page, perPage int, filters ActivityFilters) ([]Entry, int
 	for rows.Next() {
 		var e Entry
 		var changes []byte
-		if err := rows.Scan(&e.ID, &e.Description, &e.UserID, &e.UserName, &e.Action, &e.ResourceType, &e.ResourceID, &changes, &e.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&e.ID,
+			&e.Description,
+			&e.UserID,
+			&e.UserName,
+			&e.Action,
+			&e.ResourceType,
+			&e.ResourceID,
+			&changes,
+			&e.CreatedAt,
+		); err != nil {
 			return nil, 0, err
 		}
 		if len(changes) > 0 {
@@ -78,5 +88,3 @@ func (s *Service) List(page, perPage int, filters ActivityFilters) ([]Entry, int
 	}
 	return entries, total, nil
 }
-
-

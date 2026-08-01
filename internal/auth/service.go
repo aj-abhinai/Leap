@@ -22,7 +22,7 @@ func NewService(db *sql.DB, cfg config.Auth) *Service {
 	return &Service{db: db, cfg: cfg}
 }
 
-func (s *Service) Login(email, password string) (*TokenResponse, error) {
+func (s *Service) login(email, password string) (*TokenResponse, error) {
 	var u User
 	err := s.db.QueryRow(
 		`SELECT id, name, email, password_hash FROM users WHERE email = $1 AND deleted_at IS NULL`,
@@ -37,7 +37,7 @@ func (s *Service) Login(email, password string) (*TokenResponse, error) {
 	return s.generateTokenPair(u.ID)
 }
 
-func (s *Service) Refresh(refreshToken string) (*TokenResponse, error) {
+func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {
 	hash := hashToken(refreshToken)
 
 	tx, err := s.db.Begin()
@@ -72,14 +72,9 @@ func (s *Service) Refresh(refreshToken string) (*TokenResponse, error) {
 	return s.generateTokenPair(userID)
 }
 
-func (s *Service) Logout(refreshToken string) error {
+func (s *Service) logout(refreshToken string) error {
 	hash := hashToken(refreshToken)
 	_, err := s.db.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)
-	return err
-}
-
-func (s *Service) RevokeUserTokens(userID string) error {
-	_, err := s.db.Exec(`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1`, userID)
 	return err
 }
 
@@ -145,10 +140,12 @@ func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 	return sub, nil
 }
 
-func (s *Service) GetUser(userID string) (*User, error) {
+func (s *Service) getUser(userID string) (*User, error) {
 	var u User
 	err := s.db.QueryRow(
-		`SELECT id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at, updated_at FROM users WHERE id = $1 AND deleted_at IS NULL`,
+		`SELECT id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at, updated_at
+		FROM users
+		WHERE id = $1 AND deleted_at IS NULL`,
 		userID,
 	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
@@ -157,7 +154,7 @@ func (s *Service) GetUser(userID string) (*User, error) {
 	return &u, nil
 }
 
-func (s *Service) UpdateProfile(userID string, req UpdateProfileRequest) (*User, error) {
+func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*User, error) {
 	var u User
 	err := s.db.QueryRow(`
 		UPDATE users SET
