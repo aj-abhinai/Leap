@@ -3,27 +3,28 @@ package middleware
 import (
 	"context"
 	"crm/internal/ctxutil"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
-func TestRequirePermissionUnauthorized(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("handler should not be called when unauthorized")
-	})
+type fakePermissionChecker struct {
+	perms []string
+	err   error
+}
 
+func (f fakePermissionChecker) GetUserPermissions(string) ([]string, error) {
+	return f.perms, f.err
+}
+
+func TestRequirePermissionUnauthenticated(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called when unauthenticated")
+	}
+	mw := RequirePermission(fakePermissionChecker{}, "contact:read", handler)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
-
-	mw := func(w http.ResponseWriter, r *http.Request) {
-		userID := ctxutil.GetUserID(r)
-		if userID == "" {
-			http.Error(w, `{"error":{"code":"UNAUTHORIZED"}}`, http.StatusUnauthorized)
-			return
-		}
-		handler(w, r)
-	}
 
 	mw(rr, req)
 	if rr.Code != http.StatusUnauthorized {
@@ -31,32 +32,39 @@ func TestRequirePermissionUnauthorized(t *testing.T) {
 	}
 }
 
-func TestRequirePermissionDenied(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("handler should not be called")
-	})
-
+func TestRequirePermissionLookupFailure(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called when lookup fails")
+	}
+	mw := RequirePermission(
+		fakePermissionChecker{err: errors.New("database down")},
+		"contact:read",
+		handler,
+	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, "user-1")
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
-	mw := func(w http.ResponseWriter, r *http.Request) {
-		userID := ctxutil.GetUserID(r)
-		if userID == "" {
-			http.Error(w, `{"error":{"code":"UNAUTHORIZED"}}`, http.StatusUnauthorized)
-			return
-		}
-		perms := []string{"contact:read"}
-		required := "lead:write"
-		for _, p := range perms {
-			if p == "*" || p == required {
-				handler(w, r)
-				return
-			}
-		}
-		http.Error(w, `{"error":{"code":"FORBIDDEN"}}`, http.StatusForbidden)
+	mw(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", rr.Code)
 	}
+}
+
+func TestRequirePermissionDenied(t *testing.T) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called without the required permission")
+	}
+	mw := RequirePermission(
+		fakePermissionChecker{perms: []string{"contact:read"}},
+		"lead:write",
+		handler,
+	)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, "user-1")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
 
 	mw(rr, req)
 	if rr.Code != http.StatusForbidden {
@@ -64,62 +72,48 @@ func TestRequirePermissionDenied(t *testing.T) {
 	}
 }
 
-func TestRequirePermissionWildcard(t *testing.T) {
+func TestRequirePermissionAllowed(t *testing.T) {
 	var called bool
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusOK)
-	})
-
+	}
+	mw := RequirePermission(
+		fakePermissionChecker{perms: []string{"contact:read", "lead:write"}},
+		"lead:write",
+		handler,
+	)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, "user-1")
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
-	mw := func(w http.ResponseWriter, r *http.Request) {
-		perms := []string{"*"}
-		required := "lead:write"
-		for _, p := range perms {
-			if p == "*" || p == required {
-				handler(w, r)
-				return
-			}
-		}
-		http.Error(w, `{"error":{"code":"FORBIDDEN"}}`, http.StatusForbidden)
-	}
-
 	mw(rr, req)
 	if !called {
-		t.Error("handler should have been called with wildcard")
+		t.Fatal("handler should have been called with matching permission")
+	}
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
 	}
 }
 
-func TestRequirePermissionAllowed(t *testing.T) {
+func TestRequirePermissionWildcard(t *testing.T) {
 	var called bool
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusOK)
-	})
-
+	}
+	mw := RequirePermission(fakePermissionChecker{perms: []string{"*"}}, "lead:write", handler)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, "user-1")
 	req = req.WithContext(ctx)
 	rr := httptest.NewRecorder()
 
-	mw := func(w http.ResponseWriter, r *http.Request) {
-		perms := []string{"contact:read", "lead:write"}
-		required := "lead:write"
-		for _, p := range perms {
-			if p == "*" || p == required {
-				handler(w, r)
-				return
-			}
-		}
-		http.Error(w, `{"error":{"code":"FORBIDDEN"}}`, http.StatusForbidden)
-	}
-
 	mw(rr, req)
 	if !called {
-		t.Error("handler should have been called with matching permission")
+		t.Fatal("handler should have been called with wildcard permission")
+	}
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
 	}
 }

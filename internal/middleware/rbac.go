@@ -2,12 +2,18 @@ package middleware
 
 import (
 	"crm/internal/ctxutil"
-	"crm/internal/rbac"
 	"crm/internal/respond"
 	"net/http"
 )
 
-func RequirePermission(rbacSvc *rbac.Service, permission string, next http.HandlerFunc) http.HandlerFunc {
+// PermissionChecker resolves the permission names granted to a user.
+// *rbac.Service satisfies it; a fake implementation avoids a database in
+// middleware unit tests.
+type PermissionChecker interface {
+	GetUserPermissions(userID string) ([]string, error)
+}
+
+func RequirePermission(rbacSvc PermissionChecker, permission string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := ctxutil.GetUserID(r)
 		if userID == "" {

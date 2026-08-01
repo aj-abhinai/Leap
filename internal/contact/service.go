@@ -74,7 +74,8 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 	}
 
 	if len(contacts) > 0 {
-		if err := s.populateTagsAndStatus(contacts, contactIDs); err != nil {
+		contacts, err = s.populateTagsAndStatus(contacts, contactIDs)
+		if err != nil {
 			return nil, 0, err
 		}
 	}
@@ -82,7 +83,7 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 	return contacts, total, nil
 }
 
-func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string) error {
+func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string) ([]Contact, error) {
 	tagsByContact := make(map[string][]TagRef, len(contactIDs))
 	statusByContact := make(map[string]*TagRef)
 
@@ -99,34 +100,34 @@ func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string)
 		contactIDs,
 	)
 	if err != nil {
-		return fmt.Errorf("load contact tags: %w", err)
+		return contacts, fmt.Errorf("load contact tags: %w", err)
 	}
 	defer tagRows.Close()
 	for tagRows.Next() {
 		var contactID string
 		var ref TagRef
 		if err := tagRows.Scan(&contactID, &ref.ID, &ref.Name, &ref.Color); err != nil {
-			return fmt.Errorf("scan contact tag: %w", err)
+			return contacts, fmt.Errorf("scan contact tag: %w", err)
 		}
 		tagsByContact[contactID] = append(tagsByContact[contactID], ref)
 	}
 
 	statusRows, err := s.db.Query(
-		`SELECT c.id, t.id, t.name, COALESCE(t.color, '')
+		`SELECT c.id, COALESCE(t.id::text, ''), COALESCE(t.name, ''), COALESCE(t.color, '')
 		FROM contacts c
 		LEFT JOIN tags t ON t.id = c.status_id
 		WHERE c.id = ANY($1)`,
 		contactIDs,
 	)
 	if err != nil {
-		return fmt.Errorf("load contact statuses: %w", err)
+		return contacts, fmt.Errorf("load contact statuses: %w", err)
 	}
 	defer statusRows.Close()
 	for statusRows.Next() {
 		var contactID string
 		var ref TagRef
 		if err := statusRows.Scan(&contactID, &ref.ID, &ref.Name, &ref.Color); err != nil {
-			return fmt.Errorf("scan contact status: %w", err)
+			return contacts, fmt.Errorf("scan contact status: %w", err)
 		}
 		if ref.ID != "" {
 			statusByContact[contactID] = &ref
@@ -137,7 +138,7 @@ func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string)
 		contacts[i].Tags = tagsByContact[contacts[i].ID]
 		contacts[i].Status = statusByContact[contacts[i].ID]
 	}
-	return nil
+	return contacts, nil
 }
 
 func (s *Service) get(id string) (*Contact, error) {
@@ -153,10 +154,11 @@ func (s *Service) get(id string) (*Contact, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID}); err != nil {
+	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
+	if err != nil {
 		return nil, err
 	}
-	return &c, nil
+	return &populated[0], nil
 }
 
 func (s *Service) create(req CreateRequest) (*Contact, error) {
@@ -180,10 +182,11 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 		)
 	}
 
-	if err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID}); err != nil {
+	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
+	if err != nil {
 		return nil, err
 	}
-	return &c, nil
+	return &populated[0], nil
 }
 
 func (s *Service) update(id string, req UpdateRequest) (*Contact, error) {
@@ -228,9 +231,11 @@ func (s *Service) update(id string, req UpdateRequest) (*Contact, error) {
 		}
 	}
 
-	if err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID}); err != nil {
+	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
+	if err != nil {
 		return nil, err
 	}
+	c = populated[0]
 
 	changes := diffContact(old, &c)
 	if changes != "" {
