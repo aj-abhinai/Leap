@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { shallowRef, onMounted } from 'vue'
 import { useActivityStore } from '@/stores/activity'
 import { useRBACStore } from '@/stores/rbac'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
@@ -23,9 +23,9 @@ import { RefreshCw, User, Shield, Layers, Activity, Settings } from '@lucide/vue
 
 const activity = useActivityStore()
 const rbac = useRBACStore()
-const activityPage = ref(1)
+const activityPage = shallowRef(1)
 
-const permissionsLoaded = ref(false)
+const permissionsLoaded = shallowRef(false)
 
 onMounted(async () => {
   await rbac.fetchPermissions()

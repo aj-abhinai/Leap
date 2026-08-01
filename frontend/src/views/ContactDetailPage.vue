@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useContactsStore, type Contact } from '@/stores/contacts'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
@@ -15,17 +15,19 @@ import {
 } from '@/components/ui/sheet'
 import ContactForm from '@/components/contacts/ContactForm.vue'
 import ContactLeadJourney from '@/components/contacts/ContactLeadJourney.vue'
+import ContactNotes from '@/components/contacts/ContactNotes.vue'
 import { Mail, Phone, MapPin, ArrowLeft, Pencil } from '@lucide/vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
+import { getAvatarColor, getInitials } from '@/utils/avatar'
 
 const route = useRoute()
 const router = useRouter()
 const store = useContactsStore()
 
 const contact = ref<Contact | null>(null)
-const loading = ref(true)
-const drawerOpen = ref(false)
+const loading = shallowRef(true)
+const drawerOpen = shallowRef(false)
 
 onMounted(async () => {
   const id = route.params.id as string
@@ -47,31 +49,6 @@ async function handleSave(body: Record<string, any>) {
   } catch (e: any) {
     toast.error(e.message || 'Failed to update contact')
   }
-}
-
-function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map(n => n.charAt(0))
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
-}
-
-function getAvatarColor(name: string): string {
-  const colors = [
-    'bg-blue-100 text-blue-700',
-    'bg-emerald-100 text-emerald-700',
-    'bg-amber-100 text-amber-700',
-    'bg-violet-100 text-violet-700',
-    'bg-rose-100 text-rose-700',
-    'bg-cyan-100 text-cyan-700',
-  ]
-  let hash = 0
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  return colors[Math.abs(hash) % colors.length]
 }
 </script>
 

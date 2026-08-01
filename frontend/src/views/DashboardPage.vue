@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, shallowRef } from 'vue'
 import { useContactsStore } from '@/stores/contacts'
 import { useLeadsStore } from '@/stores/leads'
 import { useActivityStore } from '@/stores/activity'
@@ -7,11 +7,12 @@ import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Users, FolderOpen, CheckCircle2, TrendingUp, Calendar, Phone, Mail, UserPlus } from '@lucide/vue'
+import { timeAgo } from '@/utils/time'
 
 const contactsStore = useContactsStore()
 const leadsStore = useLeadsStore()
 const activity = useActivityStore()
-const loading = ref(true)
+const loading = shallowRef(true)
 
 onMounted(async () => {
   try {
@@ -24,21 +25,6 @@ onMounted(async () => {
     loading.value = false
   }
 })
-
-function timeAgo(dateStr: string): string {
-  if (!dateStr) return ''
-  const then = new Date(dateStr).getTime()
-  if (isNaN(then)) return ''
-  const now = Date.now()
-  const diff = now - then
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
 
 function activityIcon(action: string) {
   const a = action.toLowerCase()

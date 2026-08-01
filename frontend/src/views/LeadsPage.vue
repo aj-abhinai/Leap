@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiClient } from '@/composables/useApi'
-import { usePipelineStore } from '@/stores/pipeline'
-import { useLeadsStore, type Lead } from '@/stores/leads'
-import { toast } from 'vue-sonner'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -24,37 +21,43 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import LeadKanban from '@/components/leads/LeadKanban.vue'
-import LeadForm, { type PrefillContact } from '@/components/leads/LeadForm.vue'
+import LeadForm from '@/components/leads/LeadForm.vue'
 import LeadActivity from '@/components/leads/LeadActivity.vue'
 import LeadActivityForm from '@/components/leads/LeadActivityForm.vue'
 import { Plus, Layers } from '@lucide/vue'
+import { useLeadPipeline } from '@/composables/useLeadPipeline'
+import { useLeadDrawer } from '@/composables/useLeadDrawer'
+import { useActivityDrawer } from '@/composables/useActivityDrawer'
 
 const route = useRoute()
-const pipelineStore = usePipelineStore()
-const leadsStore = useLeadsStore()
 
-const selectedPipelineId = ref('')
+const {
+  pipelineStore,
+  leadsStore,
+  selectedPipelineId,
+  selectedPipeline,
+  kanbanColumns,
+  loadLeads,
+  moveStage,
+} = useLeadPipeline()
 
-const selectedPipeline = computed(() =>
-  pipelineStore.pipelines.find((p) => p.id === selectedPipelineId.value)
-)
+const {
+  drawerOpen,
+  editingLead,
+  initialStageId,
+  prefillContact,
+  openCreate,
+  openEdit,
+  handleSave,
+  deleteLead,
+} = useLeadDrawer(loadLeads)
 
-const kanbanColumns = computed(() => {
-  if (!selectedPipeline.value?.stages) return []
-  return selectedPipeline.value.stages.map((stage) => ({
-    ...stage,
-    leads: leadsStore.leads.filter((l) => l.stage_id === stage.id),
-  }))
-})
-
-const drawerOpen = ref(false)
-const editingLead = ref<Lead | null>(null)
-const initialStageId = ref<string | undefined>(undefined)
-const prefillContact = ref<PrefillContact | null>(null)
-
-const activityDrawerOpen = ref(false)
-const activityLead = ref<Lead | null>(null)
-const activityRef = ref<InstanceType<typeof LeadActivity> | null>(null)
+const {
+  activityDrawerOpen,
+  activityLead,
+  activityRef,
+  openActivities,
+} = useActivityDrawer()
 
 onMounted(async () => {
   await pipelineStore.fetchPipelines()
@@ -81,80 +84,6 @@ onMounted(async () => {
     } catch {}
   }
 })
-
-async function loadLeads() {
-  if (!selectedPipelineId.value) return
-  try {
-    await leadsStore.fetchLeads(selectedPipelineId.value, '', 1, 100)
-  } catch {
-    toast.error('Failed to load leads')
-  }
-}
-
-function openCreate(stageId?: string) {
-  editingLead.value = null
-  prefillContact.value = null
-  initialStageId.value = stageId
-  drawerOpen.value = true
-}
-
-function openEdit(lead: Lead) {
-  editingLead.value = lead
-  initialStageId.value = undefined
-  drawerOpen.value = true
-}
-
-function openActivities(lead: Lead) {
-  activityLead.value = lead
-  activityDrawerOpen.value = true
-}
-
-async function handleSave(body: Record<string, any>) {
-  try {
-    if (editingLead.value) {
-      await apiClient.patch(`/api/leads/${editingLead.value.id}`, body)
-      toast.success('Lead updated')
-    } else {
-      await apiClient.post('/api/leads', body)
-      toast.success('Lead created')
-    }
-    drawerOpen.value = false
-    loadLeads()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to save lead')
-  }
-}
-
-async function moveStage(leadId: string, newStageId: string, previousStageId?: string) {
-  try {
-    await apiClient.patch(`/api/leads/${leadId}`, { stage_id: newStageId })
-    toast.success('Lead moved', {
-      action: previousStageId ? {
-        label: 'Undo',
-        onClick: async () => {
-          await apiClient.patch(`/api/leads/${leadId}`, { stage_id: previousStageId })
-          await loadLeads()
-        },
-      } : undefined,
-      duration: 5000,
-    })
-    loadLeads()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to move lead')
-    loadLeads()
-  }
-}
-
-async function deleteLead(leadId: string) {
-  try {
-    await apiClient.delete(`/api/leads/${leadId}`)
-    toast.success('Lead deleted')
-    drawerOpen.value = false
-    loadLeads()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to delete lead')
-  }
-}
 </script>
 
 <template>

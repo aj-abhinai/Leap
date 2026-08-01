@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { BellOff, Phone, MessageCircle, NotepadText, X } from '@lucide/vue'
+import { formatDateTime } from '@/utils/time'
 
 const store = useRemindersStore()
 
@@ -27,10 +28,6 @@ function formatText(r: Reminder): string {
     case 'wa_message': return `WhatsApp: ${r.description || 'Send message'}`
     default: return r.description || 'Reminder'
   }
-}
-
-function formatDate(date: string): string {
-  return new Date(date).toLocaleString()
 }
 </script>
 
@@ -58,10 +55,10 @@ function formatDate(date: string): string {
                 <div>
                   <p class="font-medium text-sm">{{ formatText(reminder) }}</p>
                   <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-                    <span v-if="reminder.scheduled_at">Scheduled: {{ formatDate(reminder.scheduled_at) }}</span>
-                    <span v-if="reminder.remind_at" class="text-amber-600">Reminder: {{ formatDate(reminder.remind_at) }}</span>
+                    <span v-if="reminder.scheduled_at">Scheduled: {{ formatDateTime(reminder.scheduled_at) }}</span>
+                    <span v-if="reminder.remind_at" class="text-amber-600">Reminder: {{ formatDateTime(reminder.remind_at) }}</span>
                   </div>
-                  <p class="text-xs text-muted-foreground mt-1">Created {{ formatDate(reminder.created_at) }}</p>
+                  <p class="text-xs text-muted-foreground mt-1">Created {{ formatDateTime(reminder.created_at) }}</p>
                 </div>
               </div>
               <Button variant="ghost" size="icon-sm" class="shrink-0" @click="store.dismissReminder(reminder.id)" title="Dismiss">

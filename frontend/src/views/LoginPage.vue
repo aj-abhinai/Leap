@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
@@ -11,10 +11,10 @@ import { Loader2, LogIn } from '@lucide/vue'
 const router = useRouter()
 const auth = useAuthStore()
 
-const email = ref('')
-const password = ref('')
-const error = ref('')
-const loading = ref(false)
+const email = shallowRef('')
+const password = shallowRef('')
+const error = shallowRef('')
+const loading = shallowRef(false)
 
 async function handleSubmit() {
   error.value = ''

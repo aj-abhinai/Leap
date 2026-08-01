@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { shallowRef } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from 'vue-sonner'
 import { profileSchema } from '@/lib/validation'
@@ -12,11 +12,11 @@ import { Loader2, User } from '@lucide/vue'
 
 const auth = useAuthStore()
 
-const formName = ref(auth.user?.name || '')
-const formEmail = ref(auth.user?.email || '')
-const formPhone = ref(auth.user?.phone || '')
-const error = ref('')
-const saving = ref(false)
+const formName = shallowRef(auth.user?.name || '')
+const formEmail = shallowRef(auth.user?.email || '')
+const formPhone = shallowRef(auth.user?.phone || '')
+const error = shallowRef('')
+const saving = shallowRef(false)
 
 async function handleSave() {
   error.value = ''
