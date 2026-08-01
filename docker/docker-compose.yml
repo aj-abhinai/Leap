@@ -14,8 +14,9 @@ services:
       DB_USER: ${DB_USER:-crm}
       DB_PASSWORD: ${DB_PASSWORD:-crm}
       DB_NAME: ${DB_NAME:-crm}
+      APP_ENV: ${APP_ENV:-development}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-admin@crm.local}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-admin@admin.com}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-admin}
     command: ["./crm", "--config", "config.toml"]
     healthcheck:

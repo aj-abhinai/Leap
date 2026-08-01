@@ -11,6 +11,7 @@ const validTOML = `
 [app]
 port = 9000
 name = "CRM"
+environment = "development"
 
 [db]
 host = "localhost"
@@ -28,8 +29,8 @@ refresh_token_ttl = "168h"
 bcrypt_cost = 12
 
 [superadmin]
-email = "dev@crm.local"
-password = "dev-admin-password"
+ email = "admin@admin.com"
+ password = "admin"
 
 [log]
 level = "info"
@@ -48,7 +49,7 @@ func writeTemp(t *testing.T, content string) string {
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"APP_PORT", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE",
+		"APP_ENV", "APP_PORT", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE",
 		"JWT_SECRET", "JWT_ISSUER", "SUPERADMIN_EMAIL", "SUPERADMIN_PASSWORD",
 	} {
 		t.Setenv(k, "")
@@ -132,8 +133,9 @@ func TestInvalidEnvPortFails(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	cfg := &Config{}
-	cfg.Superadmin.Email = "dev@crm.local"
-	cfg.Superadmin.Password = "dev-admin-password"
+	cfg.App.Environment = "development"
+	cfg.Superadmin.Email = "admin@admin.com"
+	cfg.Superadmin.Password = "admin"
 
 	tests := []struct {
 		name   string
@@ -162,11 +164,10 @@ func TestValidate(t *testing.T) {
 		password string
 		wantOK   bool
 	}{
-		{name: "default email", email: "admin@crm.local", password: "dev-admin-password", wantOK: false},
-		{name: "default password", email: "dev@crm.local", password: "admin", wantOK: false},
-		{name: "placeholder password", email: "dev@crm.local", password: "change-me", wantOK: false},
-		{name: "short password", email: "dev@crm.local", password: "short", wantOK: false},
-		{name: "valid", email: "dev@crm.local", password: "dev-admin-password", wantOK: true},
+		{name: "legacy default email", email: "admin@crm.local", password: "admin", wantOK: false},
+		{name: "placeholder password", email: "admin@admin.com", password: "change-me", wantOK: false},
+		{name: "short password", email: "admin@admin.com", password: "short", wantOK: false},
+		{name: "development credentials", email: "admin@admin.com", password: "admin", wantOK: true},
 	}
 	for _, tt := range testsSuperadmin {
 		t.Run(tt.name, func(t *testing.T) {
@@ -177,6 +178,13 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("Validate(email=%q, pass=%q) err = %v, wantOK %v", tt.email, tt.password, err, tt.wantOK)
 			}
 		})
+	}
+
+	cfg.App.Environment = "production"
+	cfg.Superadmin.Email = "admin@admin.com"
+	cfg.Superadmin.Password = "admin"
+	if err := Validate(*cfg); err == nil {
+		t.Fatal("production should reject development credentials")
 	}
 }
 

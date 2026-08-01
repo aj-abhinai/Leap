@@ -1,6 +1,7 @@
 [app]
 port = 9000
 name = "CRM"
+environment = "development"
 
 [db]
 host = "localhost"
@@ -18,8 +19,8 @@ refresh_token_ttl = "168h"
 bcrypt_cost = 12
 
 [superadmin]
-email = "dev@crm.local"
-password = "dev-admin-password"
+email = "admin@admin.com"
+password = "admin"
 
 [log]
 level = "info"

@@ -50,7 +50,7 @@ async function handleSubmit() {
         <form @submit.prevent="handleSubmit" class="space-y-4">
           <div class="space-y-2">
             <Label for="email">Email</Label>
-            <Input id="email" v-model="email" type="email" placeholder="admin@crm.local" autocomplete="email" />
+            <Input id="email" v-model="email" type="email" placeholder="admin@admin.com" autocomplete="email" />
           </div>
           <div class="space-y-2">
             <Label for="password">Password</Label>

@@ -15,7 +15,6 @@ interface LoginResponse {
   expires_at: number
 }
 
-const REFRESH_COOKIE = 'crm_refresh'
 const CSRF_COOKIE = 'crm_csrf'
 
 function getCookie(name: string): string {
@@ -105,7 +104,9 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function bootstrap() {
-    if (!getCookie(REFRESH_COOKIE)) {
+    // The refresh token is HttpOnly and cannot be inspected from JavaScript.
+    // The CSRF cookie is readable and is required for the refresh request.
+    if (!getCookie(CSRF_COOKIE)) {
       clear()
       return
     }

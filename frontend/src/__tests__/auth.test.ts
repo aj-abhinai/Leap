@@ -88,7 +88,7 @@ describe('auth store', () => {
     expect(auth.isAuthenticated).toBe(false)
   })
 
-  it('bootstrap clears state without fetching when no refresh cookie exists', async () => {
+  it('bootstrap clears state without fetching when no CSRF cookie exists', async () => {
     document.cookie = 'crm_csrf=; Max-Age=-1'
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -99,6 +99,23 @@ describe('auth store', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     expect(auth.accessToken).toBeNull()
     expect(auth.isAuthenticated).toBe(false)
+  })
+
+  it('restores the session during bootstrap with the CSRF cookie', async () => {
+    const fetchMock = vi.fn()
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: { access_token: accessToken, expires_at: 999 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'u1', name: 'Alice', email: 'a@b.c' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const auth = useAuthStore()
+    await auth.bootstrap()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/refresh')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/auth/me')
+    expect(auth.isAuthenticated).toBe(true)
+    expect(auth.user?.id).toBe('u1')
   })
 
   it('failed refresh clears state', async () => {

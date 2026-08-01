@@ -34,9 +34,10 @@ dev-backend:
       exit 1
     fi
     # Explicit local-only secrets so the fail-fast validation passes.
+    export APP_ENV="${APP_ENV:-development}"
     export JWT_SECRET="${JWT_SECRET:-dev-only-jwt-secret-0123456789abcdef}"
-    export SUPERADMIN_EMAIL="${SUPERADMIN_EMAIL:-dev@crm.local}"
-    export SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-dev-admin-password}"
+    export SUPERADMIN_EMAIL="${SUPERADMIN_EMAIL:-admin@admin.com}"
+    export SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-admin}"
     go run ./cmd/server/ -config {{config}}
 
 # Same as dev-backend

@@ -89,14 +89,12 @@ func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
 	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM roles WHERE name = 'superadmin')`).Scan(&exists); err != nil {
 		return err
 	}
-	if exists {
-		return nil
+	if !exists {
+		if _, err := db.Exec(`INSERT INTO roles (name, description) VALUES ('superadmin', 'Full system access')`); err != nil {
+			return err
+		}
 	}
-	_, err := db.Exec(`INSERT INTO roles (name, description) VALUES ('superadmin', 'Full system access')`)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(
+	_, err := db.Exec(
 		`INSERT INTO permissions (name, description) VALUES ('*', 'Wildcard - all permissions')
 		ON CONFLICT (name) DO NOTHING`,
 	)
@@ -106,7 +104,8 @@ func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
 	_, err = db.Exec(
 		`INSERT INTO role_permissions (role_id, permission_id)
 		SELECT r.id, p.id FROM roles r, permissions p
-		WHERE r.name = 'superadmin' AND p.name = '*'`,
+		WHERE r.name = 'superadmin' AND p.name = '*'
+		ON CONFLICT DO NOTHING`,
 	)
 	if err != nil {
 		return err

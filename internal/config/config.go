@@ -19,8 +19,9 @@ type Config struct {
 }
 
 type App struct {
-	Port int    `toml:"port"`
-	Name string `toml:"name"`
+	Port        int    `toml:"port"`
+	Name        string `toml:"name"`
+	Environment string `toml:"environment"`
 }
 
 type DB struct {
@@ -71,8 +72,11 @@ func Load(path string) (*Config, error) {
 }
 
 func setDefaults(cfg *Config) {
+	if cfg.App.Environment == "" {
+		cfg.App.Environment = "production"
+	}
 	if cfg.Superadmin.Email == "" {
-		cfg.Superadmin.Email = "admin@crm.local"
+		cfg.Superadmin.Email = "admin@admin.com"
 	}
 	if cfg.Superadmin.Password == "" {
 		cfg.Superadmin.Password = "admin"
@@ -100,6 +104,7 @@ func applyEnvironment(cfg *Config) error {
 	setString(&cfg.DB.Password, "DB_PASSWORD")
 	setString(&cfg.DB.Name, "DB_NAME")
 	setString(&cfg.DB.SSLMode, "DB_SSLMODE")
+	setString(&cfg.App.Environment, "APP_ENV")
 	setString(&cfg.Auth.JWTSecret, "JWT_SECRET")
 	setString(&cfg.Auth.JWTIssuer, "JWT_ISSUER")
 	setString(&cfg.Superadmin.Email, "SUPERADMIN_EMAIL")
@@ -133,15 +138,19 @@ func Validate(cfg Config) error {
 	}
 
 	email := strings.TrimSpace(cfg.Superadmin.Email)
-	if email == "" || strings.EqualFold(email, "admin@crm.local") || !strings.Contains(email, "@") {
+	development := strings.EqualFold(strings.TrimSpace(cfg.App.Environment), "development") ||
+		strings.EqualFold(strings.TrimSpace(cfg.App.Environment), "dev")
+	if email == "" || strings.EqualFold(email, "admin@crm.local") ||
+		(!development && strings.EqualFold(email, "admin@admin.com")) || !strings.Contains(email, "@") {
 		return fmt.Errorf("superadmin.email must be an explicit non-placeholder email")
 	}
 
 	password := strings.TrimSpace(cfg.Superadmin.Password)
-	if password == "" || isPlaceholder(password) {
+	developmentPassword := development && strings.EqualFold(password, "admin")
+	if password == "" || (isPlaceholder(password) && !developmentPassword) {
 		return fmt.Errorf("superadmin.password must be an explicit non-placeholder value")
 	}
-	if len(password) < 12 {
+	if len(password) < 12 && !developmentPassword {
 		return fmt.Errorf("superadmin.password must be at least 12 characters")
 	}
 	return nil
@@ -165,6 +174,7 @@ func WriteTemplate(path string) error {
 [app]
 port = 9000
 name = "CRM"
+environment = "production"
 
 [db]
 host = "localhost"

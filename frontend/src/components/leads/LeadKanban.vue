@@ -27,8 +27,6 @@ const emit = defineEmits<{
   viewActivities: [lead: Lead]
 }>()
 
-let dragSourceStageId: string | null = null
-
 const stageColors: Record<number, string> = {
   0: 'border-l-blue-400',
   1: 'border-l-amber-400',
@@ -50,17 +48,13 @@ const moveTargets = computed<Record<string, Stage[]>>(() => {
   return map
 })
 
-function onDragStart(stageId: string) {
-  dragSourceStageId = stageId
-}
-
-function handleDragChange(evt: { added?: { element: Lead }; moved?: { element: Lead } }, newStageId: string) {
+function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string) {
   if (evt.added) {
-    emit('moveStage', evt.added.element.id!, newStageId, dragSourceStageId!)
-  } else if (evt.moved) {
-    emit('moveStage', evt.moved.element.id!, newStageId, dragSourceStageId!)
+    const previousStageId = evt.added.element.stage_id
+    if (previousStageId !== newStageId) {
+      emit('moveStage', evt.added.element.id!, newStageId, previousStageId)
+    }
   }
-  dragSourceStageId = null
 }
 </script>
 
@@ -90,7 +84,6 @@ function handleDragChange(evt: { added?: { element: Lead }; moved?: { element: L
         drag-class="shadow-xl rotate-1 z-50"
         :animation="200"
         :sort="false"
-        @start="onDragStart(col.id)"
         @change="(evt: any) => handleDragChange(evt, col.id)"
       >
         <template #item="{ element: lead }">

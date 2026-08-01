@@ -4,8 +4,22 @@ import (
 	"crm/internal/auth"
 	"crm/internal/util"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+)
+
+var (
+	// ErrSelfDelete is returned when an actor targets their own account.
+	ErrSelfDelete = errors.New("a user cannot delete their own account")
+
+	// ErrSuperadminUserProtected is returned when an operation would delete
+	// the seeded superadmin user or the user holding the superadmin role.
+	ErrSuperadminUserProtected = errors.New("the superadmin user cannot be deleted")
+
+	// ErrSuperadminRoleProtected is returned when an operation would delete,
+	// rename, or strip the wildcard permission from the superadmin role.
+	ErrSuperadminRoleProtected = errors.New("the superadmin role is protected")
 )
 
 type Service struct {
@@ -40,14 +54,56 @@ func (s *Service) listRoles() ([]Role, error) {
 	}
 	defer rows.Close()
 	roles := []Role{}
+	roleIDs := []string{}
 	for rows.Next() {
 		var r Role
 		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		roles = append(roles, r)
+		roleIDs = append(roleIDs, r.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(roleIDs) == 0 {
+		return roles, nil
+	}
+	permMap, err := s.getRolePermissionsBatch(roleIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range roles {
+		roles[i].Permissions = permMap[roles[i].ID]
 	}
 	return roles, nil
+}
+
+func (s *Service) getRolePermissionsBatch(roleIDs []string) (map[string][]Permission, error) {
+	rows, err := s.db.Query(`
+		SELECT rp.role_id, p.id, p.name, COALESCE(p.description, ''), p.created_at
+		FROM role_permissions rp
+		JOIN permissions p ON p.id = rp.permission_id
+		WHERE rp.role_id = ANY($1)
+		ORDER BY p.name
+	`, roleIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get role permissions batch: %w", err)
+	}
+	defer rows.Close()
+	permMap := map[string][]Permission{}
+	for rows.Next() {
+		var roleID string
+		var p Permission
+		if err := rows.Scan(&roleID, &p.ID, &p.Name, &p.Description, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		permMap[roleID] = append(permMap[roleID], p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return permMap, nil
 }
 
 func (s *Service) createRole(req CreateRoleRequest) (*Role, error) {
@@ -64,6 +120,15 @@ func (s *Service) createRole(req CreateRoleRequest) (*Role, error) {
 }
 
 func (s *Service) updateRole(id string, req UpdateRoleRequest) (*Role, error) {
+	if req.Name != "" {
+		var currentName string
+		if err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, id).Scan(&currentName); err != nil {
+			return nil, fmt.Errorf("update role: %w", err)
+		}
+		if currentName == "superadmin" && req.Name != "superadmin" {
+			return nil, ErrSuperadminRoleProtected
+		}
+	}
 	var r Role
 	err := s.db.QueryRow(
 		`UPDATE roles SET name = COALESCE($2, name), description = COALESCE($3, description), updated_at = now()
@@ -80,8 +145,21 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest) (*Role, error) {
 }
 
 func (s *Service) deleteRole(id string) error {
-	_, err := s.db.Exec(`DELETE FROM roles WHERE id = $1`, id)
-	return err
+	var name string
+	err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, id).Scan(&name)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("delete role: %w", err)
+	}
+	if name == "superadmin" {
+		return ErrSuperadminRoleProtected
+	}
+	if _, err := s.db.Exec(`DELETE FROM roles WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("delete role: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) assignPermission(roleID, permissionID string) error {
@@ -93,6 +171,17 @@ func (s *Service) assignPermission(roleID, permissionID string) error {
 }
 
 func (s *Service) removePermission(roleID, permissionID string) error {
+	var roleName string
+	if err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, roleID).Scan(&roleName); err != nil {
+		return err
+	}
+	var permName string
+	if err := s.db.QueryRow(`SELECT name FROM permissions WHERE id = $1`, permissionID).Scan(&permName); err != nil {
+		return err
+	}
+	if roleName == "superadmin" && permName == "*" {
+		return ErrSuperadminRoleProtected
+	}
 	_, err := s.db.Exec(`DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2`, roleID, permissionID)
 	return err
 }
@@ -230,7 +319,17 @@ func (s *Service) createUser(name, email, password string) (*UserInfo, error) {
 	return &u, nil
 }
 
-func (s *Service) deleteUser(id string) error {
+func (s *Service) deleteUser(id, actorID string) error {
+	if actorID != "" && actorID == id {
+		return ErrSelfDelete
+	}
+	protected, err := s.userHasRole(id, "superadmin")
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if protected {
+		return ErrSuperadminUserProtected
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
@@ -250,6 +349,19 @@ func (s *Service) deleteUser(id string) error {
 		return fmt.Errorf("revoke sessions: %w", err)
 	}
 	return tx.Commit()
+}
+
+func (s *Service) userHasRole(userID, roleName string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(
+		`SELECT EXISTS(
+			SELECT 1 FROM user_roles ur
+			JOIN roles r ON r.id = ur.role_id
+			WHERE ur.user_id = $1 AND r.name = $2
+		)`,
+		userID, roleName,
+	).Scan(&exists)
+	return exists, err
 }
 
 type UserInfo struct {

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Plus, Trash2, Shield } from '@lucide/vue'
+import { Plus, Shield, ShieldCheck, Trash2 } from '@lucide/vue'
 
 interface Permission {
   id: string
@@ -99,6 +99,18 @@ async function deleteRole(roleId: string) {
 function roleHasPermission(role: Role, permId: string): boolean {
   return role.permissions?.some((p) => p.id === permId) || false
 }
+
+function isSuperadminRole(role: Role): boolean {
+  return role.name === 'superadmin'
+}
+
+function permissionLabel(perm: Permission): string {
+  return perm.name === '*' ? 'All permissions' : perm.name
+}
+
+function permissionIsLocked(role: Role, perm: Permission): boolean {
+  return isSuperadminRole(role) && perm.name === '*'
+}
 </script>
 
 <template>
@@ -128,7 +140,16 @@ function roleHasPermission(role: Role, permId: string): boolean {
           <CardTitle class="text-base">{{ role.name }}</CardTitle>
           <p v-if="role.description" class="text-sm text-muted-foreground mt-0.5">{{ role.description }}</p>
         </div>
-        <Button variant="ghost" size="sm" @click="deleteRole(role.id)">
+        <Button
+          v-if="isSuperadminRole(role)"
+          variant="ghost"
+          size="sm"
+          disabled
+          title="The superadmin role is protected"
+        >
+          <ShieldCheck class="mr-1 size-3.5" /> Protected
+        </Button>
+        <Button v-else variant="ghost" size="sm" @click="deleteRole(role.id)">
           <Trash2 class="mr-1 size-3.5" /> Delete
         </Button>
       </CardHeader>
@@ -141,9 +162,13 @@ function roleHasPermission(role: Role, permId: string): boolean {
           >
             <Checkbox
               :checked="roleHasPermission(role, perm.id)"
+              :disabled="permissionIsLocked(role, perm)"
+              :title="permissionIsLocked(role, perm) ? 'The wildcard permission cannot be removed from the superadmin role' : undefined"
               @update:checked="togglePermission(role.id, perm.id, roleHasPermission(role, perm.id))"
             />
-            <Label class="text-sm cursor-pointer">{{ perm.name }}</Label>
+            <Label class="text-sm cursor-pointer" :title="perm.description">
+              {{ permissionLabel(perm) }}
+            </Label>
           </div>
         </div>
       </CardContent>

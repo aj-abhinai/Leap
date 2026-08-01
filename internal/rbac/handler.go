@@ -1,11 +1,11 @@
 package rbac
 
 import (
-	"encoding/json"
-	"net/http"
-
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
+	"encoding/json"
+	"errors"
+	"net/http"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -16,6 +16,24 @@ type Handler struct {
 
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
+}
+
+// writeProtected reports a 403 for sentinel protection errors and whether the
+// response was written.
+func (h *Handler) writeProtected(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, ErrSelfDelete) &&
+		!errors.Is(err, ErrSuperadminUserProtected) &&
+		!errors.Is(err, ErrSuperadminRoleProtected) {
+		return false
+	}
+	respond.JSON(
+		w,
+		http.StatusForbidden,
+		nil,
+		&respond.Error{Code: "FORBIDDEN", Message: err.Error()},
+		nil,
+	)
+	return true
 }
 
 func (h *Handler) ListRoles(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +114,9 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 	role, err := h.svc.updateRole(id, req)
 	if err != nil {
+		if h.writeProtected(w, err) {
+			return
+		}
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,
@@ -117,6 +138,9 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.deleteRole(id); err != nil {
+		if h.writeProtected(w, err) {
+			return
+		}
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,
@@ -194,6 +218,9 @@ func (h *Handler) RemovePermission(w http.ResponseWriter, r *http.Request) {
 	roleID := chi.URLParam(r, "id")
 	permID := chi.URLParam(r, "permission_id")
 	if err := h.svc.removePermission(roleID, permID); err != nil {
+		if h.writeProtected(w, err) {
+			return
+		}
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,
@@ -303,7 +330,10 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.svc.deleteUser(id); err != nil {
+	if err := h.svc.deleteUser(id, ctxutil.GetUserID(r)); err != nil {
+		if h.writeProtected(w, err) {
+			return
+		}
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,

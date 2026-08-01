@@ -130,6 +130,8 @@ just build
 
 The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `localhost:9000`.
 
+Development login: `admin@admin.com` / `admin`.
+
 > **Note:** `just dev-db` starts only the Postgres container. Stop it with `docker compose -f docker/docker-compose.yml down`.
 
 ---

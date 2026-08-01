@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
+import { useAuthStore } from '@/stores/auth'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,7 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Trash2, User } from '@lucide/vue'
+import { Plus, ShieldCheck, Trash2, User } from '@lucide/vue'
 
 interface Role {
   id: string
@@ -30,6 +31,7 @@ interface User {
 }
 
 const users = shallowRef<User[]>([])
+const auth = useAuthStore()
 const newUserName = shallowRef('')
 const newUserEmail = shallowRef('')
 const newUserPassword = shallowRef('')
@@ -80,6 +82,14 @@ async function deleteUser(userId: string) {
   } catch (e: any) {
     toast.error(e.message || 'Failed to delete user')
   }
+}
+
+function isSuperAdmin(u: User): boolean {
+  return u.roles?.some((r) => r.name === 'superadmin') ?? false
+}
+
+function isProtectedUser(u: User): boolean {
+  return isSuperAdmin(u) || auth.user?.id === u.id
 }
 </script>
 
@@ -132,7 +142,11 @@ async function deleteUser(userId: string) {
                 </div>
               </TableCell>
               <TableCell>
-                <Button variant="ghost" size="icon-sm" @click="deleteUser(u.id)">
+                <div v-if="isProtectedUser(u)" class="flex items-center gap-1.5">
+                  <ShieldCheck class="size-3.5 text-muted-foreground" />
+                  <span class="text-xs text-muted-foreground">Protected</span>
+                </div>
+                <Button v-else variant="ghost" size="icon-sm" @click="deleteUser(u.id)">
                   <Trash2 class="size-3.5" />
                 </Button>
               </TableCell>
