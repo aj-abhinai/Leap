@@ -19,10 +19,15 @@ export const useActivityStore = defineStore('activity', () => {
   const total = ref(0)
   const loading = ref(false)
 
-  async function fetchActivity(page = 1, perPage = 20) {
+  async function fetchActivity(page = 1, perPage = 20, filters: { action?: string; resourceType?: string } = {}) {
     loading.value = true
     try {
-      const res = await apiClient.get(`/api/activity?page=${page}&per_page=${perPage}`)
+      const params = new URLSearchParams()
+      params.set('page', String(page))
+      params.set('per_page', String(perPage))
+      if (filters.action) params.set('action', filters.action)
+      if (filters.resourceType) params.set('resource_type', filters.resourceType)
+      const res = await apiClient.get(`/api/activity?${params}`)
       entries.value = res.data
       total.value = res.meta?.total || 0
     } finally {

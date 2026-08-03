@@ -24,12 +24,14 @@ import LeadKanban from '@/components/leads/LeadKanban.vue'
 import LeadForm from '@/components/leads/LeadForm.vue'
 import LeadActivity from '@/components/leads/LeadActivity.vue'
 import LeadActivityForm from '@/components/leads/LeadActivityForm.vue'
+import { useRBACStore } from '@/stores/rbac'
 import { Plus, Layers } from '@lucide/vue'
 import { useLeadPipeline } from '@/composables/useLeadPipeline'
 import { useLeadDrawer } from '@/composables/useLeadDrawer'
 import { useActivityDrawer } from '@/composables/useActivityDrawer'
 
 const route = useRoute()
+const rbac = useRBACStore()
 
 const {
   pipelineStore,
@@ -106,7 +108,7 @@ onMounted(async () => {
         </Select>
         <Sheet v-model:open="drawerOpen">
           <SheetTrigger as-child>
-            <Button @click="openCreate()">
+            <Button v-if="rbac.can('lead:write')" @click="openCreate()">
               <Plus class="mr-2 size-4" /> Add Lead
             </Button>
           </SheetTrigger>

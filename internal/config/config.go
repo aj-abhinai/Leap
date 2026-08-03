@@ -2,6 +2,9 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -213,5 +216,30 @@ format = "json"
 }
 
 func (d DB) DSN() string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", d.User, d.Password, d.Host, d.Port, d.Name, d.SSLMode)
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(d.User, d.Password),
+		Host:   net.JoinHostPort(d.Host, strconv.Itoa(d.Port)),
+		Path:   "/" + d.Name,
+	}
+	q := u.Query()
+	q.Set("sslmode", d.SSLMode)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// SlogLevel resolves the configured log level, defaulting to info.
+func (l Log) SlogLevel() (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(l.Level)) {
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "debug":
+		return slog.LevelDebug, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("invalid log level %q (use debug, info, warn or error)", l.Level)
+	}
 }

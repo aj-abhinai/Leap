@@ -5,26 +5,35 @@ import (
 	"fmt"
 )
 
-func (s *Service) listNotes(contactID string) ([]Note, error) {
+func (s *Service) listNotes(contactID string, page, perPage int) ([]Note, int, error) {
+	var total int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM contact_notes WHERE contact_id = $1`,
+		contactID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count notes: %w", err)
+	}
+	offset := (page - 1) * perPage
 	rows, err := s.db.Query(`
 		SELECT cn.id, cn.contact_id, cn.user_id, COALESCE(u.name, ''), cn.note, cn.created_at, cn.updated_at
 		FROM contact_notes cn
 		LEFT JOIN users u ON u.id = cn.user_id
 		WHERE cn.contact_id = $1
-		ORDER BY cn.created_at DESC`, contactID)
+		ORDER BY cn.created_at DESC
+		LIMIT $2 OFFSET $3`, contactID, perPage, offset)
 	if err != nil {
-		return nil, fmt.Errorf("list notes: %w", err)
+		return nil, 0, fmt.Errorf("list notes: %w", err)
 	}
 	defer rows.Close()
 	notes := []Note{}
 	for rows.Next() {
 		var n Note
 		if err := rows.Scan(&n.ID, &n.ContactID, &n.UserID, &n.UserName, &n.Note, &n.CreatedAt, &n.UpdatedAt); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		notes = append(notes, n)
 	}
-	return notes, nil
+	return notes, total, nil
 }
 
 func (s *Service) createNote(contactID, userID, note string) (*Note, error) {
@@ -49,10 +58,20 @@ func (s *Service) createNote(contactID, userID, note string) (*Note, error) {
 	return &n, nil
 }
 
-func (s *Service) deleteNote(contactID, noteID, userID string) error {
-	_, err := s.db.Exec(`DELETE FROM contact_notes WHERE id = $1 AND contact_id = $2`, noteID, contactID)
+func (s *Service) deleteNote(contactID, noteID, userID string, canDeleteAny bool) error {
+	res, err := s.db.Exec(
+		`DELETE FROM contact_notes WHERE id = $1 AND contact_id = $2 AND (user_id = $3 OR $4)`,
+		noteID, contactID, userID, canDeleteAny,
+	)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 	changes, _ := json.Marshal(map[string]string{"note_id": noteID})
 	s.logActivity(contactID, "contact_note", "delete", string(changes), userID)

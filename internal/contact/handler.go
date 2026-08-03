@@ -1,23 +1,58 @@
 package contact
 
 import (
-	"database/sql"
-	"encoding/json"
-	"net/http"
-	"strconv"
-
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 )
 
 type Handler struct {
-	svc *Service
+	svc   *Service
+	perms PermissionChecker
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+type PermissionChecker interface {
+	UserCan(userID, permission string) (bool, error)
+}
+
+func NewHandler(svc *Service, perms PermissionChecker) *Handler {
+	return &Handler{svc: svc, perms: perms}
+}
+
+// respondError writes a mapped error response for mutation handlers.
+func respondError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound), respond.IsNotFound(err):
+		respond.JSON(
+			w,
+			http.StatusNotFound,
+			nil,
+			&respond.Error{Code: "NOT_FOUND", Message: ErrNotFound.Error()},
+			nil,
+		)
+	case errors.Is(err, ErrInvalidStatus):
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+			nil,
+		)
+	default:
+		respond.JSON(
+			w,
+			http.StatusInternalServerError,
+			nil,
+			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
+			nil,
+		)
+	}
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +63,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
 	if perPage < 1 {
 		perPage = 20
+	}
+	if perPage > 100 {
+		perPage = 100
 	}
 	search := r.URL.Query().Get("q")
 
@@ -75,13 +113,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.svc.create(req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -194,13 +226,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	userID := ctxutil.GetUserID(r)
 	c, err := h.svc.update(id, req, userID)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -216,13 +242,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	userID := ctxutil.GetUserID(r)
 	if err := h.svc.delete(id, userID); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -236,15 +256,20 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListNotes(w http.ResponseWriter, r *http.Request) {
 	contactID := chi.URLParam(r, "id")
-	notes, err := h.svc.listNotes(contactID)
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if perPage < 1 {
+		perPage = 50
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+	notes, total, err := h.svc.listNotes(contactID, page, perPage)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -252,7 +277,7 @@ func (h *Handler) ListNotes(w http.ResponseWriter, r *http.Request) {
 		http.StatusOK,
 		notes,
 		nil,
-		nil,
+		&respond.Meta{Page: page, PerPage: perPage, Total: total},
 	)
 }
 
@@ -304,14 +329,13 @@ func (h *Handler) DeleteNote(w http.ResponseWriter, r *http.Request) {
 	contactID := chi.URLParam(r, "id")
 	noteID := chi.URLParam(r, "note_id")
 	userID := ctxutil.GetUserID(r)
-	if err := h.svc.deleteNote(contactID, noteID, userID); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+	canDeleteAny, err := h.perms.UserCan(userID, "*")
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	if err := h.svc.deleteNote(contactID, noteID, userID, canDeleteAny); err != nil {
+		respondError(w, err)
 		return
 	}
 	respond.JSON(

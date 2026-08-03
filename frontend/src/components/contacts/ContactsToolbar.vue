@@ -5,6 +5,12 @@ import { List, LayoutGrid, Table2, Plus, Search } from '@lucide/vue'
 
 export type ContactViewMode = 'table' | 'compact' | 'spreadsheet'
 
+const props = withDefaults(defineProps<{
+  canWrite?: boolean
+}>(), {
+  canWrite: true,
+})
+
 const search = defineModel<string>('search', { default: '' })
 const viewMode = defineModel<ContactViewMode>('viewMode', { default: 'table' })
 
@@ -27,7 +33,7 @@ const emit = defineEmits<{
       />
     </div>
     <Button variant="outline" size="sm" @click="emit('search')">Search</Button>
-    <Button variant="outline" size="sm" @click="emit('import')">
+    <Button v-if="props.canWrite" variant="outline" size="sm" @click="emit('import')">
       Import CSV
     </Button>
     <div class="flex items-center gap-1">
@@ -59,7 +65,7 @@ const emit = defineEmits<{
         <Table2 class="size-4" />
       </Button>
     </div>
-    <Button @click="emit('create')">
+    <Button v-if="props.canWrite" @click="emit('create')">
       <Plus class="mr-2 size-4" /> Add Contact
     </Button>
   </div>

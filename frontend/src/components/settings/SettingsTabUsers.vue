@@ -15,7 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Plus, ShieldCheck, Trash2, User } from '@lucide/vue'
+import { Plus, ShieldCheck, Trash2, User, X } from '@lucide/vue'
 
 interface Role {
   id: string
@@ -31,6 +31,7 @@ interface User {
 }
 
 const users = shallowRef<User[]>([])
+const roles = shallowRef<Role[]>([])
 const auth = useAuthStore()
 const newUserName = shallowRef('')
 const newUserEmail = shallowRef('')
@@ -38,7 +39,10 @@ const newUserPassword = shallowRef('')
 const newUserError = shallowRef('')
 const creatingUser = shallowRef(false)
 
-onMounted(() => loadUsers())
+onMounted(() => {
+  loadUsers()
+  loadRoles()
+})
 
 async function loadUsers() {
   try {
@@ -46,6 +50,15 @@ async function loadUsers() {
     users.value = res.data
   } catch (e: any) {
     toast.error(e.message || 'Failed to load users')
+  }
+}
+
+async function loadRoles() {
+  try {
+    const res = await apiClient.get('/api/roles')
+    roles.value = res.data
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to load roles')
   }
 }
 
@@ -84,12 +97,42 @@ async function deleteUser(userId: string) {
   }
 }
 
+async function assignRole(userId: string, roleId: string) {
+  if (!roleId) return
+  try {
+    await apiClient.post(`/api/users/${userId}/roles`, { role_id: roleId })
+    toast.success('Role assigned')
+    loadUsers()
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to assign role')
+  }
+}
+
+async function removeRole(userId: string, roleId: string) {
+  try {
+    await apiClient.delete(`/api/users/${userId}/roles/${roleId}`)
+    toast.success('Role removed')
+    loadUsers()
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to remove role')
+  }
+}
+
 function isSuperAdmin(u: User): boolean {
   return u.roles?.some((r) => r.name === 'superadmin') ?? false
 }
 
 function isProtectedUser(u: User): boolean {
   return isSuperAdmin(u) || auth.user?.id === u.id
+}
+
+function isSuperadminRole(role: Role): boolean {
+  return role.name === 'superadmin'
+}
+
+function assignableRoles(u: User): Role[] {
+  const assigned = new Set(u.roles?.map((r) => r.id) ?? [])
+  return roles.value.filter((r) => !assigned.has(r.id))
 }
 </script>
 
@@ -126,6 +169,7 @@ function isProtectedUser(u: User): boolean {
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Roles</TableHead>
+              <TableHead class="w-56">Add role</TableHead>
               <TableHead class="w-16">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -137,8 +181,30 @@ function isProtectedUser(u: User): boolean {
                 <div class="flex flex-wrap gap-1">
                   <Badge v-for="r in u.roles" :key="r.id" variant="secondary" class="text-xs">
                     {{ r.name }}
+                    <button
+                      v-if="!isSuperadminRole(r)"
+                      class="ml-1 inline-flex items-center rounded hover:text-destructive"
+                      :title="`Remove role ${r.name}`"
+                      @click="removeRole(u.id, r.id)"
+                    >
+                      <X class="size-3" />
+                    </button>
                   </Badge>
                   <span v-if="!u.roles?.length" class="text-xs text-muted-foreground">—</span>
+                </div>
+              </TableCell>
+              <TableCell>
+                <div class="flex items-center gap-1.5">
+                  <select
+                    v-if="assignableRoles(u).length > 0"
+                    class="h-8 w-full rounded-md border bg-background px-2 text-sm"
+                    :value="''"
+                    @change="assignRole(u.id, ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="" disabled>Add role…</option>
+                    <option v-for="r in assignableRoles(u)" :key="r.id" :value="r.id">{{ r.name }}</option>
+                  </select>
+                  <span v-else class="text-xs text-muted-foreground">—</span>
                 </div>
               </TableCell>
               <TableCell>

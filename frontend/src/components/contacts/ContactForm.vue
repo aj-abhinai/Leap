@@ -74,16 +74,19 @@ async function handleSave() {
     return
   }
   saving.value = true
-  emit('save', {
-    name: result.data.name,
-    email: result.data.email || null,
-    phone: result.data.phone || null,
-    location: result.data.location || null,
-    age: result.data.age || null,
-    tag_ids: selectedTags.value,
-    status_id: formStatusId.value && formStatusId.value !== '__none__' ? formStatusId.value : null,
-  })
-  saving.value = false
+  try {
+    await emit('save', {
+      name: result.data.name,
+      email: result.data.email ?? '',
+      phone: result.data.phone ?? '',
+      location: result.data.location ?? '',
+      age: result.data.age ?? null,
+      tag_ids: selectedTags.value,
+      status_id: formStatusId.value && formStatusId.value !== '__none__' ? formStatusId.value : '',
+    })
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 

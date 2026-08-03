@@ -40,7 +40,13 @@ async function request<T = any>(method: string, url: string, body?: any): Promis
     }
   }
 
-  const json = await res.json()
+  const text = await res.text()
+  let json: ApiResponse<T>
+  try {
+    json = JSON.parse(text)
+  } catch {
+    throw new Error(`Unexpected response from server (${res.status})`)
+  }
   if (json.error) {
     throw new Error(json.error.message)
   }

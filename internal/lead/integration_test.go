@@ -3,8 +3,12 @@ package lead
 import (
 	"crm/internal/testdb"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestCreateLeadStoresActorIntegration(t *testing.T) {
@@ -256,6 +260,139 @@ func TestOneContactTwoProgramsIntegration(t *testing.T) {
 	}
 	if total != 2 || len(leads) != 2 {
 		t.Errorf("total = %d, want 2 leads for one contact", total)
+	}
+}
+
+func TestListCapsPerPageHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db), stubPerms{can: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/leads?per_page=9999", nil)
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var body struct {
+		Meta struct {
+			PerPage int `json:"per_page"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Meta.PerPage != 200 {
+		t.Errorf("per_page = %d, want capped at 200", body.Meta.PerPage)
+	}
+}
+
+func TestCreateLeadBlocksWhileProgramLockedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	programID := seedProgram(t, db, "Coaching", 25000)
+
+	lockTx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin lock tx: %v", err)
+	}
+	defer lockTx.Rollback()
+	if _, err := lockTx.Exec(
+		`SELECT price FROM programs WHERE id = $1 FOR UPDATE`,
+		programID,
+	); err != nil {
+		t.Fatalf("lock program: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.create(CreateRequest{
+			Name:       "Alice Example",
+			PipelineID: pipelineID,
+			StageID:    stageID,
+			ProgramID:  &programID,
+		}, "")
+		done <- err
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("create returned while the program row was locked; FOR SHARE lock is missing")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	if err := lockTx.Commit(); err != nil {
+		t.Fatalf("commit lock tx: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("create after lock release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("create did not complete after the lock was released")
+	}
+}
+
+// stubPerms satisfies the handler's PermissionChecker for handler-level tests.
+type stubPerms struct {
+	can bool
+}
+
+func (p stubPerms) UserCan(_ string, _ string) (bool, error) {
+	return p.can, nil
+}
+
+func TestUpdateLeadMissingReturnsNotFoundIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	name := "Alice"
+	_, err := svc.update("00000000-0000-0000-0000-000000000000", UpdateRequest{Name: &name}, "")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("update missing lead = %v, want ErrNotFound", err)
+	}
+
+	if err := svc.delete("00000000-0000-0000-0000-000000000000", ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("delete missing lead = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateLeadRejectsForeignStageIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineA, _ := seedPipelineAndStage(t, db)
+	_, stageB := seedPipelineAndStage(t, db)
+
+	_, err := svc.create(CreateRequest{Name: "Alice", PipelineID: pipelineA, StageID: stageB}, "")
+	if !errors.Is(err, ErrStageNotInPipeline) {
+		t.Errorf("create with foreign stage = %v, want ErrStageNotInPipeline", err)
+	}
+}
+
+func TestDeleteActivityScopedToLeadIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{Name: "Alice", PipelineID: pipelineID, StageID: stageID}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	activity, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "note", Description: "hello"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	if err := svc.deleteActivity("00000000-0000-0000-0000-000000000000", activity.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("delete via wrong lead = %v, want ErrNotFound", err)
+	}
+
+	if err := svc.deleteActivity(created.ID, activity.ID); err != nil {
+		t.Errorf("delete via owning lead = %v, want nil", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -26,7 +27,7 @@ func (s *Service) login(email, password string) (*TokenResponse, error) {
 	var u User
 	err := s.db.QueryRow(
 		`SELECT id, name, email, password_hash FROM users WHERE email = $1 AND deleted_at IS NULL`,
-		email,
+		normalizeEmail(email),
 	).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash)
 	if err != nil {
 		return nil, ErrInvalidCredentials
@@ -35,6 +36,12 @@ func (s *Service) login(email, password string) (*TokenResponse, error) {
 		return nil, ErrInvalidCredentials
 	}
 	return s.generateTokenPair(u.ID)
+}
+
+// normalizeEmail trims and lowercases so case and whitespace differences in
+// stored or submitted addresses never lock a user out of their account.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {

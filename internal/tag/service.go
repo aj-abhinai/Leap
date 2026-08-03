@@ -1,8 +1,17 @@
 package tag
 
 import (
+	"crm/internal/respond"
 	"database/sql"
+	"errors"
 	"fmt"
+)
+
+var (
+	// ErrDuplicate marks tag names that already exist.
+	ErrDuplicate = errors.New("tag name already exists")
+	// ErrInvalidType marks tag types outside {tag, status}.
+	ErrInvalidType = errors.New("type must be 'tag' or 'status'")
 )
 
 type Service struct {
@@ -14,6 +23,12 @@ func NewService(db *sql.DB) *Service {
 }
 
 func (s *Service) list(tagType string) ([]Tag, error) {
+	if tagType == "" {
+		tagType = "tag"
+	}
+	if tagType != "tag" && tagType != "status" {
+		return nil, ErrInvalidType
+	}
 	rows, err := s.db.Query(
 		`SELECT id, name, type, COALESCE(color, ''), created_at FROM tags WHERE type = $1 ORDER BY name`,
 		tagType,
@@ -35,12 +50,18 @@ func (s *Service) list(tagType string) ([]Tag, error) {
 }
 
 func (s *Service) create(req CreateRequest) (*Tag, error) {
+	if req.Type != "tag" && req.Type != "status" {
+		return nil, ErrInvalidType
+	}
 	var t Tag
 	err := s.db.QueryRow(
 		`INSERT INTO tags (name, type, color) VALUES ($1, $2, $3) RETURNING id, name, type, COALESCE(color, ''), created_at`,
 		req.Name, req.Type, req.Color,
 	).Scan(&t.ID, &t.Name, &t.Type, &t.Color, &t.CreatedAt)
 	if err != nil {
+		if respond.IsDuplicate(err) {
+			return nil, ErrDuplicate
+		}
 		return nil, fmt.Errorf("create tag: %w", err)
 	}
 	return &t, nil

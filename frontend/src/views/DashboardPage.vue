@@ -6,7 +6,7 @@ import { useActivityStore } from '@/stores/activity'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Users, FolderOpen, CheckCircle2, TrendingUp, Calendar, Phone, Mail, UserPlus } from '@lucide/vue'
+import { Users, FolderOpen, TrendingUp, Calendar, Phone, Mail, UserPlus } from '@lucide/vue'
 import { timeAgo } from '@/utils/time'
 
 const contactsStore = useContactsStore()
@@ -84,30 +84,6 @@ function activityIcon(action: string) {
           <CardContent>
             <div class="text-2xl font-bold">{{ leadsStore.total }}</div>
             <p class="mt-1 text-xs text-muted-foreground">Open leads across all pipelines</p>
-          </CardContent>
-        </Card>
-
-        <Card v-if="loading" class="overflow-hidden">
-          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <Skeleton class="h-4 w-28" />
-            <Skeleton class="size-8 rounded-lg" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton class="h-8 w-16" />
-            <Skeleton class="mt-2 h-3 w-20" />
-          </CardContent>
-        </Card>
-        <Card v-else class="relative overflow-hidden animate-fade-in-up animate-fade-in-up-delay-2">
-          <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-emerald-500 to-green-400" />
-          <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle class="text-sm font-medium">Won This Month</CardTitle>
-            <div class="flex size-8 items-center justify-center rounded-lg bg-emerald-500/10">
-              <CheckCircle2 class="size-4 text-emerald-600 dark:text-emerald-400" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div class="text-2xl font-bold">0</div>
-            <p class="mt-1 text-xs text-muted-foreground">Deals closed this month</p>
           </CardContent>
         </Card>
       </div>

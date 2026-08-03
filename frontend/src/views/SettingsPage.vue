@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { shallowRef, onMounted } from 'vue'
+import { shallowRef, computed, onMounted } from 'vue'
 import { useActivityStore } from '@/stores/activity'
 import { useRBACStore } from '@/stores/rbac'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
@@ -26,12 +26,18 @@ import { formatDateTime } from '@/utils/time'
 const activity = useActivityStore()
 const rbac = useRBACStore()
 const activityPage = shallowRef(1)
+const activityPerPage = 20
+const activityAction = shallowRef('')
+const activityResourceType = shallowRef('')
 
 const permissionsLoaded = shallowRef(false)
+
+const activityTotalPages = computed(() => Math.ceil(activity.total / activityPerPage) || 1)
 
 onMounted(async () => {
   await rbac.fetchPermissions()
   permissionsLoaded.value = true
+  loadActivity()
 })
 
 function canOrLoading(permission: string): boolean {
@@ -40,7 +46,27 @@ function canOrLoading(permission: string): boolean {
 }
 
 function loadActivity() {
-  activity.fetchActivity(activityPage.value, 20)
+  activity.fetchActivity(activityPage.value, activityPerPage, {
+    action: activityAction.value,
+    resourceType: activityResourceType.value,
+  })
+}
+
+function applyActivityFilters() {
+  activityPage.value = 1
+  loadActivity()
+}
+
+function activityPrevPage() {
+  if (activityPage.value <= 1) return
+  activityPage.value--
+  loadActivity()
+}
+
+function activityNextPage() {
+  if (activityPage.value >= activityTotalPages.value) return
+  activityPage.value++
+  loadActivity()
 }
 
 function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
@@ -72,7 +98,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
             <Shield class="size-4" />
             <span class="hidden sm:inline">Roles</span>
           </TabsTrigger>
-          <TabsTrigger value="pipelines" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <TabsTrigger v-show="canOrLoading('pipeline:manage')" value="pipelines" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Layers class="size-4" />
             <span class="hidden sm:inline">Pipelines</span>
           </TabsTrigger>
@@ -98,7 +124,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
           <SettingsTabRoles />
         </TabsContent>
 
-        <TabsContent value="pipelines" class="mt-0">
+        <TabsContent v-if="canOrLoading('pipeline:manage')" value="pipelines" class="mt-0">
           <SettingsTabPipelines />
         </TabsContent>
 
@@ -115,6 +141,33 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
               </Button>
             </CardHeader>
             <CardContent>
+              <div class="mb-4 flex flex-wrap gap-2">
+                <select
+                  v-model="activityAction"
+                  class="h-8 rounded-md border bg-background px-2 text-sm"
+                  @change="applyActivityFilters()"
+                >
+                  <option value="">All actions</option>
+                  <option value="create">Create</option>
+                  <option value="update">Update</option>
+                  <option value="delete">Delete</option>
+                  <option value="move_stage">Move stage</option>
+                </select>
+                <select
+                  v-model="activityResourceType"
+                  class="h-8 rounded-md border bg-background px-2 text-sm"
+                  @change="applyActivityFilters()"
+                >
+                  <option value="">All types</option>
+                  <option value="contact">Contact</option>
+                  <option value="lead">Lead</option>
+                  <option value="user">User</option>
+                  <option value="role">Role</option>
+                  <option value="pipeline">Pipeline</option>
+                  <option value="program">Program</option>
+                  <option value="contact_note">Note</option>
+                </select>
+              </div>
               <div v-if="activity.entries.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
                 <Activity class="size-10 text-muted-foreground/40 mb-3" />
                 <p class="text-sm font-medium text-muted-foreground">No activity logged yet</p>
@@ -144,6 +197,24 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
                   </TableRow>
                 </TableBody>
               </Table>
+              <div class="mt-4 flex items-center justify-between">
+                <span class="text-sm text-muted-foreground">
+                  Page {{ activityPage }} of {{ activityTotalPages }} &middot; {{ activity.total }} total
+                </span>
+                <div class="flex items-center gap-1">
+                  <Button variant="outline" size="sm" :disabled="activityPage <= 1" @click="activityPrevPage()">
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    :disabled="activityPage >= activityTotalPages"
+                    @click="activityNextPage()"
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

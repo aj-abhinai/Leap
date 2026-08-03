@@ -32,16 +32,19 @@ const props = defineProps<{ leadId: string }>()
 
 const activities = shallowRef<Activity[]>([])
 const loading = shallowRef(false)
+const loadError = shallowRef('')
 
 onMounted(() => fetchActivities())
 
 async function fetchActivities() {
   loading.value = true
+  loadError.value = ''
   try {
     const res = await apiClient.get(`/api/leads/${props.leadId}/activities`)
     activities.value = res.data
-  } catch {
+  } catch (e: any) {
     activities.value = []
+    loadError.value = e.message || 'Failed to load activities'
   } finally {
     loading.value = false
   }
@@ -75,6 +78,10 @@ defineExpose({ fetchActivities })
   <div class="space-y-3">
     <div v-if="loading" class="space-y-2">
       <Skeleton v-for="i in 3" :key="i" class="h-16 w-full" />
+    </div>
+
+    <div v-else-if="loadError" class="rounded-lg border border-dashed p-6 text-center">
+      <p class="text-sm text-destructive">{{ loadError }}</p>
     </div>
 
     <div v-else-if="activities.length === 0" class="rounded-lg border border-dashed p-6 text-center">

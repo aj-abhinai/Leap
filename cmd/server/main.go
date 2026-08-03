@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -60,6 +61,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	level, err := cfg.Log.SlogLevel()
+	if err != nil {
+		slog.Error("failed to parse log level", "error", err)
+		os.Exit(1)
+	}
+	var handler slog.Handler
+	if strings.EqualFold(cfg.Log.Format, "json") {
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	}
+	slog.SetDefault(slog.New(handler))
+
 	appAssets, err := assets.Load()
 	if err != nil {
 		slog.Error("failed to load assets", "error", err)
@@ -93,7 +107,7 @@ func main() {
 	rbacH := rbac.NewHandler(rbacSvc)
 
 	contactSvc := contact.NewService(database)
-	contactH := contact.NewHandler(contactSvc)
+	contactH := contact.NewHandler(contactSvc, rbacSvc)
 
 	pipelineSvc := pipeline.NewService(database)
 	pipelineH := pipeline.NewHandler(pipelineSvc)
@@ -102,7 +116,7 @@ func main() {
 	programH := program.NewHandler(programSvc)
 
 	leadSvc := lead.NewService(database)
-	leadH := lead.NewHandler(leadSvc)
+	leadH := lead.NewHandler(leadSvc, rbacSvc)
 
 	activitySvc := activity.NewService(database)
 	activityH := activity.NewHandler(activitySvc)

@@ -24,6 +24,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if perPage < 1 {
 		perPage = 20
 	}
+	if perPage > 100 {
+		perPage = 100
+	}
 
 	filters := ActivityFilters{
 		UserID:       r.URL.Query().Get("user_id"),

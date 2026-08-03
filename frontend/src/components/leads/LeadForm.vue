@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select'
 import { Loader2, Link } from '@lucide/vue'
 import type { Stage } from '@/stores/pipeline'
+import { formatCurrency } from '@/utils/format'
 
 export interface PrefillContact {
   id: string
@@ -44,7 +45,7 @@ const emit = defineEmits<{
 }>()
 
 const programs = shallowRef<Program[]>([])
-const formProgramId = shallowRef<string | null>(props.editingLead?.program_id || null)
+const formProgramId = shallowRef<string>(props.editingLead?.program_id || '__none__')
 const linkedContactId = shallowRef(props.editingLead?.contact_id || props.prefillContact?.id || null)
 const linkedContactName = shallowRef(props.editingLead?.contact_name || props.prefillContact?.name || '')
 
@@ -68,8 +69,11 @@ const snapshotValue = computed(() => {
 })
 
 function formatPrice(price?: number) {
-  if (price === undefined || price === null) return '—'
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(price)
+  return formatCurrency(price) || '—'
+}
+
+function programIdToSend(): string {
+  return formProgramId.value === '__none__' ? '' : formProgramId.value
 }
 
 onMounted(async () => {
@@ -87,7 +91,7 @@ watch(() => props.editingLead, (lead) => {
   formPhone.value = lead?.phone || props.prefillContact?.phone || ''
   formNotes.value = lead?.notes || ''
   formStageId.value = lead?.stage_id || props.initialStageId || props.stages[0]?.id || ''
-  formProgramId.value = lead?.program_id || null
+  formProgramId.value = lead?.program_id || '__none__'
   formError.value = ''
 })
 
@@ -98,17 +102,20 @@ async function handleSave() {
     return
   }
   saving.value = true
-  emit('save', {
-    name: formName.value,
-    email: formEmail.value || null,
-    phone: formPhone.value || null,
-    notes: formNotes.value || null,
-    pipeline_id: props.pipelineId,
-    stage_id: formStageId.value,
-    contact_id: linkedContactId.value || null,
-    program_id: formProgramId.value || null,
-  })
-  saving.value = false
+  try {
+    await emit('save', {
+      name: formName.value,
+      email: formEmail.value,
+      phone: formPhone.value,
+      notes: formNotes.value,
+      pipeline_id: props.pipelineId,
+      stage_id: formStageId.value,
+      contact_id: linkedContactId.value || '',
+      program_id: programIdToSend(),
+    })
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -138,6 +145,7 @@ async function handleSave() {
           <SelectValue placeholder="Select program" />
         </SelectTrigger>
         <SelectContent>
+          <SelectItem value="__none__">No program</SelectItem>
           <SelectItem v-for="p in programs" :key="p.id" :value="p.id">
             {{ p.name }} — {{ formatPrice(p.price) }}
           </SelectItem>

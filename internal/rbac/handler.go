@@ -18,12 +18,44 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// writeProtected reports a 403 for sentinel protection errors and whether the
-// response was written.
+// respondError maps service errors onto the HTTP contract: protection
+// violations answer 403, missing resources 404, and name collisions 409.
+func (h *Handler) respondError(w http.ResponseWriter, err error) {
+	if h.writeProtected(w, err) {
+		return
+	}
+	switch {
+	case errors.Is(err, ErrNotFound), respond.IsNotFound(err):
+		respond.JSON(
+			w,
+			http.StatusNotFound,
+			nil,
+			&respond.Error{Code: "NOT_FOUND", Message: "Role or user not found"},
+			nil,
+		)
+	case errors.Is(err, ErrDuplicate):
+		respond.JSON(
+			w,
+			http.StatusConflict,
+			nil,
+			&respond.Error{Code: "CONFLICT", Message: err.Error()},
+			nil,
+		)
+	default:
+		respond.JSON(
+			w,
+			http.StatusInternalServerError,
+			nil,
+			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
+			nil,
+		)
+	}
+}
 func (h *Handler) writeProtected(w http.ResponseWriter, err error) bool {
 	if !errors.Is(err, ErrSelfDelete) &&
 		!errors.Is(err, ErrSuperadminUserProtected) &&
-		!errors.Is(err, ErrSuperadminRoleProtected) {
+		!errors.Is(err, ErrSuperadminRoleProtected) &&
+		!errors.Is(err, ErrLastManagerProtected) {
 		return false
 	}
 	respond.JSON(
@@ -81,13 +113,7 @@ func (h *Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 	}
 	role, err := h.svc.createRole(req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		h.respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -114,16 +140,7 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 	role, err := h.svc.updateRole(id, req)
 	if err != nil {
-		if h.writeProtected(w, err) {
-			return
-		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		h.respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -138,16 +155,7 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.deleteRole(id); err != nil {
-		if h.writeProtected(w, err) {
-			return
-		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		h.respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -196,13 +204,7 @@ func (h *Handler) AssignPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.assignPermission(roleID, body.PermissionID); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		h.respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -218,16 +220,7 @@ func (h *Handler) RemovePermission(w http.ResponseWriter, r *http.Request) {
 	roleID := chi.URLParam(r, "id")
 	permID := chi.URLParam(r, "permission_id")
 	if err := h.svc.removePermission(roleID, permID); err != nil {
-		if h.writeProtected(w, err) {
-			return
-		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		h.respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -308,15 +301,19 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	user, err := h.svc.createUser(req.Name, req.Email, req.Password)
-	if err != nil {
+	if len(req.Password) < 8 {
 		respond.JSON(
 			w,
-			http.StatusInternalServerError,
+			http.StatusBadRequest,
 			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
+			&respond.Error{Code: "BAD_REQUEST", Message: "Password must be at least 8 characters"},
 			nil,
 		)
+		return
+	}
+	user, err := h.svc.createUser(req.Name, req.Email, req.Password)
+	if err != nil {
+		h.respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -331,16 +328,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.deleteUser(id, ctxutil.GetUserID(r)); err != nil {
-		if h.writeProtected(w, err) {
-			return
-		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		h.respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -368,13 +356,7 @@ func (h *Handler) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.assignUserRole(userID, body.RoleID); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		h.respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -390,13 +372,7 @@ func (h *Handler) RemoveUserRole(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
 	roleID := chi.URLParam(r, "role_id")
 	if err := h.svc.removeUserRole(userID, roleID); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		h.respondError(w, err)
 		return
 	}
 	respond.JSON(

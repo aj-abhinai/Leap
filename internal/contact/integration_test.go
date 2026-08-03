@@ -3,7 +3,6 @@ package contact
 import (
 	"bytes"
 	"crm/internal/testdb"
-	"crm/internal/util"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -123,7 +122,7 @@ func TestUpdateContactIntegration(t *testing.T) {
 	}
 
 	newName := "Alice Updated"
-	updated, err := svc.update(created.ID, UpdateRequest{Name: &newName, Phone: util.StrPtr(&created.Phone)}, "")
+	updated, err := svc.update(created.ID, UpdateRequest{Name: &newName, Phone: &created.Phone}, "")
 	if err != nil {
 		t.Fatalf("update contact: %v", err)
 	}
@@ -367,6 +366,159 @@ func TestBulkCreateImportsFreshRowsIntegration(t *testing.T) {
 	}
 }
 
+func TestBulkCreateReportsUnknownTagsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Tags: []string{"Hot", "NotATag"}},
+		{Name: "Bob", Tags: []string{"Hot"}},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 1 || resp.Failed != 1 {
+		t.Errorf("imported/failed = %d/%d, want 1/1", resp.Imported, resp.Failed)
+	}
+	if !strings.Contains(resp.Errors[0].Message, "unknown tag") {
+		t.Errorf("message = %q, want unknown-tag row error", resp.Errors[0].Message)
+	}
+}
+
+func TestListCapsPerPageHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db), stubPerms{can: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/contacts?per_page=9999", nil)
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var body struct {
+		Meta struct {
+			PerPage int `json:"per_page"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Meta.PerPage != 100 {
+		t.Errorf("per_page = %d, want capped at 100", body.Meta.PerPage)
+	}
+}
+
+func TestUpdateContactClearsNullableFieldsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{
+		Name:     "Alice Example",
+		Email:    "alice@example.com",
+		Phone:    "9876543210",
+		Location: "Pune",
+	})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	empty := ""
+	updated, err := svc.update(created.ID, UpdateRequest{Email: &empty, Phone: &empty}, "")
+	if err != nil {
+		t.Fatalf("clear contact fields: %v", err)
+	}
+	if updated.Email != "" || updated.Phone != "" {
+		t.Errorf("email/phone = %q/%q, want cleared", updated.Email, updated.Phone)
+	}
+	if updated.Location != "Pune" {
+		t.Errorf("location = %q, want unchanged 'Pune'", updated.Location)
+	}
+
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get contact: %v", err)
+	}
+	if got.Email != "" || got.Phone != "" {
+		t.Errorf("stored email/phone = %q/%q, want cleared", got.Email, got.Phone)
+	}
+}
+
+func TestUpdateContactClearsStatusIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var statusID string
+	if err := db.QueryRow(
+		`INSERT INTO tags (name, type) VALUES ('Active', 'status') RETURNING id`,
+	).Scan(&statusID); err != nil {
+		t.Fatalf("seed status tag: %v", err)
+	}
+	created, err := svc.create(CreateRequest{Name: "Alice", StatusID: &statusID})
+	if err != nil {
+		t.Fatalf("create contact with status: %v", err)
+	}
+	if created.Status == nil {
+		t.Fatal("status should be set before clearing")
+	}
+
+	empty := ""
+	updated, err := svc.update(created.ID, UpdateRequest{StatusID: &empty}, "")
+	if err != nil {
+		t.Fatalf("clear status: %v", err)
+	}
+	if updated.Status != nil {
+		t.Errorf("status = %+v, want nil after clearing", updated.Status)
+	}
+}
+
+func TestCreateContactRejectsInvalidStatusIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var tagID string
+	if err := db.QueryRow(
+		`INSERT INTO tags (name, type) VALUES ('Hot', 'tag') RETURNING id`,
+	).Scan(&tagID); err != nil {
+		t.Fatalf("seed tag: %v", err)
+	}
+
+	_, err := svc.create(CreateRequest{Name: "Alice", StatusID: &tagID})
+	if !errors.Is(err, ErrInvalidStatus) {
+		t.Errorf("create with tag-typed status = %v, want ErrInvalidStatus", err)
+	}
+}
+
+func TestUpdateContactMissingReturnsNotFoundIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	name := "Alice"
+	_, err := svc.update("00000000-0000-0000-0000-000000000000", UpdateRequest{Name: &name}, "")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("update missing contact = %v, want ErrNotFound", err)
+	}
+
+	if err := svc.delete("00000000-0000-0000-0000-000000000000", ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("delete missing contact = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateContactReportsUnknownTagWarningIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{Name: "Alice", TagIDs: []string{"00000000-0000-0000-0000-000000000000"}})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+	if len(created.Warnings) != 1 || !strings.Contains(created.Warnings[0], "unknown tag") {
+		t.Errorf("warnings = %+v, want unknown-tag warning", created.Warnings)
+	}
+	if len(created.Tags) != 0 {
+		t.Errorf("tags = %+v, want none", created.Tags)
+	}
+}
+
 func TestBulkCreateSharedTagsResolvedOnceIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -457,7 +609,7 @@ func TestCreateContactReturnsDuplicateWarningIntegration(t *testing.T) {
 
 func TestBulkCreateRejectsOver500RowsHandlerIntegration(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db))
+	h := NewHandler(NewService(db), stubPerms{can: true})
 
 	contacts := make([]BulkContact, 501)
 	for i := range contacts {
@@ -475,7 +627,7 @@ func TestBulkCreateRejectsOver500RowsHandlerIntegration(t *testing.T) {
 
 func TestBulkCreateRejectsOversizedBodyHandlerIntegration(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db))
+	h := NewHandler(NewService(db), stubPerms{can: true})
 
 	contacts := make([]BulkContact, 300)
 	for i := range contacts {
@@ -502,6 +654,15 @@ func seedTestUser(t *testing.T, db *sql.DB, email string) string {
 		t.Fatalf("seed user: %v", err)
 	}
 	return id
+}
+
+// stubPerms satisfies the handler's PermissionChecker for handler-level tests.
+type stubPerms struct {
+	can bool
+}
+
+func (p stubPerms) UserCan(_ string, _ string) (bool, error) {
+	return p.can, nil
 }
 
 func assertAuditRow(t *testing.T, db *sql.DB, resourceID, action string) {

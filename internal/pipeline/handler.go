@@ -1,10 +1,10 @@
 package pipeline
 
 import (
-	"encoding/json"
-	"net/http"
-
 	"crm/internal/respond"
+	"encoding/json"
+	"errors"
+	"net/http"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -17,9 +17,26 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	pipelines, err := h.svc.list()
-	if err != nil {
+// respondError maps service errors onto the HTTP contract.
+func respondError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound), respond.IsNotFound(err):
+		respond.JSON(
+			w,
+			http.StatusNotFound,
+			nil,
+			&respond.Error{Code: "NOT_FOUND", Message: ErrNotFound.Error()},
+			nil,
+		)
+	case errors.Is(err, ErrInUse):
+		respond.JSON(
+			w,
+			http.StatusConflict,
+			nil,
+			&respond.Error{Code: "CONFLICT", Message: "Delete the leads using this pipeline or stage first"},
+			nil,
+		)
+	default:
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,
@@ -27,6 +44,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
 			nil,
 		)
+	}
+}
+
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	pipelines, err := h.svc.list()
+	if err != nil {
+		respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -62,13 +86,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.svc.createPipeline(req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -95,13 +113,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.svc.updatePipeline(id, req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -159,13 +171,7 @@ func (h *Handler) CreateStage(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := h.svc.createStage(pipelineID, req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -192,13 +198,7 @@ func (h *Handler) UpdateStage(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := h.svc.updateStage(stageID, req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(

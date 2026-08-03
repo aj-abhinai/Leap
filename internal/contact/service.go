@@ -4,8 +4,18 @@ import (
 	"crm/internal/util"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+)
+
+var (
+	// ErrNotFound marks mutations targeting a contact that does not exist or
+	// has been deleted.
+	ErrNotFound = errors.New("contact not found")
+	// ErrInvalidStatus marks status_id values that do not reference a
+	// type='status' tag.
+	ErrInvalidStatus = errors.New("status_id must reference a status tag")
 )
 
 type Service struct {
@@ -167,13 +177,36 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 		slog.Error("load contact keys for duplicate check", "error", err)
 		keys = contactKeys{phones: map[string]bool{}, emails: map[string]bool{}}
 	}
+	return s.createWithKeys(req, keys)
+}
 
+// createWithKeys inserts a contact while reusing already-loaded duplicate
+// lookup keys. Bulk import calls this so the full-table key scan runs once
+// per import instead of once per row.
+func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact, error) {
 	var c Contact
-	err = s.db.QueryRow(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("create contact: %w", err)
+	}
+	defer tx.Rollback()
+
+	statusID := util.NullPtr(req.StatusID)
+	if statusID != nil {
+		valid, err := statusTagExists(tx, *statusID)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, ErrInvalidStatus
+		}
+	}
+
+	err = tx.QueryRow(
 		`INSERT INTO contacts (name, email, phone, location, age, status_id)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
-		req.Name, util.NullStr(req.Email), util.NullStr(req.Phone), util.NullStr(req.Location), req.Age, req.StatusID,
+		req.Name, util.NullStr(req.Email), util.NullStr(req.Phone), util.NullStr(req.Location), req.Age, statusID,
 	).Scan(
 		&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 	)
@@ -181,11 +214,12 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 		return nil, fmt.Errorf("create contact: %w", err)
 	}
 
-	for _, tagID := range req.TagIDs {
-		_, _ = s.db.Exec(
-			`INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-			c.ID, tagID,
-		)
+	unknownTags, err := syncTags(tx, c.ID, req.TagIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit contact: %w", err)
 	}
 
 	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
@@ -193,7 +227,10 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 		return nil, err
 	}
 	if reason := keys.duplicateReason(req.Phone, req.Email); reason != "" {
-		populated[0].Warnings = []string{reason}
+		populated[0].Warnings = append(populated[0].Warnings, reason)
+	}
+	if len(unknownTags) > 0 {
+		populated[0].Warnings = append(populated[0].Warnings, "ignored unknown tag id(s)")
 	}
 	return &populated[0], nil
 }
@@ -201,26 +238,45 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact, error) {
 	old, err := s.get(id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("update contact: %w", err)
+	}
+	defer tx.Rollback()
+
+	if req.StatusID != nil && *req.StatusID != "" {
+		valid, err := statusTagExists(tx, *req.StatusID)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, ErrInvalidStatus
+		}
+	}
+
 	var c Contact
-	err = s.db.QueryRow(
+	err = tx.QueryRow(
 		`UPDATE contacts SET
-			name = COALESCE($2, name),
-			email = COALESCE($3, email),
-			phone = COALESCE($4, phone),
-			location = COALESCE($5, location),
+			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
+			email = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE email END,
+			phone = CASE WHEN $4 IS NOT NULL THEN NULLIF($4, '') ELSE phone END,
+			location = CASE WHEN $5 IS NOT NULL THEN NULLIF($5, '') ELSE location END,
 			age = COALESCE($6, age),
-			status_id = COALESCE($7, status_id),
+			status_id = CASE WHEN $7 IS NOT NULL THEN NULLIF($7, '')::uuid ELSE status_id END,
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
 		id,
 		req.Name,
-		util.StrPtr(req.Email),
-		util.StrPtr(req.Phone),
-		util.StrPtr(req.Location),
+		req.Email,
+		req.Phone,
+		req.Location,
 		req.Age,
 		req.StatusID,
 	).Scan(
@@ -230,19 +286,26 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		return nil, fmt.Errorf("update contact: %w", err)
 	}
 
+	var unknownTags []string
 	if req.TagIDs != nil {
-		_, _ = s.db.Exec(`DELETE FROM contact_tags WHERE contact_id = $1`, id)
-		for _, tagID := range req.TagIDs {
-			_, _ = s.db.Exec(
-				`INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-				id, tagID,
-			)
+		if _, err := tx.Exec(`DELETE FROM contact_tags WHERE contact_id = $1`, id); err != nil {
+			return nil, fmt.Errorf("clear contact tags: %w", err)
 		}
+		unknownTags, err = syncTags(tx, id, req.TagIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit contact update: %w", err)
 	}
 
 	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
 	if err != nil {
 		return nil, err
+	}
+	if len(unknownTags) > 0 {
+		populated[0].Warnings = append(populated[0].Warnings, "ignored unknown tag id(s)")
 	}
 	c = populated[0]
 
@@ -253,13 +316,78 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 	return &c, nil
 }
 
+// queryer is satisfied by both *sql.DB and *sql.Tx so tag syncing can run
+// inside the mutation transaction.
+type queryer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// syncTags validates that every tag id exists and is a contact tag, inserts
+// the valid ones, and reports the unknown ids so callers can surface them as
+// warnings instead of silently dropping tags.
+func syncTags(q queryer, contactID string, tagIDs []string) ([]string, error) {
+	if len(tagIDs) == 0 {
+		return nil, nil
+	}
+	valid := map[string]bool{}
+	rows, err := q.Query(`SELECT id::text FROM tags WHERE type = 'tag' AND id::text = ANY($1)`, tagIDs)
+	if err != nil {
+		return nil, fmt.Errorf("validate contact tags: %w", err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		valid[id] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	unknown := []string{}
+	for _, id := range tagIDs {
+		if !valid[id] {
+			unknown = append(unknown, id)
+			continue
+		}
+		if _, err := q.Exec(
+			`INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			contactID, id,
+		); err != nil {
+			return nil, fmt.Errorf("attach contact tag: %w", err)
+		}
+	}
+	return unknown, nil
+}
+
 func (s *Service) delete(id string, userID string) error {
-	_, err := s.db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, id)
+	res, err := s.db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
 		return err
 	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
 	s.logActivity(id, "contact", "delete", `{"action":"deleted"}`, userID)
 	return nil
+}
+
+// statusTagExists reports whether the id references a tag of type 'status'.
+func statusTagExists(q queryer, statusID string) (bool, error) {
+	var exists bool
+	err := q.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM tags WHERE id = $1 AND type = 'status')`,
+		statusID,
+	).Scan(&exists)
+	return exists, err
 }
 
 func (s *Service) logActivity(resourceID, resourceType, action, changes, userID string) {

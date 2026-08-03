@@ -1,8 +1,8 @@
 package contact
 
 import (
+	"crm/internal/util"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"strings"
 )
@@ -99,6 +99,11 @@ func (k contactKeys) duplicateReason(phone, email string) string {
 	}
 }
 
+type pendingContact struct {
+	contact BulkContact
+	tagIDs  []string
+}
+
 func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error) {
 	resp := &BulkCreateResponse{}
 
@@ -112,6 +117,8 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 		return nil, err
 	}
 
+	pending := []pendingContact{}
+
 	for i, c := range req.Contacts {
 		if c.Name == "" {
 			resp.Failed++
@@ -124,26 +131,106 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 			continue
 		}
 		tagIDsForContact := []string{}
+		unknown := []string{}
 		for _, tagName := range c.Tags {
-			tagIDsForContact = append(tagIDsForContact, tagIDs[strings.TrimSpace(tagName)]...)
+			name := strings.TrimSpace(tagName)
+			ids := tagIDs[name]
+			if len(ids) == 0 {
+				unknown = append(unknown, name)
+			}
+			tagIDsForContact = append(tagIDsForContact, ids...)
 		}
-		_, err := s.create(CreateRequest{
-			Name:     c.Name,
-			Email:    c.Email,
-			Phone:    c.Phone,
-			Location: c.Location,
-			TagIDs:   tagIDsForContact,
-		})
-		if err != nil {
+		if len(unknown) > 0 {
 			resp.Failed++
-			slog.Error("bulk import row failed", "row", i+1, "error", err)
-			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "failed to create contact"})
+			resp.Errors = append(resp.Errors, BulkRowError{
+				Row:     i + 1,
+				Message: "unknown tag(s): " + strings.Join(unknown, ", "),
+			})
 			continue
 		}
+		pending = append(pending, pendingContact{contact: c, tagIDs: tagIDsForContact})
 		keys.recordMatch(c.Phone, c.Email)
-		resp.Imported++
 	}
+
+	if len(pending) == 0 {
+		return resp, nil
+	}
+
+	if err := s.insertContactsBulk(pending); err != nil {
+		return nil, err
+	}
+	resp.Imported = len(pending)
 	return resp, nil
+}
+
+// insertContactsBulk inserts every pre-validated row with one multi-row
+// INSERT and attaches all contact tags with one batch statement, so a 500-row
+// import costs a handful of queries instead of thousands.
+func (s *Service) insertContactsBulk(pending []pendingContact) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("bulk create: %w", err)
+	}
+	defer tx.Rollback()
+
+	args := make([]any, 0, len(pending)*6)
+	placeholders := make([]string, 0, len(pending))
+	argIdx := 1
+	for _, p := range pending {
+		placeholders = append(placeholders,
+			fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", argIdx, argIdx+1, argIdx+2, argIdx+3, argIdx+4, argIdx+5))
+		args = append(args,
+			p.contact.Name,
+			util.NullStr(p.contact.Email),
+			util.NullStr(p.contact.Phone),
+			util.NullStr(p.contact.Location),
+			nil,
+			nil,
+		)
+		argIdx += 6
+	}
+
+	query := `INSERT INTO contacts (name, email, phone, location, age, status_id) VALUES ` +
+		strings.Join(placeholders, ", ") +
+		` RETURNING id`
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return fmt.Errorf("bulk insert contacts: %w", err)
+	}
+	createdIDs := make([]string, 0, len(pending))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		createdIDs = append(createdIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	tagContactIDs := []string{}
+	tagIDsForInsert := []string{}
+	for i, p := range pending {
+		for _, tid := range p.tagIDs {
+			tagContactIDs = append(tagContactIDs, createdIDs[i])
+			tagIDsForInsert = append(tagIDsForInsert, tid)
+		}
+	}
+	if len(tagContactIDs) > 0 {
+		if _, err := tx.Exec(
+			`INSERT INTO contact_tags (contact_id, tag_id)
+			SELECT cid, tid FROM unnest($1::text[], $2::text[]) AS x(cid, tid)
+			ON CONFLICT DO NOTHING`,
+			tagContactIDs, tagIDsForInsert,
+		); err != nil {
+			return fmt.Errorf("bulk attach contact tags: %w", err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 // loadTagIDs resolves every tag name in the import with one query instead of a

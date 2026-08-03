@@ -1,9 +1,20 @@
 package pipeline
 
 import (
+	"crm/internal/respond"
 	"crm/internal/util"
 	"database/sql"
+	"errors"
 	"fmt"
+)
+
+var (
+	// ErrNotFound marks mutations targeting a pipeline or stage that does
+	// not exist.
+	ErrNotFound = errors.New("pipeline or stage not found")
+	// ErrInUse marks deletions blocked because leads or activities still
+	// reference the pipeline or stage.
+	ErrInUse = errors.New("resource is in use and cannot be deleted")
 )
 
 type Service struct {
@@ -99,14 +110,20 @@ func (s *Service) createPipeline(req CreatePipelineRequest) (*Pipeline, error) {
 func (s *Service) updatePipeline(id string, req UpdatePipelineRequest) (*Pipeline, error) {
 	var p Pipeline
 	err := s.db.QueryRow(
-		`UPDATE pipelines SET name = COALESCE($2, name), description = COALESCE($3, description), updated_at = now()
+		`UPDATE pipelines SET
+			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
+			description = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE description END,
+			updated_at = now()
 		WHERE id = $1
 		RETURNING id, name, COALESCE(description, ''), created_at, updated_at`,
 		id,
-		util.StrPtr(req.Name),
-		util.StrPtr(req.Description),
+		req.Name,
+		req.Description,
 	).Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("update pipeline: %w", err)
 	}
 	return &p, nil
@@ -114,7 +131,13 @@ func (s *Service) updatePipeline(id string, req UpdatePipelineRequest) (*Pipelin
 
 func (s *Service) deletePipeline(id string) error {
 	_, err := s.db.Exec(`DELETE FROM pipelines WHERE id = $1`, id)
-	return err
+	if err != nil {
+		if respond.IsForeignKeyViolation(err) {
+			return ErrInUse
+		}
+		return fmt.Errorf("delete pipeline: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage, error) {
@@ -128,6 +151,9 @@ func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage
 		util.NullStr(req.Color),
 	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.CreatedAt, &st.UpdatedAt)
 	if err != nil {
+		if respond.IsForeignKeyViolation(err) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("create stage: %w", err)
 	}
 	return &st, nil
@@ -136,16 +162,22 @@ func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage
 func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, error) {
 	var st Stage
 	err := s.db.QueryRow(
-		`UPDATE lead_stages SET name = COALESCE($2, name), "order" = COALESCE($3, "order"),
-			color = COALESCE($4, color), updated_at = now()
+		`UPDATE lead_stages SET
+			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
+			"order" = COALESCE($3, "order"),
+			color = CASE WHEN $4 IS NOT NULL THEN NULLIF($4, '') ELSE color END,
+			updated_at = now()
 		WHERE id = $1
 		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), created_at, updated_at`,
 		stageID,
-		util.StrPtr(req.Name),
+		req.Name,
 		req.Order,
-		util.StrPtr(req.Color),
+		req.Color,
 	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.CreatedAt, &st.UpdatedAt)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("update stage: %w", err)
 	}
 	return &st, nil
@@ -153,5 +185,11 @@ func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, e
 
 func (s *Service) deleteStage(stageID string) error {
 	_, err := s.db.Exec(`DELETE FROM lead_stages WHERE id = $1`, stageID)
-	return err
+	if err != nil {
+		if respond.IsForeignKeyViolation(err) {
+			return ErrInUse
+		}
+		return fmt.Errorf("delete stage: %w", err)
+	}
+	return nil
 }

@@ -1,10 +1,10 @@
 package tag
 
 import (
-	"encoding/json"
-	"net/http"
-
 	"crm/internal/respond"
+	"encoding/json"
+	"errors"
+	"net/http"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -21,6 +21,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	tagType := r.URL.Query().Get("type")
 	tags, err := h.svc.list(tagType)
 	if err != nil {
+		if errors.Is(err, ErrInvalidType) {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+				nil,
+			)
+			return
+		}
 		respond.JSON(
 			w,
 			http.StatusInternalServerError,
@@ -66,13 +76,32 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := h.svc.create(req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		switch {
+		case errors.Is(err, ErrInvalidType):
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+				nil,
+			)
+		case errors.Is(err, ErrDuplicate):
+			respond.JSON(
+				w,
+				http.StatusConflict,
+				nil,
+				&respond.Error{Code: "CONFLICT", Message: err.Error()},
+				nil,
+			)
+		default:
+			respond.JSON(
+				w,
+				http.StatusInternalServerError,
+				nil,
+				&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
+				nil,
+			)
+		}
 		return
 	}
 	respond.JSON(

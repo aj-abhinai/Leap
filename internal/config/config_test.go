@@ -1,6 +1,8 @@
 package config
 
 import (
+	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,5 +217,51 @@ func TestTemplateDoesNotBootUntilEdited(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("template config must not boot until placeholders are replaced")
+	}
+}
+
+func TestDSNEscapesReservedCharacters(t *testing.T) {
+	cfg := Config{}
+	cfg.DB = DB{Host: "db.example.com", Port: 5432, User: "crm", Password: "p@ss:w/rd?", Name: "crm db", SSLMode: "disable"}
+
+	dsn := cfg.DB.DSN()
+	if strings.Contains(dsn, "p@ss") {
+		t.Errorf("DSN leaks raw password characters: %s", dsn)
+	}
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse DSN: %v", err)
+	}
+	password, _ := parsed.User.Password()
+	if password != "p@ss:w/rd?" {
+		t.Errorf("round-tripped password = %q, want %q", password, "p@ss:w/rd?")
+	}
+	if parsed.User.Username() != "crm" {
+		t.Errorf("round-tripped user = %q, want crm", parsed.User.Username())
+	}
+}
+
+func TestLogLevel(t *testing.T) {
+	tests := []struct {
+		level string
+		want  slog.Level
+		ok    bool
+	}{
+		{level: "", want: slog.LevelInfo, ok: true},
+		{level: "info", want: slog.LevelInfo, ok: true},
+		{level: "debug", want: slog.LevelDebug, ok: true},
+		{level: "WARN", want: slog.LevelWarn, ok: true},
+		{level: "error", want: slog.LevelError, ok: true},
+		{level: "verbose", ok: false},
+	}
+	for _, tt := range tests {
+		got, err := (Log{Level: tt.level}).SlogLevel()
+		if (err == nil) != tt.ok {
+			t.Errorf("Level(%q) err = %v, ok want %v", tt.level, err, tt.ok)
+			continue
+		}
+		if tt.ok && got != tt.want {
+			t.Errorf("Level(%q) = %v, want %v", tt.level, got, tt.want)
+		}
 	}
 }

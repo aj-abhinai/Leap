@@ -30,7 +30,7 @@ func (s *Service) scanProgram(row interface{ Scan(...any) error }) (*Program, er
 // listActive returns non-archived programs for lead-form selection.
 func (s *Service) listActive() ([]Program, error) {
 	rows, err := s.db.Query(
-		`SELECT `+selectColumns+` FROM programs WHERE deleted_at IS NULL ORDER BY name`,
+		`SELECT ` + selectColumns + ` FROM programs WHERE deleted_at IS NULL ORDER BY name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list programs: %w", err)
@@ -42,7 +42,7 @@ func (s *Service) listActive() ([]Program, error) {
 // listAll returns every program including archived ones for settings.
 func (s *Service) listAll() ([]Program, error) {
 	rows, err := s.db.Query(
-		`SELECT `+selectColumns+` FROM programs ORDER BY deleted_at IS NULL, name`,
+		`SELECT ` + selectColumns + ` FROM programs ORDER BY deleted_at IS NULL, name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list all programs: %w", err)
@@ -94,15 +94,15 @@ func (s *Service) update(id string, req UpdateRequest) (*Program, error) {
 	}
 	p, err := s.scanProgram(s.db.QueryRow(
 		`UPDATE programs SET
-			name = COALESCE($2, name),
-			description = COALESCE($3, description),
+			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
+			description = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE description END,
 			price = COALESCE($4, price),
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING `+selectColumns,
 		id,
-		util.StrPtr(req.Name),
-		util.StrPtr(req.Description),
+		req.Name,
+		req.Description,
 		req.Price,
 	))
 	if errors.Is(err, sql.ErrNoRows) {

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiClient } from '@/composables/useApi'
 import { useContactsStore, type Contact } from '@/stores/contacts'
+import { useRBACStore } from '@/stores/rbac'
 import { toast } from 'vue-sonner'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Button } from '@/components/ui/button'
@@ -35,6 +36,7 @@ import { getAvatarColor, getInitials } from '@/utils/avatar'
 
 const store = useContactsStore()
 const router = useRouter()
+const rbac = useRBACStore()
 const search = shallowRef('')
 const page = shallowRef(1)
 const perPage = 20
@@ -69,6 +71,10 @@ const importOpen = shallowRef(false)
 
 async function loadContacts() {
   await store.fetchContacts(page.value, perPage, search.value)
+  if (store.contacts.length === 0 && page.value > 1 && store.total > 0) {
+    page.value = Math.max(1, Math.ceil(store.total / perPage))
+    await store.fetchContacts(page.value, perPage, search.value)
+  }
 }
 
 function onSearch() {
@@ -140,6 +146,7 @@ async function handleDelete() {
       <ContactsToolbar
         v-model:search="search"
         v-model:view-mode="viewMode"
+        :can-write="rbac.can('contact:write')"
         @search="onSearch"
         @import="importOpen = true"
         @create="openCreate"
@@ -216,10 +223,11 @@ async function handleDelete() {
                     >
                       <FolderKanban class="size-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon-sm" @click="openEdit(c)">
+                    <Button variant="ghost" size="icon-sm" @click="openEdit(c)" v-if="rbac.can('contact:write')">
                       <Pencil class="size-3.5" />
                     </Button>
                     <Button
+                      v-if="rbac.can('contact:delete')"
                       variant="ghost"
                       size="icon-sm"
                       @click="confirmDelete(c.id)"

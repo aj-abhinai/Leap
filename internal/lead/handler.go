@@ -13,11 +13,16 @@ import (
 )
 
 type Handler struct {
-	svc *Service
+	svc   *Service
+	perms PermissionChecker
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+type PermissionChecker interface {
+	UserCan(userID, permission string) (bool, error)
+}
+
+func NewHandler(svc *Service, perms PermissionChecker) *Handler {
+	return &Handler{svc: svc, perms: perms}
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +33,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
 	if perPage < 1 {
 		perPage = 50
+	}
+	if perPage > 200 {
+		perPage = 200
 	}
 	pipelineID := r.URL.Query().Get("pipeline_id")
 	stageID := r.URL.Query().Get("stage_id")
@@ -61,6 +69,22 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 			http.StatusBadRequest,
 			nil,
 			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+			nil,
+		)
+	case errors.Is(err, ErrNotFound), respond.IsNotFound(err):
+		respond.JSON(
+			w,
+			http.StatusNotFound,
+			nil,
+			&respond.Error{Code: "NOT_FOUND", Message: ErrNotFound.Error()},
+			nil,
+		)
+	case errors.Is(err, ErrStageNotInPipeline):
+		respond.JSON(
+			w,
+			http.StatusUnprocessableEntity,
+			nil,
+			&respond.Error{Code: "UNPROCESSABLE", Message: err.Error()},
 			nil,
 		)
 	default:
@@ -125,6 +149,23 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	if req.StageID != nil && *req.StageID != "" {
+		canMove, err := h.perms.UserCan(userID, "lead:move_stage")
+		if err != nil {
+			respondLeadMutationError(w, err)
+			return
+		}
+		if !canMove {
+			respond.JSON(
+				w,
+				http.StatusForbidden,
+				nil,
+				&respond.Error{Code: "FORBIDDEN", Message: "lead:move_stage permission required to move leads between stages"},
+				nil,
+			)
+			return
+		}
+	}
 	l, err := h.svc.update(id, req, userID)
 	if err != nil {
 		respondLeadMutationError(w, err)
@@ -143,13 +184,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	userID := ctxutil.GetUserID(r)
 	if err := h.svc.delete(id, userID); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondLeadMutationError(w, err)
 		return
 	}
 	respond.JSON(
@@ -163,15 +198,20 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListActivities(w http.ResponseWriter, r *http.Request) {
 	leadID := chi.URLParam(r, "id")
-	activities, err := h.svc.listActivities(leadID)
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if perPage < 1 {
+		perPage = 50
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+	activities, total, err := h.svc.listActivities(leadID, page, perPage)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondLeadMutationError(w, err)
 		return
 	}
 	respond.JSON(
@@ -179,7 +219,7 @@ func (h *Handler) ListActivities(w http.ResponseWriter, r *http.Request) {
 		http.StatusOK,
 		activities,
 		nil,
-		nil,
+		&respond.Meta{Page: page, PerPage: perPage, Total: total},
 	)
 }
 
@@ -232,15 +272,10 @@ func (h *Handler) CreateActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteActivity(w http.ResponseWriter, r *http.Request) {
+	leadID := chi.URLParam(r, "id")
 	activityID := chi.URLParam(r, "activity_id")
-	if err := h.svc.deleteActivity(activityID); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+	if err := h.svc.deleteActivity(leadID, activityID); err != nil {
+		respondLeadMutationError(w, err)
 		return
 	}
 	respond.JSON(

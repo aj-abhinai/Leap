@@ -2,10 +2,11 @@ package rbac
 
 import (
 	"crm/internal/auth"
-	"crm/internal/util"
+	"crm/internal/respond"
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,17 @@ var (
 	// ErrSuperadminRoleProtected is returned when an operation would delete,
 	// rename, or strip the wildcard permission from the superadmin role.
 	ErrSuperadminRoleProtected = errors.New("the superadmin role is protected")
+
+	// ErrLastManagerProtected is returned when an operation would leave no
+	// user able to manage roles and users.
+	ErrLastManagerProtected = errors.New("cannot remove the last user who can manage roles and users")
+
+	// ErrNotFound marks mutations targeting a role or user that does not
+	// exist.
+	ErrNotFound = errors.New("role or user not found")
+
+	// ErrDuplicate marks name collisions on uniquely named resources.
+	ErrDuplicate = errors.New("name already in use")
 )
 
 type Service struct {
@@ -114,6 +126,9 @@ func (s *Service) createRole(req CreateRoleRequest) (*Role, error) {
 		req.Name, req.Description,
 	).Scan(&r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
+		if respond.IsDuplicate(err) {
+			return nil, ErrDuplicate
+		}
 		return nil, fmt.Errorf("create role: %w", err)
 	}
 	return &r, nil
@@ -123,6 +138,9 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest) (*Role, error) {
 	if req.Name != "" {
 		var currentName string
 		if err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, id).Scan(&currentName); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
 			return nil, fmt.Errorf("update role: %w", err)
 		}
 		if currentName == "superadmin" && req.Name != "superadmin" {
@@ -131,12 +149,15 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest) (*Role, error) {
 	}
 	var r Role
 	err := s.db.QueryRow(
-		`UPDATE roles SET name = COALESCE($2, name), description = COALESCE($3, description), updated_at = now()
+		`UPDATE roles SET
+			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
+			description = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE description END,
+			updated_at = now()
 		WHERE id = $1
 		RETURNING id, name, COALESCE(description, ''), created_at, updated_at`,
 		id,
-		util.StrPtr(&req.Name),
-		util.StrPtr(&req.Description),
+		req.Name,
+		req.Description,
 	).Scan(&r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("update role: %w", err)
@@ -167,16 +188,28 @@ func (s *Service) assignPermission(roleID, permissionID string) error {
 		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 		roleID, permissionID,
 	)
-	return err
+	if err != nil {
+		if respond.IsForeignKeyViolation(err) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Service) removePermission(roleID, permissionID string) error {
 	var roleName string
 	if err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, roleID).Scan(&roleName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
 	var permName string
 	if err := s.db.QueryRow(`SELECT name FROM permissions WHERE id = $1`, permissionID).Scan(&permName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
 	}
 	if roleName == "superadmin" && permName == "*" {
@@ -234,12 +267,80 @@ func (s *Service) getRolePermissions(roleID string) ([]Permission, error) {
 
 func (s *Service) assignUserRole(userID, roleID string) error {
 	_, err := s.db.Exec(`INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, userID, roleID)
-	return err
+	if err != nil {
+		if respond.IsForeignKeyViolation(err) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Service) removeUserRole(userID, roleID string) error {
-	_, err := s.db.Exec(`DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2`, userID, roleID)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("remove user role: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := lockRBACMutations(tx); err != nil {
+		return fmt.Errorf("remove user role: %w", err)
+	}
+
+	var exists bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM roles WHERE id = $1)`,
+		roleID,
+	).Scan(&exists); err != nil {
+		return fmt.Errorf("remove user role: %w", err)
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	if err := tx.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`,
+		userID,
+	).Scan(&exists); err != nil {
+		return fmt.Errorf("remove user role: %w", err)
+	}
+	if !exists {
+		return ErrNotFound
+	}
+
+	if _, err := tx.Exec(`DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2`, userID, roleID); err != nil {
+		return fmt.Errorf("remove user role: %w", err)
+	}
+
+	canStillManage, err := userCanManageRBAC(tx, userID)
+	if err != nil {
+		return fmt.Errorf("remove user role: %w", err)
+	}
+	if !canStillManage {
+		others, err := countOtherRBACManagers(tx, userID)
+		if err != nil {
+			return fmt.Errorf("remove user role: %w", err)
+		}
+		if others == 0 {
+			return ErrLastManagerProtected
+		}
+	}
+	return tx.Commit()
+}
+
+// UserCan reports whether the user holds the permission, honoring the
+// wildcard. Used by handlers that need conditional permission checks the
+// route-level middleware cannot express.
+func (s *Service) UserCan(userID, permission string) (bool, error) {
+	perms, err := s.GetUserPermissions(userID)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range perms {
+		if p == "*" || p == permission {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) listUsers() ([]UserInfo, error) {
@@ -307,6 +408,7 @@ func (s *Service) createUser(name, email, password string) (*UserInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
+	email = strings.ToLower(strings.TrimSpace(email))
 	var u UserInfo
 	err = s.db.QueryRow(
 		`INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3)
@@ -314,6 +416,9 @@ func (s *Service) createUser(name, email, password string) (*UserInfo, error) {
 		name, email, hash,
 	).Scan(&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt)
 	if err != nil {
+		if respond.IsDuplicate(err) {
+			return nil, ErrDuplicate
+		}
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 	return &u, nil
@@ -323,18 +428,37 @@ func (s *Service) deleteUser(id, actorID string) error {
 	if actorID != "" && actorID == id {
 		return ErrSelfDelete
 	}
-	protected, err := s.userHasRole(id, "superadmin")
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := lockRBACMutations(tx); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+
+	protected, err := userHasRole(tx, id, "superadmin")
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	if protected {
 		return ErrSuperadminUserProtected
 	}
-	tx, err := s.db.Begin()
+
+	canManage, err := userCanManageRBAC(tx, id)
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
-	defer tx.Rollback()
+	if canManage {
+		others, err := countOtherRBACManagers(tx, id)
+		if err != nil {
+			return fmt.Errorf("delete user: %w", err)
+		}
+		if others == 0 {
+			return ErrLastManagerProtected
+		}
+	}
 
 	if _, err := tx.Exec(`DELETE FROM user_roles WHERE user_id = $1`, id); err != nil {
 		return fmt.Errorf("delete user roles: %w", err)
@@ -351,9 +475,18 @@ func (s *Service) deleteUser(id, actorID string) error {
 	return tx.Commit()
 }
 
-func (s *Service) userHasRole(userID, roleName string) (bool, error) {
+// lockRBACMutations serializes mutations that can remove the last RBAC
+// manager so concurrent deletions cannot both pass the count check.
+func lockRBACMutations(tx *sql.Tx) error {
+	const rbacMutationLockKey = 748391621
+	_, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, rbacMutationLockKey)
+	return err
+}
+
+// userHasRole reports whether the user holds a role with the given name.
+func userHasRole(tx *sql.Tx, userID, roleName string) (bool, error) {
 	var exists bool
-	err := s.db.QueryRow(
+	err := tx.QueryRow(
 		`SELECT EXISTS(
 			SELECT 1 FROM user_roles ur
 			JOIN roles r ON r.id = ur.role_id
@@ -362,6 +495,42 @@ func (s *Service) userHasRole(userID, roleName string) (bool, error) {
 		userID, roleName,
 	).Scan(&exists)
 	return exists, err
+}
+
+// userCanManageRBAC reports whether the user could manage roles and users,
+// either through rbac:manage or the wildcard.
+func userCanManageRBAC(tx *sql.Tx, userID string) (bool, error) {
+	var can bool
+	err := tx.QueryRow(
+		`SELECT EXISTS(
+			SELECT 1 FROM user_roles ur
+			JOIN roles r ON r.id = ur.role_id
+			JOIN role_permissions rp ON rp.role_id = r.id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE ur.user_id = $1 AND p.name IN ('rbac:manage', '*')
+		)`,
+		userID,
+	).Scan(&can)
+	return can, err
+}
+
+// countOtherRBACManagers counts users other than the excluded one who could
+// manage roles and users.
+func countOtherRBACManagers(tx *sql.Tx, excludeID string) (int, error) {
+	var count int
+	err := tx.QueryRow(
+		`SELECT COUNT(DISTINCT u.id) FROM users u
+		WHERE u.deleted_at IS NULL AND u.id <> $1
+		  AND EXISTS(
+			SELECT 1 FROM user_roles ur
+			JOIN roles r ON r.id = ur.role_id
+			JOIN role_permissions rp ON rp.role_id = r.id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE ur.user_id = u.id AND p.name IN ('rbac:manage', '*')
+		  )`,
+		excludeID,
+	).Scan(&count)
+	return count, err
 }
 
 type UserInfo struct {

@@ -5,7 +5,15 @@ import (
 	"time"
 )
 
-func (s *Service) listActivities(leadID string) ([]Activity, error) {
+func (s *Service) listActivities(leadID string, page, perPage int) ([]Activity, int, error) {
+	var total int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM lead_activities WHERE lead_id = $1`,
+		leadID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count activities: %w", err)
+	}
+	offset := (page - 1) * perPage
 	rows, err := s.db.Query(`
 		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
 			la.type, la.description, la.scheduled_at, la.remind_at, la.is_done, la.is_reminded,
@@ -14,9 +22,10 @@ func (s *Service) listActivities(leadID string) ([]Activity, error) {
 		LEFT JOIN users u ON u.id = la.user_id
 		LEFT JOIN lead_stages ls ON ls.id = la.stage_id
 		WHERE la.lead_id = $1
-		ORDER BY la.created_at DESC`, leadID)
+		ORDER BY la.created_at DESC
+		LIMIT $2 OFFSET $3`, leadID, perPage, offset)
 	if err != nil {
-		return nil, fmt.Errorf("list activities: %w", err)
+		return nil, 0, fmt.Errorf("list activities: %w", err)
 	}
 	defer rows.Close()
 	activities := []Activity{}
@@ -27,11 +36,11 @@ func (s *Service) listActivities(leadID string) ([]Activity, error) {
 			&a.Type, &a.Description, &a.ScheduledAt, &a.RemindAt, &a.IsDone, &a.IsReminded,
 			&a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		activities = append(activities, a)
 	}
-	return activities, nil
+	return activities, total, nil
 }
 
 func (s *Service) createActivity(leadID, stageID, userID string, req CreateActivityRequest) (*Activity, error) {
@@ -53,10 +62,17 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	return &a, nil
 }
 
-func (s *Service) deleteActivity(activityID string) error {
-	_, err := s.db.Exec(`DELETE FROM lead_activities WHERE id = $1`, activityID)
+func (s *Service) deleteActivity(leadID, activityID string) error {
+	res, err := s.db.Exec(`DELETE FROM lead_activities WHERE id = $1 AND lead_id = $2`, activityID, leadID)
 	if err != nil {
 		return fmt.Errorf("delete activity: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
