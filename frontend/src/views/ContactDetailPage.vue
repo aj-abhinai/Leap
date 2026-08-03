@@ -95,10 +95,31 @@ async function handleSave(body: Record<string, any>) {
           </div>
 
           <div class="space-y-2">
-            <div v-if="contact.email" class="flex items-center gap-2 text-sm text-muted-foreground">
+            <div v-if="contact.nickname" class="flex items-center gap-2 text-sm">
+              <Badge variant="secondary" class="text-xs">Nickname: {{ contact.nickname }}</Badge>
+            </div>
+            <div v-if="contact.emails?.length" class="flex items-start gap-2 text-sm text-muted-foreground">
+              <Mail class="mt-0.5 size-4 shrink-0" />
+              <div class="space-y-1">
+                <div v-for="e in contact.emails" :key="e.id" class="flex items-center gap-2">
+                  <span>{{ e.value }}</span>
+                  <Badge v-if="e.is_primary" variant="outline" class="text-[10px] px-1.5">primary</Badge>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="contact.email" class="flex items-center gap-2 text-sm text-muted-foreground">
               <Mail class="size-4" /> {{ contact.email }}
             </div>
-            <div v-if="contact.phone" class="flex items-center gap-2 text-sm text-muted-foreground">
+            <div v-if="contact.phones?.length" class="flex items-start gap-2 text-sm text-muted-foreground">
+              <Phone class="mt-0.5 size-4 shrink-0" />
+              <div class="space-y-1">
+                <div v-for="p in contact.phones" :key="p.id" class="flex items-center gap-2">
+                  <span>{{ p.value }}</span>
+                  <Badge v-if="p.is_primary" variant="outline" class="text-[10px] px-1.5">primary</Badge>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="contact.phone" class="flex items-center gap-2 text-sm text-muted-foreground">
               <Phone class="size-4" /> {{ contact.phone }}
             </div>
             <div v-if="contact.location" class="flex items-center gap-2 text-sm text-muted-foreground">

@@ -135,7 +135,7 @@ onMounted(async () => {
             <SheetHeader>
               <SheetTitle>Activities</SheetTitle>
               <SheetDescription v-if="activityLead">
-                Activities for <strong>{{ activityLead.name }}</strong>
+                Activities for <strong>{{ activityLead.display_name }}</strong>
               </SheetDescription>
             </SheetHeader>
             <div v-if="activityLead" class="mt-4 space-y-4">

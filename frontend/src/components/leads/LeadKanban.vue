@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, MoreHorizontal, ChevronRight, Link, ListChecks, BookOpen } from '@lucide/vue'
+import { Plus, MoreHorizontal, ChevronRight, ListChecks, BookOpen } from '@lucide/vue'
 import { formatCurrency } from '@/utils/format'
 
 const props = defineProps<{
@@ -94,7 +94,7 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
             @click="emit('edit', lead)"
           >
             <div class="flex items-start justify-between gap-2">
-              <div class="font-medium truncate">{{ lead.name }}</div>
+              <div class="font-medium truncate">{{ lead.display_name }}</div>
               <div class="flex items-center gap-0.5">
                 <Button variant="ghost" size="icon-sm" class="size-6 opacity-0 group-hover:opacity-100 transition-opacity" @click.stop="emit('viewActivities', lead)" title="Activities">
                   <ListChecks class="size-3" />
@@ -118,10 +118,8 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
                 </DropdownMenu>
               </div>
             </div>
-            <div v-if="lead.email" class="mt-0.5 text-xs text-muted-foreground truncate">{{ lead.email }}</div>
-            <div v-if="lead.contact_name" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-              <Link class="size-3" />
-              <span class="truncate">{{ lead.contact_name }}</span>
+            <div v-if="lead.contact_phone || lead.contact_email" class="mt-0.5 text-xs text-muted-foreground truncate">
+              {{ [lead.contact_phone, lead.contact_email].filter(Boolean).join(' · ') }}
             </div>
             <div v-if="lead.program_name" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
               <BookOpen class="size-3" />

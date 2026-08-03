@@ -43,7 +43,7 @@ async function handleSave() {
 <template>
   <LayoutShell>
     <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
-      <Card class="max-w-md">
+      <Card class="mx-auto max-w-md">
         <CardHeader>
           <div class="flex items-center gap-2">
             <div class="flex size-8 items-center justify-center rounded-md bg-muted">

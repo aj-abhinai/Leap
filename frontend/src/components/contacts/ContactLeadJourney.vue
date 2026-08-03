@@ -10,7 +10,7 @@ import { formatDate } from '@/utils/time'
 
 interface LeadInfo {
   id: string
-  name: string
+  display_name: string
   pipeline_id: string
   stage_name?: string
   program_name?: string
@@ -62,7 +62,7 @@ async function fetchLeads() {
         <CardContent class="p-3">
           <div class="flex items-start justify-between">
             <div class="min-w-0">
-              <div class="font-medium text-sm truncate">{{ lead.name }}</div>
+              <div class="font-medium text-sm truncate">{{ lead.display_name }}</div>
             <div class="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
               <span>Pipeline</span>
               <ChevronRight class="size-3" />

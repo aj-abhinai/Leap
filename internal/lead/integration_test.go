@@ -19,7 +19,7 @@ func TestCreateLeadStoresActorIntegration(t *testing.T) {
 	pipelineID, stageID := seedPipelineAndStage(t, db)
 
 	created, err := svc.create(CreateRequest{
-		Name:       "Alice Example",
+		NewContact: &NewContact{Name: "Alice Example", Phone: "1234567890"},
 		PipelineID: pipelineID,
 		StageID:    stageID,
 	}, userID)
@@ -50,7 +50,7 @@ func TestCreateLeadWithoutActorStoresNullActorIntegration(t *testing.T) {
 	pipelineID, stageID := seedPipelineAndStage(t, db)
 
 	created, err := svc.create(CreateRequest{
-		Name:       "Alice Example",
+		NewContact: &NewContact{Name: "Alice Example", Phone: "1234567890"},
 		PipelineID: pipelineID,
 		StageID:    stageID,
 	}, "")
@@ -82,7 +82,7 @@ func TestCreateLeadSnapshotsProgramPriceIntegration(t *testing.T) {
 	programID := seedProgram(t, db, "Coaching", 25000)
 
 	created, err := svc.create(CreateRequest{
-		Name:       "Alice Example",
+		NewContact: &NewContact{Name: "Alice Example", Phone: "1234567890"},
 		PipelineID: pipelineID,
 		StageID:    stageID,
 		ProgramID:  &programID,
@@ -109,7 +109,7 @@ func TestCatalogPriceChangeLeavesLeadValueIntegration(t *testing.T) {
 	programID := seedProgram(t, db, "Coaching", 25000)
 
 	created, err := svc.create(CreateRequest{
-		Name:       "Alice Example",
+		NewContact: &NewContact{Name: "Alice Example", Phone: "1234567890"},
 		PipelineID: pipelineID,
 		StageID:    stageID,
 		ProgramID:  &programID,
@@ -140,7 +140,7 @@ func TestProgramChangeResnapshotsValueIntegration(t *testing.T) {
 	programB := seedProgram(t, db, "Mentorship", 40000)
 
 	created, err := svc.create(CreateRequest{
-		Name:       "Alice Example",
+		NewContact: &NewContact{Name: "Alice Example", Phone: "1234567890"},
 		PipelineID: pipelineID,
 		StageID:    stageID,
 		ProgramID:  &programA,
@@ -172,7 +172,7 @@ func TestArchivedProgramRejectedForNewLeadIntegration(t *testing.T) {
 	}
 
 	_, err := svc.create(CreateRequest{
-		Name:       "Alice Example",
+		NewContact: &NewContact{Name: "Alice Example", Phone: "1234567890"},
 		PipelineID: pipelineID,
 		StageID:    stageID,
 		ProgramID:  &programID,
@@ -189,7 +189,7 @@ func TestCustomValueOverrideRejectedIntegration(t *testing.T) {
 	pipelineID, stageID := seedPipelineAndStage(t, db)
 	custom := 12345.0
 	_, err := svc.create(CreateRequest{
-		Name:       "Alice Example",
+		NewContact: &NewContact{Name: "Alice Example", Phone: "1234567890"},
 		PipelineID: pipelineID,
 		StageID:    stageID,
 		Value:      &custom,
@@ -205,7 +205,7 @@ func TestLeadWithoutProgramHasNullValueIntegration(t *testing.T) {
 
 	pipelineID, stageID := seedPipelineAndStage(t, db)
 	created, err := svc.create(CreateRequest{
-		Name:       "Alice Example",
+		NewContact: &NewContact{Name: "Alice Example", Phone: "1234567890"},
 		PipelineID: pipelineID,
 		StageID:    stageID,
 	}, "")
@@ -240,7 +240,6 @@ func TestOneContactTwoProgramsIntegration(t *testing.T) {
 		{programB, 40000},
 	} {
 		created, err := svc.create(CreateRequest{
-			Name:       "Alice Example",
 			ContactID:  &contactID,
 			PipelineID: pipelineID,
 			StageID:    stageID,
@@ -308,7 +307,7 @@ func TestCreateLeadBlocksWhileProgramLockedIntegration(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		_, err := svc.create(CreateRequest{
-			Name:       "Alice Example",
+			NewContact: &NewContact{Name: "Alice Example", Phone: "1234567890"},
 			PipelineID: pipelineID,
 			StageID:    stageID,
 			ProgramID:  &programID,
@@ -349,8 +348,7 @@ func TestUpdateLeadMissingReturnsNotFoundIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	name := "Alice"
-	_, err := svc.update("00000000-0000-0000-0000-000000000000", UpdateRequest{Name: &name}, "")
+	_, err := svc.update("00000000-0000-0000-0000-000000000000", UpdateRequest{}, "")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("update missing lead = %v, want ErrNotFound", err)
 	}
@@ -367,7 +365,11 @@ func TestCreateLeadRejectsForeignStageIntegration(t *testing.T) {
 	pipelineA, _ := seedPipelineAndStage(t, db)
 	_, stageB := seedPipelineAndStage(t, db)
 
-	_, err := svc.create(CreateRequest{Name: "Alice", PipelineID: pipelineA, StageID: stageB}, "")
+	_, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineA,
+		StageID:    stageB,
+	}, "")
 	if !errors.Is(err, ErrStageNotInPipeline) {
 		t.Errorf("create with foreign stage = %v, want ErrStageNotInPipeline", err)
 	}
@@ -378,7 +380,11 @@ func TestDeleteActivityScopedToLeadIntegration(t *testing.T) {
 	svc := NewService(db)
 
 	pipelineID, stageID := seedPipelineAndStage(t, db)
-	created, err := svc.create(CreateRequest{Name: "Alice", PipelineID: pipelineID, StageID: stageID}, "")
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
 	if err != nil {
 		t.Fatalf("create lead: %v", err)
 	}

@@ -36,7 +36,7 @@ func respondError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "NOT_FOUND", Message: ErrNotFound.Error()},
 			nil,
 		)
-	case errors.Is(err, ErrInvalidStatus):
+	case errors.Is(err, ErrInvalidStatus), errors.Is(err, ErrNoContactDetail):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,

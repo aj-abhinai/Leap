@@ -63,7 +63,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 func respondLeadMutationError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive):
+	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive),
+		errors.Is(err, ErrContactRequired), errors.Is(err, ErrNoContactDetail):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -110,12 +111,22 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if req.Name == "" || req.PipelineID == "" || req.StageID == "" {
+	if req.PipelineID == "" || req.StageID == "" {
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
 			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: "Name, pipeline_id and stage_id are required"},
+			&respond.Error{Code: "BAD_REQUEST", Message: "pipeline_id and stage_id are required"},
+			nil,
+		)
+		return
+	}
+	if (req.ContactID == nil || *req.ContactID == "") && req.NewContact == nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "a lead must reference a contact (contact_id or new_contact)"},
 			nil,
 		)
 		return

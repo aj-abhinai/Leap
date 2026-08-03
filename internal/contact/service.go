@@ -16,6 +16,8 @@ var (
 	// ErrInvalidStatus marks status_id values that do not reference a
 	// type='status' tag.
 	ErrInvalidStatus = errors.New("status_id must reference a status tag")
+	// ErrNoContactDetail marks contacts created without a phone or an email.
+	ErrNoContactDetail = errors.New("contact must have at least one phone or one email")
 )
 
 type Service struct {
@@ -34,12 +36,12 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 
 	if search != "" {
 		baseWhere += fmt.Sprintf(
-			" AND (name ILIKE $%d OR email ILIKE $%d OR phone ILIKE $%d)",
-			argIdx, argIdx+1, argIdx+2,
+			" AND (name ILIKE $%d OR nickname ILIKE $%d OR email ILIKE $%d OR phone ILIKE $%d)",
+			argIdx, argIdx+1, argIdx+2, argIdx+3,
 		)
 		searchTerm := "%" + search + "%"
-		args = append(args, searchTerm, searchTerm, searchTerm)
-		argIdx += 3
+		args = append(args, searchTerm, searchTerm, searchTerm, searchTerm)
+		argIdx += 4
 	}
 
 	countQuery := "SELECT COUNT(*) FROM contacts " + baseWhere
@@ -57,7 +59,8 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 	offset := (page - 1) * perPage
 
 	selectQuery := fmt.Sprintf(
-		`SELECT id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at
+		`SELECT id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''),
+			COALESCE(location, ''), age, created_at, updated_at
 		FROM contacts %s
 		ORDER BY created_at DESC
 		LIMIT $%d OFFSET $%d`,
@@ -75,7 +78,7 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 	for rows.Next() {
 		var c Contact
 		if err := rows.Scan(
-			&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+			&c.ID, &c.Name, &c.Nickname, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -88,9 +91,124 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 		if err != nil {
 			return nil, 0, err
 		}
+		contacts, err = s.populatePhonesEmails(contacts)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	return contacts, total, nil
+}
+
+// populatePhonesEmails attaches the primary phone/email (lists/compact views) to
+// each contact in one batched query, avoiding a join per value.
+func (s *Service) populatePhonesEmails(contacts []Contact) ([]Contact, error) {
+	if len(contacts) == 0 {
+		return contacts, nil
+	}
+	ids := make([]string, len(contacts))
+	for i, c := range contacts {
+		ids[i] = c.ID
+	}
+
+	// primary phone per contact
+	phoneRows, err := s.db.Query(
+		`SELECT DISTINCT ON (contact_id) contact_id, id, value
+		FROM contact_phones
+		WHERE contact_id = ANY($1) AND is_primary
+		ORDER BY contact_id, created_at`,
+		ids,
+	)
+	if err != nil {
+		return contacts, fmt.Errorf("load primary phones: %w", err)
+	}
+	defer phoneRows.Close()
+	phoneByContact := map[string]PhoneValue{}
+	for phoneRows.Next() {
+		var cid, id, value string
+		if err := phoneRows.Scan(&cid, &id, &value); err != nil {
+			return contacts, fmt.Errorf("scan primary phone: %w", err)
+		}
+		phoneByContact[cid] = PhoneValue{ID: id, Value: value, IsPrimary: true}
+	}
+
+	// primary email per contact
+	emailRows, err := s.db.Query(
+		`SELECT DISTINCT ON (contact_id) contact_id, id, value
+		FROM contact_emails
+		WHERE contact_id = ANY($1) AND is_primary
+		ORDER BY contact_id, created_at`,
+		ids,
+	)
+	if err != nil {
+		return contacts, fmt.Errorf("load primary emails: %w", err)
+	}
+	defer emailRows.Close()
+	emailByContact := map[string]EmailValue{}
+	for emailRows.Next() {
+		var cid, id, value string
+		if err := emailRows.Scan(&cid, &id, &value); err != nil {
+			return contacts, fmt.Errorf("scan primary email: %w", err)
+		}
+		emailByContact[cid] = EmailValue{ID: id, Value: value, IsPrimary: true}
+	}
+
+	for i := range contacts {
+		if p, ok := phoneByContact[contacts[i].ID]; ok {
+			contacts[i].Phone = p.Value
+			contacts[i].Phones = []PhoneValue{p}
+		}
+		if e, ok := emailByContact[contacts[i].ID]; ok {
+			contacts[i].Email = e.Value
+			contacts[i].Emails = []EmailValue{e}
+		}
+	}
+	return contacts, nil
+}
+
+// loadAllPhonesEmails attaches every phone and email (detail view) for a single
+// contact, ordered primary-first.
+func (s *Service) loadAllPhonesEmails(c *Contact) error {
+	phoneRows, err := s.db.Query(
+		`SELECT id, value, is_primary FROM contact_phones WHERE contact_id = $1 ORDER BY is_primary DESC, created_at`,
+		c.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("load contact phones: %w", err)
+	}
+	defer phoneRows.Close()
+	c.Phones = []PhoneValue{}
+	for phoneRows.Next() {
+		var p PhoneValue
+		if err := phoneRows.Scan(&p.ID, &p.Value, &p.IsPrimary); err != nil {
+			return fmt.Errorf("scan contact phone: %w", err)
+		}
+		c.Phones = append(c.Phones, p)
+	}
+	if len(c.Phones) > 0 {
+		c.Phone = c.Phones[0].Value
+	}
+
+	emailRows, err := s.db.Query(
+		`SELECT id, value, is_primary FROM contact_emails WHERE contact_id = $1 ORDER BY is_primary DESC, created_at`,
+		c.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("load contact emails: %w", err)
+	}
+	defer emailRows.Close()
+	c.Emails = []EmailValue{}
+	for emailRows.Next() {
+		var e EmailValue
+		if err := emailRows.Scan(&e.ID, &e.Value, &e.IsPrimary); err != nil {
+			return fmt.Errorf("scan contact email: %w", err)
+		}
+		c.Emails = append(c.Emails, e)
+	}
+	if len(c.Emails) > 0 {
+		c.Email = c.Emails[0].Value
+	}
+	return nil
 }
 
 func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string) ([]Contact, error) {
@@ -154,12 +272,13 @@ func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string)
 func (s *Service) get(id string) (*Contact, error) {
 	var c Contact
 	err := s.db.QueryRow(
-		`SELECT id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at
+		`SELECT id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''),
+			COALESCE(location, ''), age, created_at, updated_at
 		FROM contacts
 		WHERE id = $1 AND deleted_at IS NULL`,
 		id,
 	).Scan(
-		&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Nickname, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -168,7 +287,11 @@ func (s *Service) get(id string) (*Contact, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &populated[0], nil
+	c = populated[0]
+	if err := s.loadAllPhonesEmails(&c); err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 func (s *Service) create(req CreateRequest) (*Contact, error) {
@@ -202,16 +325,27 @@ func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact,
 		}
 	}
 
+	// validate the "at least one phone or one email" invariant
+	if req.Phone == "" && req.Email == "" && len(req.Phones) == 0 && len(req.Emails) == 0 {
+		return nil, ErrNoContactDetail
+	}
+
 	err = tx.QueryRow(
-		`INSERT INTO contacts (name, email, phone, location, age, status_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
-		req.Name, util.NullStr(req.Email), util.NullStr(req.Phone), util.NullStr(req.Location), req.Age, statusID,
+		`INSERT INTO contacts (name, nickname, email, phone, location, age, status_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
+		req.Name, util.NullStr(req.Nickname), util.NullStr(req.Email), util.NullStr(req.Phone),
+		util.NullStr(req.Location), req.Age, statusID,
 	).Scan(
-		&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Nickname, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create contact: %w", err)
+	}
+
+	// sync phones/emails child rows (also writes the primary flag)
+	if err := syncPhonesEmailsTx(tx, c.ID, req.Phones, req.Emails, req.Phone, req.Email); err != nil {
+		return nil, err
 	}
 
 	unknownTags, err := syncTags(tx, c.ID, req.TagIDs)
@@ -226,6 +360,9 @@ func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact,
 	if err != nil {
 		return nil, err
 	}
+	if err := s.loadAllPhonesEmails(&populated[0]); err != nil {
+		return nil, err
+	}
 	if reason := keys.duplicateReason(req.Phone, req.Email); reason != "" {
 		populated[0].Warnings = append(populated[0].Warnings, reason)
 	}
@@ -233,6 +370,85 @@ func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact,
 		populated[0].Warnings = append(populated[0].Warnings, "ignored unknown tag id(s)")
 	}
 	return &populated[0], nil
+}
+
+// syncPhonesEmailsTx replaces a contact's phone/email child rows with the given
+// values, maintaining exactly one primary per type. Each type is cleared and
+// rewritten only when its slice is non-nil, so a caller that sends just the
+// phones (or just the emails) does not wipe the other. When no explicit primary
+// is marked, the first value becomes primary; legacy scalar phone/email are
+// merged in as the primary when no child rows are provided.
+func syncPhonesEmailsTx(q queryer, contactID string, phones []PhoneValue, emails []EmailValue, scalarPhone, scalarEmail string) error {
+	// Merge legacy scalar values in as primary when no child rows exist.
+	if len(phones) == 0 && scalarPhone != "" {
+		phones = []PhoneValue{{Value: scalarPhone, IsPrimary: true}}
+	}
+	if len(emails) == 0 && scalarEmail != "" {
+		emails = []EmailValue{{Value: scalarEmail, IsPrimary: true}}
+	}
+
+	if phones != nil {
+		if _, err := q.Exec(`DELETE FROM contact_phones WHERE contact_id = $1`, contactID); err != nil {
+			return fmt.Errorf("clear contact phones: %w", err)
+		}
+		if err := insertPhoneRows(q, contactID, phones); err != nil {
+			return err
+		}
+	}
+	if emails != nil {
+		if _, err := q.Exec(`DELETE FROM contact_emails WHERE contact_id = $1`, contactID); err != nil {
+			return fmt.Errorf("clear contact emails: %w", err)
+		}
+		if err := insertEmailRows(q, contactID, emails); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertPhoneRows(q queryer, contactID string, phones []PhoneValue) error {
+	// ensure exactly one primary
+	hasPrimary := false
+	for i := range phones {
+		if phones[i].IsPrimary {
+			hasPrimary = true
+			break
+		}
+	}
+	if !hasPrimary && len(phones) > 0 {
+		phones[0].IsPrimary = true
+	}
+	for _, p := range phones {
+		if _, err := q.Exec(
+			`INSERT INTO contact_phones (contact_id, value, is_primary) VALUES ($1, $2, $3)`,
+			contactID, p.Value, p.IsPrimary,
+		); err != nil {
+			return fmt.Errorf("insert contact phone: %w", err)
+		}
+	}
+	return nil
+}
+
+func insertEmailRows(q queryer, contactID string, emails []EmailValue) error {
+	hasPrimary := false
+	for i := range emails {
+		if emails[i].IsPrimary {
+			hasPrimary = true
+			break
+		}
+	}
+	if !hasPrimary && len(emails) > 0 {
+		emails[0].IsPrimary = true
+	}
+	for _, e := range emails {
+		if _, err := q.Exec(
+			`INSERT INTO contact_emails (contact_id, value, is_primary) VALUES ($1, $2, $3)`,
+			contactID, e.Value, e.IsPrimary,
+		); err != nil {
+			return fmt.Errorf("insert contact email: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact, error) {
@@ -264,26 +480,47 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 	err = tx.QueryRow(
 		`UPDATE contacts SET
 			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
-			email = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE email END,
-			phone = CASE WHEN $4 IS NOT NULL THEN NULLIF($4, '') ELSE phone END,
-			location = CASE WHEN $5 IS NOT NULL THEN NULLIF($5, '') ELSE location END,
-			age = COALESCE($6, age),
-			status_id = CASE WHEN $7 IS NOT NULL THEN NULLIF($7, '')::uuid ELSE status_id END,
+			nickname = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE nickname END,
+			email = CASE WHEN $4 IS NOT NULL THEN NULLIF($4, '') ELSE email END,
+			phone = CASE WHEN $5 IS NOT NULL THEN NULLIF($5, '') ELSE phone END,
+			location = CASE WHEN $6 IS NOT NULL THEN NULLIF($6, '') ELSE location END,
+			age = COALESCE($7, age),
+			status_id = CASE WHEN $8 IS NOT NULL THEN NULLIF($8, '')::uuid ELSE status_id END,
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
+		RETURNING id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
 		id,
 		req.Name,
+		req.Nickname,
 		req.Email,
 		req.Phone,
 		req.Location,
 		req.Age,
 		req.StatusID,
 	).Scan(
-		&c.ID, &c.Name, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Nickname, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update contact: %w", err)
+	}
+
+	// Sync the phone/email child rows when the client sends a list. Each type is
+	// replaced only when sent, so a partial update never wipes the other.
+	if req.Phones != nil || req.Emails != nil {
+		var phones []PhoneValue
+		if req.Phones != nil {
+			phones = *req.Phones
+		}
+		var emails []EmailValue
+		if req.Emails != nil {
+			emails = *req.Emails
+		}
+		if len(phones) == 0 && len(emails) == 0 {
+			return nil, ErrNoContactDetail
+		}
+		if err := syncPhonesEmailsTx(tx, id, phones, emails, "", ""); err != nil {
+			return nil, err
+		}
 	}
 
 	var unknownTags []string
@@ -302,6 +539,9 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 
 	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
 	if err != nil {
+		return nil, err
+	}
+	if err := s.loadAllPhonesEmails(&populated[0]); err != nil {
 		return nil, err
 	}
 	if len(unknownTags) > 0 {

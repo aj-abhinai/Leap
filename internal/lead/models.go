@@ -4,11 +4,12 @@ import "time"
 
 type Lead struct {
 	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Email       string     `json:"email,omitempty"`
-	Phone       string     `json:"phone,omitempty"`
-	ContactID   *string    `json:"contact_id,omitempty"`
+	Nickname    string     `json:"nickname,omitempty"`
+	DisplayName string     `json:"display_name"`
+	ContactID   string     `json:"contact_id"`
 	ContactName string     `json:"contact_name,omitempty"`
+	ContactPhone string    `json:"contact_phone,omitempty"`
+	ContactEmail string    `json:"contact_email,omitempty"`
 	PipelineID  string     `json:"pipeline_id"`
 	StageID     string     `json:"stage_id"`
 	StageName   string     `json:"stage_name,omitempty"`
@@ -22,23 +23,28 @@ type Lead struct {
 	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
 }
 
+// NewContact holds the contact details to resolve-or-create when a lead is
+// created without an explicit contact_id.
+type NewContact struct {
+	Name   string `json:"name"`
+	Phone  string `json:"phone,omitempty"`
+	Email  string `json:"email,omitempty"`
+}
+
 type CreateRequest struct {
-	Name       string   `json:"name"`
-	Email      string   `json:"email,omitempty"`
-	Phone      string   `json:"phone,omitempty"`
-	ContactID  *string  `json:"contact_id,omitempty"`
-	PipelineID string   `json:"pipeline_id"`
-	StageID    string   `json:"stage_id"`
-	ProgramID  *string  `json:"program_id,omitempty"`
-	Value      *float64 `json:"value,omitempty"`
-	Notes      string   `json:"notes,omitempty"`
-	AssignedTo *string  `json:"assigned_to,omitempty"`
+	Nickname   string     `json:"nickname,omitempty"`
+	ContactID  *string    `json:"contact_id,omitempty"`
+	NewContact *NewContact `json:"new_contact,omitempty"`
+	PipelineID string     `json:"pipeline_id"`
+	StageID    string     `json:"stage_id"`
+	ProgramID  *string    `json:"program_id,omitempty"`
+	Value      *float64   `json:"value,omitempty"`
+	Notes      string     `json:"notes,omitempty"`
+	AssignedTo *string    `json:"assigned_to,omitempty"`
 }
 
 type UpdateRequest struct {
-	Name       *string  `json:"name,omitempty"`
-	Email      *string  `json:"email,omitempty"`
-	Phone      *string  `json:"phone,omitempty"`
+	Nickname   *string  `json:"nickname,omitempty"`
 	ContactID  *string  `json:"contact_id,omitempty"`
 	PipelineID *string  `json:"pipeline_id,omitempty"`
 	StageID    *string  `json:"stage_id,omitempty"`
@@ -71,3 +77,4 @@ type CreateActivityRequest struct {
 	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 	RemindAt    *time.Time `json:"remind_at,omitempty"`
 }
+

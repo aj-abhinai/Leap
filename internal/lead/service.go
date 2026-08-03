@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 var (
@@ -17,6 +18,11 @@ var (
 	// ErrStageNotInPipeline marks leads whose stage does not belong to the
 	// pipeline they are assigned to.
 	ErrStageNotInPipeline = errors.New("stage_id does not belong to the pipeline")
+	// ErrContactRequired marks lead creation with neither a contact_id nor a
+	// new_contact payload — a lead must reference a contact.
+	ErrContactRequired = errors.New("a lead must reference a contact")
+	// ErrNoContactDetail marks a new_contact with neither a phone nor an email.
+	ErrNoContactDetail = errors.New("new contact must have at least one phone or one email")
 )
 
 type Service struct {
@@ -64,13 +70,20 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 	offset := (page - 1) * perPage
 
 	selectQuery := fmt.Sprintf(
-		`SELECT l.id, l.name, COALESCE(l.email, ''), COALESCE(l.phone, ''),
-			l.contact_id, COALESCE(c.name, ''), l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
+		`SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
+			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
+			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
 			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
 		FROM leads l
 		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
 		LEFT JOIN contacts c ON l.contact_id = c.id
 		LEFT JOIN programs p ON l.program_id = p.id
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+		) pcp ON true
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+		) pce ON true
 		%s
 		ORDER BY l.created_at DESC
 		LIMIT $%d OFFSET $%d`,
@@ -88,12 +101,13 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 	for rows.Next() {
 		var l Lead
 		if err := rows.Scan(
-			&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.ContactName, &l.PipelineID, &l.StageID,
-			&l.StageName, &l.Value, &l.ProgramID, &l.ProgramName, &l.Notes, &l.AssignedTo,
-			&l.CreatedAt, &l.UpdatedAt,
+			&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
+			&l.PipelineID, &l.StageID, &l.StageName, &l.Value, &l.ProgramID, &l.ProgramName,
+			&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
+		l.DisplayName = l.displayName()
 		leads = append(leads, l)
 	}
 	return leads, total, nil
@@ -102,23 +116,39 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 func (s *Service) get(id string) (*Lead, error) {
 	var l Lead
 	err := s.db.QueryRow(
-		`SELECT l.id, l.name, COALESCE(l.email, ''), COALESCE(l.phone, ''),
-			l.contact_id, COALESCE(c.name, ''), l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
+		`SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
+			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
+			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
 			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
 		FROM leads l
 		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
 		LEFT JOIN contacts c ON l.contact_id = c.id
 		LEFT JOIN programs p ON l.program_id = p.id
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+		) pcp ON true
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+		) pce ON true
 		WHERE l.id = $1 AND l.deleted_at IS NULL`, id,
 	).Scan(
-		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.ContactName, &l.PipelineID, &l.StageID,
-		&l.StageName, &l.Value, &l.ProgramID, &l.ProgramName, &l.Notes, &l.AssignedTo,
-		&l.CreatedAt, &l.UpdatedAt,
+		&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
+		&l.PipelineID, &l.StageID, &l.StageName, &l.Value, &l.ProgramID, &l.ProgramName,
+		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	l.DisplayName = l.displayName()
 	return &l, nil
+}
+
+// displayName returns the lead's nickname when set, else the contact name.
+func (l *Lead) displayName() string {
+	if l.Nickname != "" {
+		return l.Nickname
+	}
+	return l.ContactName
 }
 
 func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
@@ -131,6 +161,12 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 	}
 	defer tx.Rollback()
 
+	// Resolve-or-create the backing contact.
+	contactID, err := s.resolveOrCreateContactTx(tx, req.ContactID, req.NewContact)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.validateStageForPipelineTx(tx, req.PipelineID, req.StageID); err != nil {
 		return nil, err
 	}
@@ -140,14 +176,12 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 	}
 	var l Lead
 	err = tx.QueryRow(
-		`INSERT INTO leads (name, email, phone, contact_id, pipeline_id, stage_id, program_id, value, notes, assigned_to)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id,
+		`INSERT INTO leads (nickname, contact_id, pipeline_id, stage_id, program_id, value, notes, assigned_to)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id, COALESCE(nickname, ''), contact_id, pipeline_id, stage_id,
 			program_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
-		req.Name,
-		util.NullStr(req.Email),
-		util.NullStr(req.Phone),
-		util.NullPtr(req.ContactID),
+		util.NullStr(req.Nickname),
+		contactID,
 		req.PipelineID,
 		req.StageID,
 		util.NullPtr(req.ProgramID),
@@ -155,7 +189,7 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 		util.NullStr(req.Notes),
 		util.NullPtr(req.AssignedTo),
 	).Scan(
-		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.ProgramID,
+		&l.ID, &l.Nickname, &l.ContactID, &l.PipelineID, &l.StageID, &l.ProgramID,
 		&l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
@@ -167,8 +201,84 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 	if err := s.populateNames(&l); err != nil {
 		return nil, err
 	}
+	l.DisplayName = l.displayName()
 	s.logActivity(l.ID, "lead", "create", "", userID)
 	return &l, nil
+}
+
+// resolveOrCreateContactTx links the lead to the contact_id when provided, else
+// resolves an existing contact by phone (primary) / email (secondary) from the
+// new_contact details, creating a new contact in the same transaction when none
+// matches. This is the "contact is the single source of truth" entry flow.
+func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *NewContact) (string, error) {
+	if contactID != nil && *contactID != "" {
+		return *contactID, nil
+	}
+	if nc == nil || nc.Name == "" {
+		return "", ErrContactRequired
+	}
+	if nc.Phone == "" && nc.Email == "" {
+		return "", ErrNoContactDetail
+	}
+
+	// Phone primary, email secondary (ADR 009). The child tables store the raw
+	// value for display, so the lookup normalizes both sides: the incoming value
+	// is stripped to digits and matched against the stored value with the same
+	// transformation. Any phone/email on a contact counts as a match (not just
+	// the primary), so an alternate number still resolves to the contact.
+	if phone := normalizePhone(nc.Phone); phone != "" {
+		var found string
+		err := tx.QueryRow(
+			`SELECT contact_id FROM contact_phones WHERE regexp_replace(value, '\D', '', 'g') = $1 LIMIT 1`,
+			phone,
+		).Scan(&found)
+		if err == nil {
+			return found, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("resolve contact by phone: %w", err)
+		}
+	}
+	if email := normalizeEmail(nc.Email); email != "" {
+		var found string
+		err := tx.QueryRow(
+			`SELECT contact_id FROM contact_emails WHERE lower(trim(value)) = $1 LIMIT 1`,
+			email,
+		).Scan(&found)
+		if err == nil {
+			return found, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("resolve contact by email: %w", err)
+		}
+	}
+
+	// No match — create the contact and link the lead in the same transaction.
+	var id string
+	err := tx.QueryRow(
+		`INSERT INTO contacts (name, email, phone) VALUES ($1, $2, $3) RETURNING id`,
+		nc.Name, util.NullStr(nc.Email), util.NullStr(nc.Phone),
+	).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("create contact from lead: %w", err)
+	}
+	if nc.Phone != "" {
+		if _, err := tx.Exec(
+			`INSERT INTO contact_phones (contact_id, value, is_primary) VALUES ($1, $2, true)`,
+			id, nc.Phone,
+		); err != nil {
+			return "", fmt.Errorf("insert lead contact phone: %w", err)
+		}
+	}
+	if nc.Email != "" {
+		if _, err := tx.Exec(
+			`INSERT INTO contact_emails (contact_id, value, is_primary) VALUES ($1, $2, true)`,
+			id, nc.Email,
+		); err != nil {
+			return "", fmt.Errorf("insert lead contact email: %w", err)
+		}
+	}
+	return id, nil
 }
 
 func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, error) {
@@ -224,24 +334,20 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	var l Lead
 	err = tx.QueryRow(
 		`UPDATE leads SET
-			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
-			email = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE email END,
-			phone = CASE WHEN $4 IS NOT NULL THEN NULLIF($4, '') ELSE phone END,
-			contact_id = CASE WHEN $5 IS NOT NULL THEN NULLIF($5, '')::uuid ELSE contact_id END,
-			pipeline_id = COALESCE($6, pipeline_id),
-			stage_id = COALESCE($7, stage_id),
-			program_id = CASE WHEN $8 IS NOT NULL THEN NULLIF($8, '')::uuid ELSE program_id END,
-			value = CASE WHEN $8 IS NOT NULL AND NULLIF($8, '') IS NULL THEN NULL ELSE COALESCE($9, value) END,
-			notes = CASE WHEN $10 IS NOT NULL THEN NULLIF($10, '') ELSE notes END,
-			assigned_to = CASE WHEN $11 IS NOT NULL THEN NULLIF($11, '')::uuid ELSE assigned_to END,
+			nickname = CASE WHEN $2 IS NOT NULL THEN NULLIF($2, '') ELSE nickname END,
+			contact_id = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '')::uuid ELSE contact_id END,
+			pipeline_id = COALESCE($4, pipeline_id),
+			stage_id = COALESCE($5, stage_id),
+			program_id = CASE WHEN $6 IS NOT NULL THEN NULLIF($6, '')::uuid ELSE program_id END,
+			value = CASE WHEN $6 IS NOT NULL AND NULLIF($6, '') IS NULL THEN NULL ELSE COALESCE($7, value) END,
+			notes = CASE WHEN $8 IS NOT NULL THEN NULLIF($8, '') ELSE notes END,
+			assigned_to = CASE WHEN $9 IS NOT NULL THEN NULLIF($9, '')::uuid ELSE assigned_to END,
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id, name, COALESCE(email, ''), COALESCE(phone, ''), contact_id, pipeline_id, stage_id,
+		RETURNING id, COALESCE(nickname, ''), contact_id, pipeline_id, stage_id,
 			program_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
 		id,
-		req.Name,
-		req.Email,
-		req.Phone,
+		req.Nickname,
 		req.ContactID,
 		req.PipelineID,
 		req.StageID,
@@ -250,7 +356,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		req.Notes,
 		req.AssignedTo,
 	).Scan(
-		&l.ID, &l.Name, &l.Email, &l.Phone, &l.ContactID, &l.PipelineID, &l.StageID, &l.ProgramID,
+		&l.ID, &l.Nickname, &l.ContactID, &l.PipelineID, &l.StageID, &l.ProgramID,
 		&l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
@@ -262,6 +368,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	if err := s.populateNames(&l); err != nil {
 		return nil, err
 	}
+	l.DisplayName = l.displayName()
 
 	action := "update"
 	desc := "Updated lead"
@@ -323,14 +430,28 @@ func (s *Service) populateNames(l *Lead) error {
 		}
 		l.ProgramName = programName
 	}
-	if l.ContactID == nil {
+	if l.ContactID == "" {
 		return nil
 	}
-	var contactName string
-	if err := s.db.QueryRow(`SELECT name FROM contacts WHERE id = $1`, *l.ContactID).Scan(&contactName); err != nil {
+	var contactName, contactPhone, contactEmail string
+	err = s.db.QueryRow(
+		`SELECT COALESCE(c.name, ''), COALESCE(pcp.value, ''), COALESCE(pce.value, '')
+		FROM contacts c
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_phones WHERE contact_id = c.id AND is_primary LIMIT 1
+		) pcp ON true
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_emails WHERE contact_id = c.id AND is_primary LIMIT 1
+		) pce ON true
+		WHERE c.id = $1`,
+		l.ContactID,
+	).Scan(&contactName, &contactPhone, &contactEmail)
+	if err != nil {
 		return fmt.Errorf("load contact name: %w", err)
 	}
 	l.ContactName = contactName
+	l.ContactPhone = contactPhone
+	l.ContactEmail = contactEmail
 	return nil
 }
 
@@ -372,6 +493,24 @@ func (s *Service) stageName(stageID string) (string, error) {
 		return "", fmt.Errorf("load stage name: %w", err)
 	}
 	return name, nil
+}
+
+// normalizePhone keeps only ASCII digits so identical numbers with different
+// formatting collapse to one lookup key (mirrors the contact package).
+func normalizePhone(phone string) string {
+	var b strings.Builder
+	for _, r := range phone {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// normalizeEmail trims and lowercases so case/whitespace differences collapse
+// to one lookup key (mirrors the contact package).
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 func (s *Service) logActivity(resourceID, resourceType, action, desc, userID string) {

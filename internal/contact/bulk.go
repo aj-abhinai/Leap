@@ -51,9 +51,22 @@ type contactKeys struct {
 
 func (s *Service) loadContactKeys() (contactKeys, error) {
 	keys := contactKeys{phones: map[string]bool{}, emails: map[string]bool{}}
-	rows, err := s.db.Query(
-		`SELECT COALESCE(phone, ''), COALESCE(email, '') FROM contacts WHERE deleted_at IS NULL`,
-	)
+	// phones and emails come from the child tables (contact_phones/contact_emails);
+	// legacy scalar columns are also scanned so dedupe still works for any rows
+	// created before the child tables were populated.
+	rows, err := s.db.Query(`
+		SELECT COALESCE(cp.value, ''), COALESCE(ce.value, '')
+		FROM contacts c
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_phones WHERE contact_id = c.id AND is_primary LIMIT 1
+		) cp ON true
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_emails WHERE contact_id = c.id AND is_primary LIMIT 1
+		) ce ON true
+		WHERE c.deleted_at IS NULL
+		UNION
+		SELECT COALESCE(phone, ''), COALESCE(email, '') FROM contacts WHERE deleted_at IS NULL
+	`)
 	if err != nil {
 		return keys, fmt.Errorf("load contact keys: %w", err)
 	}
@@ -213,10 +226,22 @@ func (s *Service) insertContactsBulk(pending []pendingContact) error {
 
 	tagContactIDs := []string{}
 	tagIDsForInsert := []string{}
+	phoneContactIDs := []string{}
+	phoneValues := []string{}
+	emailContactIDs := []string{}
+	emailValues := []string{}
 	for i, p := range pending {
 		for _, tid := range p.tagIDs {
 			tagContactIDs = append(tagContactIDs, createdIDs[i])
 			tagIDsForInsert = append(tagIDsForInsert, tid)
+		}
+		if p.contact.Phone != "" {
+			phoneContactIDs = append(phoneContactIDs, createdIDs[i])
+			phoneValues = append(phoneValues, p.contact.Phone)
+		}
+		if p.contact.Email != "" {
+			emailContactIDs = append(emailContactIDs, createdIDs[i])
+			emailValues = append(emailValues, p.contact.Email)
 		}
 	}
 	if len(tagContactIDs) > 0 {
@@ -227,6 +252,24 @@ func (s *Service) insertContactsBulk(pending []pendingContact) error {
 			tagContactIDs, tagIDsForInsert,
 		); err != nil {
 			return fmt.Errorf("bulk attach contact tags: %w", err)
+		}
+	}
+	if len(phoneContactIDs) > 0 {
+		if _, err := tx.Exec(
+			`INSERT INTO contact_phones (contact_id, value, is_primary)
+			SELECT cid, val, true FROM unnest($1::text[], $2::text[]) AS x(cid, val)`,
+			phoneContactIDs, phoneValues,
+		); err != nil {
+			return fmt.Errorf("bulk insert contact phones: %w", err)
+		}
+	}
+	if len(emailContactIDs) > 0 {
+		if _, err := tx.Exec(
+			`INSERT INTO contact_emails (contact_id, value, is_primary)
+			SELECT cid, val, true FROM unnest($1::text[], $2::text[]) AS x(cid, val)`,
+			emailContactIDs, emailValues,
+		); err != nil {
+			return fmt.Errorf("bulk insert contact emails: %w", err)
 		}
 	}
 

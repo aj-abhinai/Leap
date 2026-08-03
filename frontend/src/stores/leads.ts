@@ -4,11 +4,12 @@ import { apiClient } from '@/composables/useApi'
 
 export interface Lead {
   id: string
-  name: string
-  email?: string
-  phone?: string
-  contact_id?: string
+  nickname?: string
+  display_name: string
+  contact_id: string
   contact_name?: string
+  contact_phone?: string
+  contact_email?: string
   pipeline_id: string
   stage_id: string
   stage_name?: string

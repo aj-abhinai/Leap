@@ -8,11 +8,26 @@ export interface TagRef {
   color?: string
 }
 
+export interface PhoneValue {
+  id: string
+  value: string
+  is_primary: boolean
+}
+
+export interface EmailValue {
+  id: string
+  value: string
+  is_primary: boolean
+}
+
 export interface Contact {
   id: string
   name: string
+  nickname?: string
   email?: string
   phone?: string
+  phones?: PhoneValue[]
+  emails?: EmailValue[]
   location?: string
   age?: number
   tags?: TagRef[]
