@@ -88,9 +88,14 @@ func (a *Assets) ServeFrontend(w http.ResponseWriter, r *http.Request) {
 	}
 	rel := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 	if rel != "" && strings.HasPrefix(rel, "assets/") {
+		// Hashed filenames are content-addressed: safe to cache forever.
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		a.serveFile(w, r, rel)
 		return
 	}
+	// index.html references hashed assets; always revalidate so new
+	// builds are picked up.
+	w.Header().Set("Cache-Control", "no-cache")
 	a.serveFile(w, r, "index.html")
 }
 

@@ -56,13 +56,9 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  async function fetchContact(id: string): Promise<Contact | null> {
-    try {
-      const res = await apiClient.get(`/api/contacts/${id}`)
-      return res.data
-    } catch {
-      return null
-    }
+  async function fetchContact(id: string): Promise<Contact> {
+    const res = await apiClient.get(`/api/contacts/${id}`)
+    return res.data
   }
 
   async function fetchTotal() {

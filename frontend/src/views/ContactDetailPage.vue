@@ -27,13 +27,27 @@ const store = useContactsStore()
 
 const contact = ref<Contact | null>(null)
 const loading = shallowRef(true)
+const loadError = shallowRef('')
 const drawerOpen = shallowRef(false)
 
 onMounted(async () => {
   const id = route.params.id as string
-  contact.value = await store.fetchContact(id)
-  loading.value = false
+  await loadContact(id)
 })
+
+async function loadContact(id: string) {
+  loading.value = true
+  loadError.value = ''
+  try {
+    contact.value = await store.fetchContact(id)
+  } catch (e: any) {
+    contact.value = null
+    if (e.message === 'Contact not found') return
+    loadError.value = e.message || 'Failed to load contact'
+  } finally {
+    loading.value = false
+  }
+}
 
 function goBack() {
   router.push({ name: 'Contacts' })
@@ -45,9 +59,14 @@ async function handleSave(body: Record<string, any>) {
     await apiClient.patch(`/api/contacts/${contact.value.id}`, body)
     toast.success('Contact updated')
     drawerOpen.value = false
-    contact.value = await store.fetchContact(contact.value.id)
   } catch (e: any) {
     toast.error(e.message || 'Failed to update contact')
+    return
+  }
+  try {
+    contact.value = await store.fetchContact(contact.value.id)
+  } catch {
+    // Update succeeded; keep showing the previous data rather than blanking the page.
   }
 }
 </script>
@@ -67,6 +86,12 @@ async function handleSave(body: Record<string, any>) {
           <Skeleton class="h-16 w-full" />
         </div>
       </div>
+    </div>
+
+    <div v-else-if="loadError" class="flex flex-col items-center justify-center py-16">
+      <p class="text-destructive">{{ loadError }}</p>
+      <Button variant="outline" class="mt-3" @click="loadContact(route.params.id as string)">Retry</Button>
+      <Button variant="ghost" class="mt-2" @click="goBack">Back to Contacts</Button>
     </div>
 
     <div v-else-if="!contact" class="flex flex-col items-center justify-center py-16">

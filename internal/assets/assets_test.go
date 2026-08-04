@@ -78,6 +78,30 @@ func TestServeFrontend(t *testing.T) {
 	}
 }
 
+func TestServeFrontendCacheHeaders(t *testing.T) {
+	a := testAssets(t)
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "assets immutable", path: "/assets/app.js", want: "public, max-age=31536000, immutable"},
+		{name: "index no-cache", path: "/", want: "no-cache"},
+		{name: "spa fallback no-cache", path: "/contacts/123", want: "no-cache"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			a.ServeFrontend(rec, req)
+			if got := rec.Header().Get("Cache-Control"); got != tt.want {
+				t.Fatalf("Cache-Control = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestServeFrontendStuffed(t *testing.T) {
 	memFS, err := stuffbin.NewFS()
 	if err != nil {

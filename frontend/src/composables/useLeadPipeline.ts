@@ -24,7 +24,7 @@ export function useLeadPipeline() {
   async function loadLeads() {
     if (!selectedPipelineId.value) return
     try {
-      await leadsStore.fetchLeads(selectedPipelineId.value, '', 1, 100)
+      await leadsStore.fetchLeads(selectedPipelineId.value, '', 1, 200)
     } catch {
       toast.error('Failed to load leads')
     }

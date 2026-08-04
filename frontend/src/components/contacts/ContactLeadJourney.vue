@@ -25,16 +25,19 @@ const props = defineProps<{
 
 const leads = shallowRef<LeadInfo[]>([])
 const loading = shallowRef(false)
+const loadError = shallowRef('')
 
 onMounted(() => fetchLeads())
 
 async function fetchLeads() {
   loading.value = true
+  loadError.value = ''
   try {
     const res = await apiClient.get(`/api/leads?contact_id=${props.contactId}`)
     leads.value = res.data
-  } catch {
+  } catch (e: any) {
     leads.value = []
+    loadError.value = e.message || 'Failed to load leads'
   } finally {
     loading.value = false
   }
@@ -50,6 +53,10 @@ async function fetchLeads() {
 
     <div v-if="loading" class="space-y-2">
       <Skeleton v-for="i in 3" :key="i" class="h-16 w-full" />
+    </div>
+
+    <div v-else-if="loadError" class="rounded-lg border border-dashed p-6 text-center">
+      <p class="text-sm text-destructive">{{ loadError }}</p>
     </div>
 
     <div v-else-if="leads.length === 0" class="rounded-lg border border-dashed p-6 text-center">
