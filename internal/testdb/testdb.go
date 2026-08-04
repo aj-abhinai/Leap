@@ -35,13 +35,7 @@ func New(t *testing.T) *sql.DB {
 	pkgDir := filepath.Dir(file)
 	dbName := dbNameFor(pkgDir)
 
-	adminDSN := dsn
-	if u, err := url.Parse(dsn); err != nil {
-		t.Fatalf("testdb: parse TEST_DATABASE_URL: %v", err)
-	} else {
-		u.Path = "/postgres"
-		adminDSN = u.String()
-	}
+	adminDSN := setPath(t, dsn, "/postgres")
 	admin, err := sql.Open("pgx", adminDSN)
 	if err != nil {
 		t.Fatalf("testdb: open admin connection: %v", err)
@@ -49,13 +43,7 @@ func New(t *testing.T) *sql.DB {
 	defer admin.Close()
 	ensureDatabase(t, admin, dbName)
 
-	testDSN := dsn
-	if u, err := url.Parse(dsn); err != nil {
-		t.Fatalf("testdb: parse TEST_DATABASE_URL: %v", err)
-	} else {
-		u.Path = "/" + dbName
-		testDSN = u.String()
-	}
+	testDSN := setPath(t, dsn, "/"+dbName)
 	db, err := sql.Open("pgx", testDSN)
 	if err != nil {
 		t.Fatalf("testdb: open test database: %v", err)
@@ -67,6 +55,18 @@ func New(t *testing.T) *sql.DB {
 	migrateDB(t, pkgDir, testDSN)
 	truncateAll(t, db)
 	return db
+}
+
+// setPath returns dsn with its database path replaced, failing the test on
+// an unparseable URL.
+func setPath(t *testing.T, dsn, path string) string {
+	t.Helper()
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("testdb: parse TEST_DATABASE_URL: %v", err)
+	}
+	u.Path = path
+	return u.String()
 }
 
 func dbNameFor(pkgDir string) string {

@@ -305,7 +305,7 @@ async function handleSave() {
       <Button
         v-if="isEditing"
         variant="destructive"
-        @click="emit('delete', editingLead.id!)"
+        @click="editingLead && emit('delete', editingLead.id)"
       >
         Delete
       </Button>

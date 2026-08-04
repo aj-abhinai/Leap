@@ -507,11 +507,11 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 	// Sync the phone/email child rows when the client sends a list. Each type is
 	// replaced only when sent, so a partial update never wipes the other.
 	if req.Phones != nil || req.Emails != nil {
-		var phones []PhoneValue
+		phones := []PhoneValue{}
 		if req.Phones != nil {
 			phones = *req.Phones
 		}
-		var emails []EmailValue
+		emails := []EmailValue{}
 		if req.Emails != nil {
 			emails = *req.Emails
 		}
@@ -523,7 +523,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		}
 	}
 
-	var unknownTags []string
+	unknownTags := []string{}
 	if req.TagIDs != nil {
 		if _, err := tx.Exec(`DELETE FROM contact_tags WHERE contact_id = $1`, id); err != nil {
 			return nil, fmt.Errorf("clear contact tags: %w", err)

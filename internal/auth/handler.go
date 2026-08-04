@@ -60,15 +60,15 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				&respond.Error{Code: ae.Code, Message: ae.Message},
 				nil,
 			)
-		} else {
-			respond.JSON(
-				w,
-				http.StatusInternalServerError,
-				nil,
-				&respond.Error{Code: "INTERNAL", Message: "Login failed"},
-				nil,
-			)
+			return
 		}
+		respond.JSON(
+			w,
+			http.StatusInternalServerError,
+			nil,
+			&respond.Error{Code: "INTERNAL", Message: "Login failed"},
+			nil,
+		)
 		return
 	}
 	h.cfg.setRefreshCookie(w, resp.RefreshToken, h.ttls.Refresh)
@@ -109,15 +109,15 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 				&respond.Error{Code: ae.Code, Message: ae.Message},
 				nil,
 			)
-		} else {
-			respond.JSON(
-				w,
-				http.StatusInternalServerError,
-				nil,
-				&respond.Error{Code: "INTERNAL", Message: "Refresh failed"},
-				nil,
-			)
+			return
 		}
+		respond.JSON(
+			w,
+			http.StatusInternalServerError,
+			nil,
+			&respond.Error{Code: "INTERNAL", Message: "Refresh failed"},
+			nil,
+		)
 		return
 	}
 	h.cfg.setRefreshCookie(w, resp.RefreshToken, h.ttls.Refresh)
