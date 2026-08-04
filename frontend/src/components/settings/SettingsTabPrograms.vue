@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Archive, RotateCcw, BookOpen } from '@lucide/vue'
+import { formatCurrency } from '@/utils/format'
 
 interface Program {
   id: string
@@ -34,10 +35,6 @@ async function loadPrograms() {
   } catch (e: any) {
     toast.error(e.message || 'Failed to load programs')
   }
-}
-
-function formatPrice(price: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(price)
 }
 
 async function createProgram() {
@@ -157,7 +154,7 @@ async function restoreProgram(id: string) {
             <Badge v-if="p.archived" variant="secondary" class="text-xs">Archived</Badge>
           </CardTitle>
           <p v-if="p.description" class="text-sm text-muted-foreground mt-0.5">{{ p.description }}</p>
-          <p class="text-sm font-medium mt-1">{{ formatPrice(p.price) }}</p>
+          <p class="text-sm font-medium mt-1">{{ formatCurrency(p.price) }}</p>
         </div>
         <div v-if="!editing || editing.id !== p.id" class="flex gap-1">
           <Button variant="outline" size="sm" @click="startEdit(p)">Edit</Button>

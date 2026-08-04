@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Plus, MoreHorizontal, ChevronRight, ListChecks, BookOpen } from '@lucide/vue'
-import { formatCurrency } from '@/utils/format'
+import { formatCurrency, formatContactDetail } from '@/utils/format'
 
 const props = defineProps<{
   columns: (Stage & { leads: Lead[] })[]
@@ -119,7 +119,7 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
               </div>
             </div>
             <div v-if="lead.contact_phone || lead.contact_email" class="mt-0.5 text-xs text-muted-foreground truncate">
-              {{ [lead.contact_phone, lead.contact_email].filter(Boolean).join(' · ') }}
+              {{ formatContactDetail(lead.contact_phone, lead.contact_email) }}
             </div>
             <div v-if="lead.program_name" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
               <BookOpen class="size-3" />

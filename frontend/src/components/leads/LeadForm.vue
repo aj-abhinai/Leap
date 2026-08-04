@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select'
 import { Loader2, Link, Search } from '@lucide/vue'
 import type { Stage } from '@/stores/pipeline'
-import { formatCurrency } from '@/utils/format'
+import { formatCurrency, formatContactDetail } from '@/utils/format'
 
 export interface PrefillContact {
   id: string
@@ -224,7 +224,7 @@ async function handleSave() {
           >
             <span class="text-sm font-medium">{{ c.name }}</span>
             <span class="text-xs text-muted-foreground">
-              {{ [c.phone, c.email].filter(Boolean).join(' · ') }}
+              {{ formatContactDetail(c.phone, c.email) }}
             </span>
           </button>
         </div>

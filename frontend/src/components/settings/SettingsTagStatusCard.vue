@@ -13,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Plus, Trash2 } from '@lucide/vue'
 
 const props = defineProps<{
@@ -25,6 +26,7 @@ const store = useSettingsStore()
 
 const newName = shallowRef('')
 const error = shallowRef('')
+const deletingId = shallowRef<string | null>(null)
 
 const items = computed(() => (props.kind === 'tag' ? store.tags : store.statuses))
 
@@ -43,12 +45,19 @@ async function add() {
   }
 }
 
-async function remove(id: string) {
+function confirmDelete(id: string) {
+  deletingId.value = id
+}
+
+async function remove() {
+  if (!deletingId.value) return
   try {
-    await store.deleteTag(id)
+    await store.deleteTag(deletingId.value)
     toast.success('Deleted')
   } catch (e: any) {
     toast.error(e.message || 'Failed to delete')
+  } finally {
+    deletingId.value = null
   }
 }
 </script>
@@ -82,13 +91,23 @@ async function remove(id: string) {
           <TableRow v-for="item in items" :key="item.id">
             <TableCell>{{ item.name }}</TableCell>
             <TableCell>
-              <Button variant="ghost" size="icon-sm" @click="remove(item.id)">
+              <Button variant="ghost" size="icon-sm" @click="confirmDelete(item.id)">
                 <Trash2 class="size-3.5" />
               </Button>
             </TableCell>
           </TableRow>
         </TableBody>
       </Table>
+
+      <ConfirmDialog
+        :open="!!deletingId"
+        title="Delete"
+        :description="`Delete ${props.title.toLowerCase()} &ldquo;${items.find((i) => i.id === deletingId)?.name ?? ''}&rdquo;? This cannot be undone.`"
+        confirm-text="Delete"
+        destructive
+        @update:open="(v) => { if (!v) deletingId = null }"
+        @confirm="remove"
+      />
     </CardContent>
   </Card>
 </template>

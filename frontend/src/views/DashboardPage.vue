@@ -113,7 +113,7 @@ function activityIcon(action: string) {
           </div>
           <div v-else class="space-y-1">
             <div
-              v-for="entry in activity.entries.slice(0, 10)"
+              v-for="entry in activity.entries"
               :key="entry.id"
               class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted/50"
             >

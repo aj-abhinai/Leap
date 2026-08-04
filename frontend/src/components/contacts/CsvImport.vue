@@ -38,11 +38,8 @@ const preview = shallowRef<string[][]>([])
 const importing = shallowRef(false)
 const result = shallowRef<{ imported: number; failed: number; errors?: { row: number; message: string }[] } | null>(null)
 
-function onFileSelect(e: Event) {
+function loadFile(file: File) {
   error.value = ''
-  const target = e.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (!file) return
   if (!file.name.endsWith('.csv')) {
     error.value = 'Please select a CSV file'
     return
@@ -71,12 +68,15 @@ function onFileSelect(e: Event) {
   reader.readAsText(file)
 }
 
+function onFileSelect(e: Event) {
+  const target = e.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (file) loadFile(file)
+}
+
 function handleDrop(e: DragEvent) {
-  const files = e.dataTransfer?.files
-  const input = fileInput.value
-  if (!files?.length || !input) return
-  input.files = files
-  onFileSelect({ target: input } as unknown as Event)
+  const file = e.dataTransfer?.files?.[0]
+  if (file) loadFile(file)
 }
 
 function triggerUpload() {
