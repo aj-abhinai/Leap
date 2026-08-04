@@ -23,19 +23,23 @@ func NewService(db *sql.DB, cfg config.Auth) *Service {
 	return &Service{db: db, cfg: cfg}
 }
 
-func (s *Service) login(email, password string) (*TokenResponse, error) {
+func (s *Service) login(email, password string) (*TokenResponse, bool, error) {
 	var u User
 	err := s.db.QueryRow(
-		`SELECT id, name, email, password_hash FROM users WHERE email = $1 AND deleted_at IS NULL`,
+		`SELECT id, name, email, password_hash, must_change_password FROM users WHERE email = $1 AND deleted_at IS NULL`,
 		normalizeEmail(email),
-	).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash)
+	).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.MustChangePassword)
 	if err != nil {
-		return nil, ErrInvalidCredentials
+		return nil, false, ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
-		return nil, ErrInvalidCredentials
+		return nil, false, ErrInvalidCredentials
 	}
-	return s.generateTokenPair(u.ID)
+	resp, err := s.generateTokenPair(u.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	return resp, u.MustChangePassword, nil
 }
 
 // normalizeEmail trims and lowercases so case and whitespace differences in
@@ -156,11 +160,11 @@ func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 func (s *Service) getUser(userID string) (*User, error) {
 	var u User
 	err := s.db.QueryRow(
-		`SELECT id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at, updated_at
+		`SELECT id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), must_change_password, created_at, updated_at
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL`,
 		userID,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -175,13 +179,57 @@ func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*User,
 			phone = COALESCE($3, phone),
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at, updated_at`,
+		RETURNING id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), must_change_password, created_at, updated_at`,
 		userID, req.Name, req.Phone,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("update profile: %w", err)
 	}
 	return &u, nil
+}
+
+// changePassword verifies the current password and replaces it. The caller's
+// session survives (refreshing with a fresh token); all other sessions for
+// the user are revoked.
+func (s *Service) changePassword(userID, currentPassword, newPassword string) error {
+	if len(newPassword) < 8 {
+		return ErrPasswordTooShort
+	}
+	var currentHash string
+	err := s.db.QueryRow(
+		`SELECT password_hash FROM users WHERE id = $1 AND deleted_at IS NULL`,
+		userID,
+	).Scan(&currentHash)
+	if err != nil {
+		return fmt.Errorf("change password: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(currentPassword)); err != nil {
+		return ErrIncorrectPassword
+	}
+	newHash, err := HashPassword(newPassword, s.cfg.BcryptCost)
+	if err != nil {
+		return fmt.Errorf("change password: hash: %w", err)
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("change password: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		`UPDATE users SET password_hash = $2, must_change_password = false, updated_at = now() WHERE id = $1`,
+		userID, newHash,
+	); err != nil {
+		return fmt.Errorf("change password: update: %w", err)
+	}
+	if _, err := tx.Exec(
+		`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND NOT revoked`,
+		userID,
+	); err != nil {
+		return fmt.Errorf("change password: revoke sessions: %w", err)
+	}
+	return tx.Commit()
 }
 
 func HashPassword(password string, cost int) (string, error) {

@@ -3,20 +3,26 @@ package auth
 import "time"
 
 type User struct {
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Email        string     `json:"email"`
-	Phone        string     `json:"phone,omitempty"`
-	PasswordHash string     `json:"-"`
-	AvatarURL    *string    `json:"avatar_url,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+	ID                 string     `json:"id"`
+	Name               string     `json:"name"`
+	Email              string     `json:"email"`
+	Phone              string     `json:"phone,omitempty"`
+	PasswordHash       string     `json:"-"`
+	AvatarURL          *string    `json:"avatar_url,omitempty"`
+	MustChangePassword bool       `json:"must_change_password"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	DeletedAt          *time.Time `json:"deleted_at,omitempty"`
 }
 
 type UpdateProfileRequest struct {
 	Name  *string `json:"name,omitempty"`
 	Phone *string `json:"phone,omitempty"`
+}
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
 }
 
 type LoginRequest struct {
@@ -34,6 +40,8 @@ var (
 	ErrInvalidCredentials = &AuthError{Code: "INVALID_CREDENTIALS", Message: "Invalid email or password"}
 	ErrInvalidToken       = &AuthError{Code: "INVALID_TOKEN", Message: "Invalid or expired token"}
 	ErrTokenRevoked       = &AuthError{Code: "TOKEN_REVOKED", Message: "Token has been revoked"}
+	ErrIncorrectPassword  = &AuthError{Code: "INCORRECT_PASSWORD", Message: "Current password is incorrect"}
+	ErrPasswordTooShort   = &AuthError{Code: "BAD_REQUEST", Message: "Password must be at least 8 characters"}
 )
 
 type AuthError struct {

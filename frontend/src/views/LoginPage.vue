@@ -25,7 +25,11 @@ async function handleSubmit() {
   loading.value = true
   try {
     await auth.login(email.value, password.value)
-    router.push('/')
+    if (auth.mustChangePassword) {
+      router.push({ name: 'ChangePassword' })
+    } else {
+      router.push({ name: 'Dashboard' })
+    }
   } catch (e: any) {
     error.value = e.message || 'Login failed'
   } finally {

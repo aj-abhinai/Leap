@@ -52,6 +52,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Profile' },
   },
   {
+    path: '/change-password',
+    name: 'ChangePassword',
+    component: () => import('@/views/ChangePasswordPage.vue'),
+    meta: { title: 'Change Password' },
+  },
+  {
     path: '/reminders',
     name: 'Reminders',
     component: () => import('@/views/RemindersPage.vue'),
@@ -70,7 +76,17 @@ router.beforeEach((to, _from, next) => {
     return next({ name: 'Login' })
   }
   if (to.meta.public && auth.isAuthenticated) {
+    if (auth.mustChangePassword) {
+      return next({ name: 'ChangePassword' })
+    }
     return next({ name: 'Dashboard' })
+  }
+  if (
+    to.name !== 'ChangePassword' &&
+    auth.isAuthenticated &&
+    auth.mustChangePassword
+  ) {
+    return next({ name: 'ChangePassword' })
   }
   next()
 })

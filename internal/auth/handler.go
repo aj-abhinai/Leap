@@ -50,7 +50,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	resp, err := h.svc.login(req.Email, req.Password)
+	resp, mustChange, err := h.svc.login(req.Email, req.Password)
 	if err != nil {
 		if ae, ok := err.(*AuthError); ok {
 			respond.JSON(
@@ -77,8 +77,9 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		w,
 		http.StatusOK,
 		map[string]any{
-			"access_token": resp.AccessToken,
-			"expires_at":   resp.ExpiresAt,
+			"access_token":         resp.AccessToken,
+			"expires_at":           resp.ExpiresAt,
+			"must_change_password": mustChange,
 		},
 		nil,
 		nil,
@@ -198,6 +199,58 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		w,
 		http.StatusOK,
 		u,
+		nil,
+		nil,
+	)
+}
+
+func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	userID := ctxutil.GetUserID(r)
+	var req ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Current and new passwords are required"},
+			nil,
+		)
+		return
+	}
+	if err := h.svc.changePassword(userID, req.CurrentPassword, req.NewPassword); err != nil {
+		if ae, ok := err.(*AuthError); ok {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: ae.Code, Message: ae.Message},
+				nil,
+			)
+			return
+		}
+		respond.JSON(
+			w,
+			http.StatusInternalServerError,
+			nil,
+			&respond.Error{Code: "INTERNAL", Message: "Failed to change password"},
+			nil,
+		)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		map[string]string{"message": "Password changed"},
 		nil,
 		nil,
 	)

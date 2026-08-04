@@ -411,7 +411,7 @@ func (s *Service) createUser(name, email, password string) (*UserInfo, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var u UserInfo
 	err = s.db.QueryRow(
-		`INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3)
+		`INSERT INTO users (name, email, password_hash, must_change_password) VALUES ($1, $2, $3, true)
 		RETURNING id, name, email, COALESCE(avatar_url, ''), created_at`,
 		name, email, hash,
 	).Scan(&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt)

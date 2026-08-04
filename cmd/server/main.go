@@ -152,6 +152,7 @@ func main() {
 
 		r.Get("/api/auth/me", authH.Me)
 		r.Patch("/api/auth/me", authH.UpdateProfile)
+		r.Patch("/api/auth/me/password", authH.ChangePassword)
 		r.Get("/api/auth/me/permissions", rbacH.MePermissions)
 
 		r.Get("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:read", contactH.List))

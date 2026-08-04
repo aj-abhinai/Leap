@@ -16,9 +16,12 @@ func TestLoginIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	resp, err := svc.login("alice@example.com", "correct-horse")
+	resp, mustChange, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
+	}
+	if mustChange {
+		t.Error("expected must_change_password=false for a normal login")
 	}
 	if resp.AccessToken == "" {
 		t.Error("expected non-empty access token")
@@ -36,7 +39,7 @@ func TestLoginWrongPasswordIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	_, err := svc.login("alice@example.com", "wrong-password")
+	_, _, err := svc.login("alice@example.com", "wrong-password")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("expected ErrInvalidCredentials, got %v", err)
 	}
@@ -46,7 +49,7 @@ func TestLoginUnknownUserIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db, authTestConfig())
 
-	_, err := svc.login("nobody@example.com", "whatever-password")
+	_, _, err := svc.login("nobody@example.com", "whatever-password")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("expected ErrInvalidCredentials, got %v", err)
 	}
@@ -57,7 +60,7 @@ func TestRefreshRotationIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	first, err := svc.login("alice@example.com", "correct-horse")
+	first, _, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -78,7 +81,7 @@ func TestRefreshReuseOldTokenRejectedIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	first, err := svc.login("alice@example.com", "correct-horse")
+	first, _, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -107,7 +110,7 @@ func TestRefreshRejectedAfterUserDeactivationIntegration(t *testing.T) {
 	userID := seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	resp, err := svc.login("alice@example.com", "correct-horse")
+	resp, _, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -126,7 +129,7 @@ func TestAccessTokenValidationIntegration(t *testing.T) {
 	userID := seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	resp, err := svc.login("alice@example.com", "correct-horse")
+	resp, _, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -141,6 +144,103 @@ func TestAccessTokenValidationIntegration(t *testing.T) {
 	tampered := resp.AccessToken[:len(resp.AccessToken)-2] + "xx"
 	if _, err := svc.ValidateJWT(tampered); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("expected ErrInvalidToken for tampered token, got %v", err)
+	}
+}
+
+func TestLoginMustChangePasswordFlagIntegration(t *testing.T) {
+	db := testdb.New(t)
+	id := seedUserWithFlag(t, db, "bob@example.com", "correct-horse", true)
+	svc := NewService(db, authTestConfig())
+
+	resp, mustChange, err := svc.login("bob@example.com", "correct-horse")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if !mustChange {
+		t.Error("expected must_change_password=true for a flagged user")
+	}
+	if resp.AccessToken == "" {
+		t.Error("expected non-empty access token")
+	}
+
+	// Verify the /me endpoint returns the flag.
+	u, err := svc.getUser(id)
+	if err != nil {
+		t.Fatalf("getUser: %v", err)
+	}
+	if !u.MustChangePassword {
+		t.Error("expected MustChangePassword=true from getUser")
+	}
+}
+
+func TestChangePasswordSuccessIntegration(t *testing.T) {
+	db := testdb.New(t)
+	id := seedUserWithFlag(t, db, "carol@example.com", "original-pw", true)
+	svc := NewService(db, authTestConfig())
+
+	err := svc.changePassword(id, "original-pw", "new-password")
+	if err != nil {
+		t.Fatalf("changePassword: %v", err)
+	}
+
+	// Log in with the new password, flag should now be false.
+	_, mustChange, err := svc.login("carol@example.com", "new-password")
+	if err != nil {
+		t.Fatalf("login with new password: %v", err)
+	}
+	if mustChange {
+		t.Error("expected must_change_password=false after successful password change")
+	}
+}
+
+func TestChangePasswordWrongCurrentIntegration(t *testing.T) {
+	db := testdb.New(t)
+	id := seedUserWithFlag(t, db, "dave@example.com", "real-pw", true)
+	svc := NewService(db, authTestConfig())
+
+	err := svc.changePassword(id, "wrong-current", "new-password")
+	if !errors.Is(err, ErrIncorrectPassword) {
+		t.Errorf("expected ErrIncorrectPassword, got %v", err)
+	}
+}
+
+func TestChangePasswordTooShortIntegration(t *testing.T) {
+	db := testdb.New(t)
+	id := seedUser(t, db, "eve@example.com", "correct-horse")
+	svc := NewService(db, authTestConfig())
+
+	err := svc.changePassword(id, "correct-horse", "short")
+	if !errors.Is(err, ErrPasswordTooShort) {
+		t.Errorf("expected ErrPasswordTooShort, got %v", err)
+	}
+}
+
+func TestChangePasswordRevokesSessionsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	id := seedUserWithFlag(t, db, "frank@example.com", "frank-pw", false)
+	svc := NewService(db, authTestConfig())
+
+	// Create two refresh-token sessions.
+	resp1, _, err := svc.login("frank@example.com", "frank-pw")
+	if err != nil {
+		t.Fatalf("login 1: %v", err)
+	}
+	resp2, _, err := svc.login("frank@example.com", "frank-pw")
+	if err != nil {
+		t.Fatalf("login 2: %v", err)
+	}
+
+	err = svc.changePassword(id, "frank-pw", "new-frank-pw")
+	if err != nil {
+		t.Fatalf("changePassword: %v", err)
+	}
+
+	// Both sessions should be revoked.
+	if _, err := svc.refresh(resp1.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
+		t.Errorf("session 1: expected ErrTokenRevoked, got %v", err)
+	}
+	if _, err := svc.refresh(resp2.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
+		t.Errorf("session 2: expected ErrTokenRevoked, got %v", err)
 	}
 }
 
@@ -163,6 +263,23 @@ func seedUser(t *testing.T, db *sql.DB, email, password string) string {
 	err = db.QueryRow(
 		`INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id`,
 		"Test User", email, hash,
+	).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	return id
+}
+
+func seedUserWithFlag(t *testing.T, db *sql.DB, email, password string, mustChange bool) string {
+	t.Helper()
+	hash, err := HashPassword(password, bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	var id string
+	err = db.QueryRow(
+		`INSERT INTO users (name, email, password_hash, must_change_password) VALUES ($1, $2, $3, $4) RETURNING id`,
+		"Test User", email, hash, mustChange,
 	).Scan(&id)
 	if err != nil {
 		t.Fatalf("seed user: %v", err)

@@ -8,11 +8,13 @@ interface User {
   email: string
   phone?: string
   avatar_url?: string
+  must_change_password: boolean
 }
 
 interface LoginResponse {
   access_token: string
   expires_at: number
+  must_change_password?: boolean
 }
 
 const CSRF_COOKIE = 'crm_csrf'
@@ -30,6 +32,7 @@ function csrfHeaders(): Record<string, string> {
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
   const accessToken = ref<string | null>(null)
+  const mustChangePassword = ref(false)
 
   const isAuthenticated = computed(() => !!accessToken.value)
 
@@ -40,6 +43,7 @@ export const useAuthStore = defineStore('auth', () => {
   function clear() {
     accessToken.value = null
     user.value = null
+    mustChangePassword.value = false
   }
 
   async function fetchUser() {
@@ -51,6 +55,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (res.ok) {
         const json = await res.json()
         user.value = json.data
+        mustChangePassword.value = json.data.must_change_password === true
       }
     } catch {}
   }
@@ -89,7 +94,10 @@ export const useAuthStore = defineStore('auth', () => {
     const json = await res.json()
     if (json.error) throw new Error(json.error.message)
     setAccess(json.data)
-    await fetchUser()
+    mustChangePassword.value = json.data.must_change_password === true
+    if (!mustChangePassword.value) {
+      await fetchUser()
+    }
     return json.data
   }
 
@@ -121,8 +129,30 @@ export const useAuthStore = defineStore('auth', () => {
   async function updateProfile(name: string, phone: string) {
     const res = await apiClient.patch('/api/auth/me', { name, phone })
     user.value = res.data
+    mustChangePassword.value = res.data.must_change_password === true
     return res.data
   }
 
-  return { user, accessToken, isAuthenticated, login, refresh, logout, bootstrap, fetchUser, updateProfile }
+  async function changePassword(currentPassword: string, newPassword: string) {
+    const res = await apiClient.patch('/api/auth/me/password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    })
+    mustChangePassword.value = false
+    return res.data
+  }
+
+  return {
+    user,
+    accessToken,
+    mustChangePassword,
+    isAuthenticated,
+    login,
+    refresh,
+    logout,
+    bootstrap,
+    fetchUser,
+    updateProfile,
+    changePassword,
+  }
 })

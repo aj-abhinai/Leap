@@ -130,4 +130,42 @@ describe('auth store', () => {
     expect(auth.accessToken).toBeNull()
     expect(auth.isAuthenticated).toBe(false)
   })
+
+  it('login sets mustChangePassword when server returns the flag', async () => {
+    const fetchMock = vi.fn()
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          access_token: accessToken,
+          expires_at: 999,
+          must_change_password: true,
+        },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const auth = useAuthStore()
+    await auth.login('user@example.com', 'password')
+
+    expect(auth.mustChangePassword).toBe(true)
+    expect(auth.user).toBeNull()
+    expect(auth.isAuthenticated).toBe(true)
+  })
+
+  it('changePassword clears the flag and returns the message', async () => {
+    const fetchMock = vi.fn()
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: { access_token: accessToken, expires_at: 999 } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 'u1', name: 'Alice', email: 'a@b.c', must_change_password: false } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const auth = useAuthStore()
+    await auth.bootstrap()
+    auth.mustChangePassword = true
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { message: 'Password changed' } }))
+    await auth.changePassword('old', 'new-password')
+
+    expect(auth.mustChangePassword).toBe(false)
+  })
 })

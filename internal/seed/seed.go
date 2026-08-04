@@ -43,7 +43,10 @@ func seedSuperadmin(db *sql.DB, cfg config.Auth, superadmin config.Superadmin) e
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(`INSERT INTO users (name, email, password_hash) VALUES ('Super Admin', $1, $2)`, email, hash)
+	_, err = db.Exec(
+		`INSERT INTO users (name, email, password_hash, must_change_password) VALUES ('Super Admin', $1, $2, true)`,
+		email, hash,
+	)
 	if err != nil {
 		return err
 	}
