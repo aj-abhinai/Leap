@@ -53,6 +53,7 @@ type UpdateRequest struct {
 	ProgramID  *string  `json:"program_id,omitempty"`
 	Value      *float64 `json:"value,omitempty"`
 	Notes      *string  `json:"notes,omitempty"`
+	LostReason *string  `json:"lost_reason,omitempty"`
 	AssignedTo *string  `json:"assigned_to,omitempty"`
 }
 

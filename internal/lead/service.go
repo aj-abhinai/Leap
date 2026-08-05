@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 var (
@@ -71,7 +72,8 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 	selectQuery := fmt.Sprintf(
 		`SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
 			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
-			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
+			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(l.outcome, ''),
+			COALESCE(l.lost_reason, ''), l.value,
 			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
 		FROM leads l
 		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
@@ -101,7 +103,7 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 		var l Lead
 		if err := rows.Scan(
 			&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
-			&l.PipelineID, &l.StageID, &l.StageName, &l.Value, &l.ProgramID, &l.ProgramName,
+			&l.PipelineID, &l.StageID, &l.StageName, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
 			&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
@@ -117,7 +119,8 @@ func (s *Service) get(id string) (*Lead, error) {
 	err := s.db.QueryRow(
 		`SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
 			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
-			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), l.value,
+			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(l.outcome, ''),
+			COALESCE(l.lost_reason, ''), l.value,
 			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
 		FROM leads l
 		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
@@ -132,7 +135,7 @@ func (s *Service) get(id string) (*Lead, error) {
 		WHERE l.id = $1 AND l.deleted_at IS NULL`, id,
 	).Scan(
 		&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
-		&l.PipelineID, &l.StageID, &l.StageName, &l.Value, &l.ProgramID, &l.ProgramName,
+		&l.PipelineID, &l.StageID, &l.StageName, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
 		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
@@ -317,6 +320,35 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		}
 	}
 
+	// Resolve the outcome when the lead moves into or out of a closing stage.
+	// outcome is set by the system on stage move (won/lost); lost_reason may be
+	// supplied by the caller when the lead is marked lost.
+	var outcome *string
+	var lostReason *string
+	var targetStage *stageInfo
+	if req.StageID != nil && *req.StageID != "" && *req.StageID != old.StageID {
+		info, err := s.stageInfoTx(tx, *req.StageID)
+		if err != nil {
+			return nil, err
+		}
+		targetStage = info
+		if info.IsClosing {
+			out := "lost"
+			if strings.Contains(strings.ToLower(info.Name), "won") || strings.EqualFold(info.Name, "Converted") {
+				out = "won"
+			}
+			outcome = &out
+			if req.LostReason != nil && out == "lost" {
+				lostReason = req.LostReason
+			}
+		} else {
+			// Moving out of a closing stage clears the outcome.
+			empty := ""
+			outcome = &empty
+			lostReason = &empty
+		}
+	}
+
 	var programPrice *float64
 	if req.ProgramID != nil && *req.ProgramID != "" {
 		if old.ProgramID != nil && *old.ProgramID == *req.ProgramID {
@@ -337,30 +369,47 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 			contact_id = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '')::uuid ELSE contact_id END,
 			pipeline_id = COALESCE($4, pipeline_id),
 			stage_id = COALESCE($5, stage_id),
-			program_id = CASE WHEN $6 IS NOT NULL THEN NULLIF($6, '')::uuid ELSE program_id END,
-			value = CASE WHEN $6 IS NOT NULL AND NULLIF($6, '') IS NULL THEN NULL ELSE COALESCE($7, value) END,
-			notes = CASE WHEN $8 IS NOT NULL THEN NULLIF($8, '') ELSE notes END,
-			assigned_to = CASE WHEN $9 IS NOT NULL THEN NULLIF($9, '')::uuid ELSE assigned_to END,
+			outcome = CASE WHEN $6 IS NOT NULL THEN NULLIF($6, '') ELSE outcome END,
+			lost_reason = CASE WHEN $7 IS NOT NULL THEN NULLIF($7, '') ELSE lost_reason END,
+			program_id = CASE WHEN $8 IS NOT NULL THEN NULLIF($8, '')::uuid ELSE program_id END,
+			value = CASE WHEN $8 IS NOT NULL AND NULLIF($8, '') IS NULL THEN NULL ELSE COALESCE($9, value) END,
+			notes = CASE WHEN $10 IS NOT NULL THEN NULLIF($10, '') ELSE notes END,
+			assigned_to = CASE WHEN $11 IS NOT NULL THEN NULLIF($11, '')::uuid ELSE assigned_to END,
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, COALESCE(nickname, ''), contact_id, pipeline_id, stage_id,
+			COALESCE(outcome, ''), COALESCE(lost_reason, ''),
 			program_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
 		id,
 		req.Nickname,
 		req.ContactID,
 		req.PipelineID,
 		req.StageID,
+		outcome,
+		lostReason,
 		req.ProgramID,
 		programPrice,
 		req.Notes,
 		req.AssignedTo,
 	).Scan(
-		&l.ID, &l.Nickname, &l.ContactID, &l.PipelineID, &l.StageID, &l.ProgramID,
-		&l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+		&l.ID, &l.Nickname, &l.ContactID, &l.PipelineID, &l.StageID, &l.Outcome, &l.LostReason,
+		&l.ProgramID, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update lead: %w", err)
 	}
+
+	// Record the stage move in history (same transaction, before commit).
+	if targetStage != nil {
+		if _, err := tx.Exec(
+			`INSERT INTO lead_stage_history (lead_id, from_stage_id, to_stage_id, from_stage_name, to_stage_name, user_id)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			id, old.StageID, l.StageID, old.StageName, targetStage.Name, userID,
+		); err != nil {
+			return nil, fmt.Errorf("record stage history: %w", err)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit lead update: %w", err)
 	}
@@ -494,6 +543,60 @@ func (s *Service) stageName(stageID string) (string, error) {
 		return "", fmt.Errorf("load stage name: %w", err)
 	}
 	return name, nil
+}
+
+// stageInfo is the minimal stage shape needed for outcome resolution and
+// history snapshots.
+type stageInfo struct {
+	ID        string
+	Name      string
+	IsClosing bool
+}
+
+// stageInfoTx loads a stage's name and closing flag inside a transaction so
+// the outcome resolution and history insert see a consistent view.
+func (s *Service) stageInfoTx(tx *sql.Tx, stageID string) (*stageInfo, error) {
+	var info stageInfo
+	err := tx.QueryRow(
+		`SELECT id, name, is_closing FROM lead_stages WHERE id = $1`,
+		stageID,
+	).Scan(&info.ID, &info.Name, &info.IsClosing)
+	if err != nil {
+		return nil, fmt.Errorf("load stage info: %w", err)
+	}
+	return &info, nil
+}
+
+// listHistory returns the chronological stage moves for a lead, oldest first.
+func (s *Service) listHistory(leadID string) ([]StageHistory, error) {
+	rows, err := s.db.Query(
+		`SELECT id, lead_id, from_stage_id, to_stage_id,
+			COALESCE(from_stage_name, ''), COALESCE(to_stage_name, ''),
+			user_id, moved_at
+		FROM lead_stage_history
+		WHERE lead_id = $1
+		ORDER BY moved_at ASC`,
+		leadID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list stage history: %w", err)
+	}
+	defer rows.Close()
+	history := []StageHistory{}
+	for rows.Next() {
+		var h StageHistory
+		var fromStageID, toStageID sql.NullString
+		if err := rows.Scan(
+			&h.ID, &h.LeadID, &fromStageID, &toStageID,
+			&h.FromStageName, &h.ToStageName, &h.UserID, &h.MovedAt,
+		); err != nil {
+			return nil, err
+		}
+		h.FromStageID = fromStageID.String
+		h.ToStageID = toStageID.String
+		history = append(history, h)
+	}
+	return history, rows.Err()
 }
 
 func (s *Service) logActivity(resourceID, resourceType, action, desc, userID string) {

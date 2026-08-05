@@ -17,7 +17,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Plus, Trash2 } from '@lucide/vue'
 
 const props = defineProps<{
-  kind: 'tag' | 'status'
+  kind: 'tag' | 'status' | 'activity_type' | 'loss_reason'
   title: string
   placeholder: string
 }>()
@@ -28,7 +28,23 @@ const newName = shallowRef('')
 const error = shallowRef('')
 const deletingId = shallowRef<string | null>(null)
 
-const items = computed(() => (props.kind === 'tag' ? store.tags : store.statuses))
+const items = computed(() => {
+  switch (props.kind) {
+    case 'status': return store.statuses
+    case 'activity_type': return store.activityTypes
+    case 'loss_reason': return store.lossReasons
+    default: return store.tags
+  }
+})
+
+const kindLabel = computed(() => {
+  switch (props.kind) {
+    case 'status': return 'Status'
+    case 'activity_type': return 'Activity type'
+    case 'loss_reason': return 'Loss reason'
+    default: return 'Tag'
+  }
+})
 
 async function add() {
   error.value = ''
@@ -38,10 +54,10 @@ async function add() {
   }
   try {
     await store.createTag(newName.value.trim(), props.kind)
-    toast.success(props.kind === 'tag' ? 'Tag created' : 'Status created')
+    toast.success(`${kindLabel.value} created`)
     newName.value = ''
   } catch (e: any) {
-    error.value = e.message || `Failed to create ${props.kind}`
+    error.value = e.message || `Failed to create ${kindLabel.value.toLowerCase()}`
   }
 }
 

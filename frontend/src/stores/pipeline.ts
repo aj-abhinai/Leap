@@ -8,6 +8,7 @@ export interface Stage {
   name: string
   order: number
   color?: string
+  is_closing: boolean
 }
 
 export interface Pipeline {

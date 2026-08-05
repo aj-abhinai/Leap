@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { MoreHorizontal, Trash2 } from '@lucide/vue'
+import { MoreHorizontal, Trash2, CheckCircle2 } from '@lucide/vue'
 import { reminderIcon } from '@/utils/reminders'
 import { formatDateTime } from '@/utils/time'
 
@@ -21,8 +21,11 @@ interface Activity {
   user_name?: string
   type: string
   description: string
+  outcome_id?: string
+  outcome_name?: string
   scheduled_at?: string
   remind_at?: string
+  responded_at?: string
   is_done: boolean
   is_reminded: boolean
   created_at: string
@@ -57,6 +60,19 @@ async function deleteActivity(id: string) {
     await fetchActivities()
   } catch (e: any) {
     toast.error(e.message || 'Failed to delete')
+  }
+}
+
+async function markResponse(a: Activity) {
+  try {
+    await apiClient.patch(`/api/leads/${props.leadId}/activities/${a.id}`, {
+      outcome_id: a.outcome_id || null,
+      is_done: true,
+    })
+    toast.success('Marked as done')
+    await fetchActivities()
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to mark response')
   }
 }
 
@@ -97,6 +113,9 @@ defineExpose({ fetchActivities })
               <div>
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-medium">{{ typeLabel(a.type) }}</span>
+                  <span v-if="a.outcome_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
+                    {{ a.outcome_name }}
+                  </span>
                   <span class="text-xs text-muted-foreground">{{ a.user_name || 'System' }}</span>
                 </div>
                 <p v-if="a.description" class="text-sm mt-0.5">{{ a.description }}</p>
@@ -106,6 +125,9 @@ defineExpose({ fetchActivities })
                   </span>
                   <span v-if="a.remind_at" class="text-xs text-warning">
                     Reminder: {{ formatDateTime(a.remind_at) }}
+                  </span>
+                  <span v-if="a.responded_at" class="text-xs text-emerald-600">
+                    Responded: {{ formatDateTime(a.responded_at) }}
                   </span>
                 </div>
                 <span class="text-xs text-muted-foreground/70 mt-0.5 block">{{ formatDateTime(a.created_at) }}</span>
@@ -118,6 +140,9 @@ defineExpose({ fetchActivities })
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem class="cursor-pointer" @click="markResponse(a)">
+                  <CheckCircle2 class="size-3.5 mr-2" /> Mark response
+                </DropdownMenuItem>
                 <DropdownMenuItem class="text-destructive cursor-pointer" @click="deleteActivity(a.id)">
                   <Trash2 class="size-3.5 mr-2" /> Delete
                 </DropdownMenuItem>

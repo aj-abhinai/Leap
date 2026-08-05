@@ -10,9 +10,18 @@ import (
 var (
 	// ErrDuplicate marks tag names that already exist.
 	ErrDuplicate = errors.New("tag name already exists")
-	// ErrInvalidType marks tag types outside {tag, status}.
-	ErrInvalidType = errors.New("type must be 'tag' or 'status'")
+	// ErrInvalidType marks tag types outside the allowed catalog kinds.
+	ErrInvalidType = errors.New("type must be 'tag', 'status', 'activity_type' or 'loss_reason'")
 )
+
+// validType reports whether a tag type is an allowed catalog kind.
+func validType(t string) bool {
+	switch t {
+	case "tag", "status", "activity_type", "loss_reason":
+		return true
+	}
+	return false
+}
 
 type Service struct {
 	db *sql.DB
@@ -26,7 +35,7 @@ func (s *Service) list(tagType string) ([]Tag, error) {
 	if tagType == "" {
 		tagType = "tag"
 	}
-	if tagType != "tag" && tagType != "status" {
+	if !validType(tagType) {
 		return nil, ErrInvalidType
 	}
 	rows, err := s.db.Query(
@@ -50,7 +59,7 @@ func (s *Service) list(tagType string) ([]Tag, error) {
 }
 
 func (s *Service) create(req CreateRequest) (*Tag, error) {
-	if req.Type != "tag" && req.Type != "status" {
+	if !validType(req.Type) {
 		return nil, ErrInvalidType
 	}
 	var t Tag

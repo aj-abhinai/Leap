@@ -33,11 +33,8 @@ dev-backend:
       echo "ERROR: Postgres did not become ready in 30s"
       exit 1
     fi
-    # Explicit local-only secrets so the fail-fast validation passes.
-    export APP_ENV="${APP_ENV:-development}"
-    export JWT_SECRET="${JWT_SECRET:-dev-only-jwt-secret-0123456789abcdef}"
-    export SUPERADMIN_EMAIL="${SUPERADMIN_EMAIL:-admin@admin.com}"
-    export SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-admin}"
+    # Free port :9000 if the docker app container is running (avoids bind collision with `just docker-up`).
+    docker compose -f docker/docker-compose.yml stop app >/dev/null 2>&1 || true
     go run ./cmd/server/ -config {{config}}
 
 # Same as dev-backend
@@ -76,6 +73,14 @@ build-ui:
 # === Docker ===
 
 docker-up:
+    docker compose -f docker/docker-compose.yml up -d
+
+# Build (or rebuild) the app image without starting containers
+docker-build:
+    docker compose -f docker/docker-compose.yml build
+
+# Rebuild the image and start the stack
+docker-rebuild:
     docker compose -f docker/docker-compose.yml up --build -d
 
 docker-down:
@@ -88,6 +93,15 @@ docker-reset:
 
 test:
     @echo "Running tests with coverage..."
+    mkdir -p coverage
+    go test -v -coverprofile=coverage/coverage.out ./... && \
+    go tool cover -html=coverage/coverage.out -o coverage/coverage.html
+    @echo "Coverage report generated at coverage/coverage.html"
+    @go tool cover -func=coverage/coverage.out | grep total | awk '{print "Total coverage: " $$3}'
+
+# Run tests with the race detector (requires CGO + a C compiler, e.g. gcc/mingw on Windows)
+test-race:
+    @echo "Running tests with race detection and coverage..."
     mkdir -p coverage
     go test -v -race -coverprofile=coverage/coverage.out ./... && \
     go tool cover -html=coverage/coverage.out -o coverage/coverage.html

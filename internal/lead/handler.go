@@ -64,7 +64,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func respondLeadMutationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive),
-		errors.Is(err, ErrContactRequired), errors.Is(err, ErrNoContactDetail):
+		errors.Is(err, ErrContactRequired), errors.Is(err, ErrNoContactDetail),
+		errors.Is(err, ErrInvalidOutcome):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -207,6 +208,22 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
+	leadID := chi.URLParam(r, "id")
+	history, err := h.svc.listHistory(leadID)
+	if err != nil {
+		respond.JSON(
+			w,
+			http.StatusInternalServerError,
+			nil,
+			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
+			nil,
+		)
+		return
+	}
+	respond.JSON(w, http.StatusOK, history, nil, nil)
+}
+
 func (h *Handler) ListActivities(w http.ResponseWriter, r *http.Request) {
 	leadID := chi.URLParam(r, "id")
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -293,6 +310,34 @@ func (h *Handler) DeleteActivity(w http.ResponseWriter, r *http.Request) {
 		w,
 		http.StatusOK,
 		map[string]string{"message": "deleted"},
+		nil,
+		nil,
+	)
+}
+
+func (h *Handler) UpdateActivity(w http.ResponseWriter, r *http.Request) {
+	leadID := chi.URLParam(r, "id")
+	activityID := chi.URLParam(r, "activity_id")
+	var req UpdateActivityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	activity, err := h.svc.updateActivity(leadID, activityID, req)
+	if err != nil {
+		respondLeadMutationError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		activity,
 		nil,
 		nil,
 	)

@@ -13,6 +13,8 @@ export interface Lead {
   pipeline_id: string
   stage_id: string
   stage_name?: string
+  outcome?: string
+  lost_reason?: string
   program_id?: string
   program_name?: string
   value?: number

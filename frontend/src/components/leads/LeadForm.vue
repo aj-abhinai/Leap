@@ -2,6 +2,7 @@
 import { computed, onMounted, shallowRef } from 'vue'
 import { type Lead } from '@/stores/leads'
 import { apiClient } from '@/composables/useApi'
+import { useSettingsStore } from '@/stores/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -52,12 +53,15 @@ const emit = defineEmits<{
   delete: [leadId: string]
 }>()
 
+const settings = useSettingsStore()
+
 const programs = shallowRef<Program[]>([])
 const formProgramId = shallowRef<string>(props.editingLead?.program_id || '__none__')
 const linkedContactId = shallowRef(props.editingLead?.contact_id || props.prefillContact?.id || null)
 const linkedContactName = shallowRef(props.editingLead?.contact_name || props.prefillContact?.name || '')
 const formNickname = shallowRef(props.editingLead?.nickname || '')
 const formNotes = shallowRef(props.editingLead?.notes || '')
+const formLostReason = shallowRef(props.editingLead?.lost_reason || '')
 const formStageId = shallowRef(props.editingLead?.stage_id || props.initialStageId || props.stages[0]?.id || '')
 const formError = shallowRef('')
 
@@ -73,6 +77,11 @@ const newContactEmail = shallowRef('')
 
 const hasLinkedContact = computed(() => !!linkedContactId.value)
 const isEditing = computed(() => !!props.editingLead)
+
+const selectedStage = computed(() => props.stages.find(s => s.id === formStageId.value))
+const isClosingStage = computed(() => !!selectedStage.value?.is_closing)
+
+const lossReasonPresets = computed(() => settings.lossReasons.map(t => t.name))
 
 const selectedProgram = computed(() => programs.value.find(p => p.id === formProgramId.value))
 
@@ -136,6 +145,7 @@ function chooseExisting() {
 }
 
 onMounted(async () => {
+  if (settings.lossReasons.length === 0) settings.fetchTags()
   try {
     const res = await apiClient.get('/api/programs')
     programs.value = res.data
@@ -150,6 +160,9 @@ async function handleSave() {
     stage_id: formStageId.value,
     notes: formNotes.value,
     program_id: programIdToSend(),
+  }
+  if (isClosingStage.value) {
+    body.lost_reason = formLostReason.value.trim()
   }
 
   if (isEditing.value) {
@@ -291,6 +304,22 @@ async function handleSave() {
           </SelectItem>
         </SelectContent>
       </Select>
+    </div>
+    <div v-if="isClosingStage" class="space-y-2">
+      <Label>Loss reason</Label>
+      <div class="flex flex-wrap gap-1.5">
+        <Button
+          v-for="r in lossReasonPresets"
+          :key="r"
+          variant="outline"
+          size="sm"
+          :class="{ 'ring-1 ring-primary': formLostReason === r }"
+          @click="formLostReason = formLostReason === r ? '' : r"
+        >
+          {{ r }}
+        </Button>
+      </div>
+      <Input v-model="formLostReason" placeholder="Or type a reason…" />
     </div>
     <div v-if="formError" class="text-sm text-destructive">{{ formError }}</div>
     </div>

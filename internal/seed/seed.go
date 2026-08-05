@@ -141,17 +141,26 @@ func seedDefaultPipeline(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	stages := []string{"Lead", "Qualified", "Proposal", "Won"}
-	for i, name := range stages {
+	stages := []struct {
+		name      string
+		isClosing bool
+	}{
+		{"New Customer", false},
+		{"Contacted", false},
+		{"Follow-up", false},
+		{"Closed Lost", true},
+		{"Converted", true},
+	}
+	for i, st := range stages {
 		_, err := db.Exec(
-			`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, $2, $3)`,
-			pipelineID, name, i,
+			`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, $2, $3, $4)`,
+			pipelineID, st.name, i, st.isClosing,
 		)
 		if err != nil {
-			return fmt.Errorf("seed stage %s: %w", name, err)
+			return fmt.Errorf("seed stage %s: %w", st.name, err)
 		}
 	}
-	slog.Info("default pipeline seeded with 4 stages")
+	slog.Info("default pipeline seeded with 5 stages")
 	return nil
 }
 
@@ -172,6 +181,36 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		}
 	}
 
-	slog.Info("default tags and statuses seeded")
+	// Activity outcomes (the "Stage Status" of a logged activity).
+	activityStatuses := []string{
+		"Share Details WA", "No Reply", "Not intrested", "Pending Response",
+		"Reminder Call", "Reminder Msg", "Rescheduled", "Fake",
+	}
+	for _, name := range activityStatuses {
+		_, err := db.Exec(`INSERT INTO tags (name, type) VALUES ($1, 'status') ON CONFLICT (name, type) DO NOTHING`, name)
+		if err != nil {
+			return fmt.Errorf("seed activity status %s: %w", name, err)
+		}
+	}
+
+	// Activity types (the "Stage Activity" labels; presets, not enforced).
+	activityTypes := []string{"Call 1", "Call 2", "WA chat", "WA Auto"}
+	for _, name := range activityTypes {
+		_, err := db.Exec(`INSERT INTO tags (name, type) VALUES ($1, 'activity_type') ON CONFLICT (name, type) DO NOTHING`, name)
+		if err != nil {
+			return fmt.Errorf("seed activity type %s: %w", name, err)
+		}
+	}
+
+	// Loss-reason presets for the "Closed Lost" stage (free text plus presets).
+	lossReasons := []string{"Not intrested", "Fake"}
+	for _, name := range lossReasons {
+		_, err := db.Exec(`INSERT INTO tags (name, type) VALUES ($1, 'loss_reason') ON CONFLICT (name, type) DO NOTHING`, name)
+		if err != nil {
+			return fmt.Errorf("seed loss reason %s: %w", name, err)
+		}
+	}
+
+	slog.Info("default tags, statuses, activity types and loss reasons seeded")
 	return nil
 }

@@ -402,6 +402,99 @@ func TestDeleteActivityScopedToLeadIntegration(t *testing.T) {
 	}
 }
 
+func TestStageMoveSetsOutcomeAndHistoryIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	// Pipeline with a non-closing "New" stage and a closing "Closed Lost" stage.
+	var pipelineID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Journey Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	var openStage, closedStage string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Open', 0, false) RETURNING id`, pipelineID).Scan(&openStage); err != nil {
+		t.Fatalf("seed open stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Closed Lost', 1, true) RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
+		t.Fatalf("seed closed stage: %v", err)
+	}
+
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	lostReason := "Not intrested"
+	updated, err := svc.update(created.ID, UpdateRequest{StageID: &closedStage, LostReason: &lostReason}, "")
+	if err != nil {
+		t.Fatalf("move to closed: %v", err)
+	}
+	if updated.Outcome != "lost" {
+		t.Errorf("outcome = %q, want lost", updated.Outcome)
+	}
+	if updated.LostReason != "Not intrested" {
+		t.Errorf("lost_reason = %q, want Not intrested", updated.LostReason)
+	}
+
+	history, err := svc.listHistory(created.ID)
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	if history[0].FromStageName != "Open" || history[0].ToStageName != "Closed Lost" {
+		t.Errorf("history move = %q -> %q, want Open -> Closed Lost", history[0].FromStageName, history[0].ToStageName)
+	}
+}
+
+func TestStageMoveOutOfClosingClearsOutcomeIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var pipelineID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Journey Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	var openStage, closedStage string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Open', 0, false) RETURNING id`, pipelineID).Scan(&openStage); err != nil {
+		t.Fatalf("seed open stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Converted', 1, true) RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
+		t.Fatalf("seed closed stage: %v", err)
+	}
+
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	won, err := svc.update(created.ID, UpdateRequest{StageID: &closedStage}, "")
+	if err != nil {
+		t.Fatalf("move to Converted: %v", err)
+	}
+	if won.Outcome != "won" {
+		t.Errorf("outcome = %q, want won", won.Outcome)
+	}
+
+	// Move back out — outcome should clear.
+	back, err := svc.update(created.ID, UpdateRequest{StageID: &openStage}, "")
+	if err != nil {
+		t.Fatalf("move back: %v", err)
+	}
+	if back.Outcome != "" || back.LostReason != "" {
+		t.Errorf("outcome/lost_reason = %q/%q, want cleared", back.Outcome, back.LostReason)
+	}
+}
+
 func seedProgram(t *testing.T, db *sql.DB, name string, price float64) string {
 	t.Helper()
 	var id string

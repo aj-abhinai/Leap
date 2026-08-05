@@ -17,6 +17,7 @@ type Stage struct {
 	Name       string    `json:"name"`
 	Order      int       `json:"order"`
 	Color      string    `json:"color,omitempty"`
+	IsClosing  bool      `json:"is_closing"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -32,13 +33,15 @@ type UpdatePipelineRequest struct {
 }
 
 type CreateStageRequest struct {
-	Name  string `json:"name"`
-	Order int    `json:"order"`
-	Color string `json:"color,omitempty"`
+	Name      string `json:"name"`
+	Order     int    `json:"order"`
+	Color     string `json:"color,omitempty"`
+	IsClosing bool   `json:"is_closing,omitempty"`
 }
 
 type UpdateStageRequest struct {
-	Name  *string `json:"name,omitempty"`
-	Order *int    `json:"order,omitempty"`
-	Color *string `json:"color,omitempty"`
+	Name      *string `json:"name,omitempty"`
+	Order     *int    `json:"order,omitempty"`
+	Color     *string `json:"color,omitempty"`
+	IsClosing *bool   `json:"is_closing,omitempty"`
 }

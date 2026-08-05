@@ -4,7 +4,7 @@ import { apiClient } from '@/composables/useApi'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { ChevronRight, FolderKanban } from '@lucide/vue'
+import { ChevronRight, FolderKanban, Trophy, XCircle } from '@lucide/vue'
 import { formatCurrency } from '@/utils/format'
 import { formatDate } from '@/utils/time'
 
@@ -13,6 +13,8 @@ interface LeadInfo {
   display_name: string
   pipeline_id: string
   stage_name?: string
+  outcome?: string
+  lost_reason?: string
   program_name?: string
   value?: number
   assigned_to?: string
@@ -74,6 +76,15 @@ async function fetchLeads() {
               <span>Pipeline</span>
               <ChevronRight class="size-3" />
               <Badge variant="outline" class="text-xs px-1.5">{{ lead.stage_name || '–' }}</Badge>
+              <span v-if="lead.outcome === 'won'" class="inline-flex items-center gap-1 text-emerald-600 font-medium">
+                <Trophy class="size-3" /> Won
+              </span>
+              <span v-else-if="lead.outcome === 'lost'" class="inline-flex items-center gap-1 text-destructive font-medium">
+                <XCircle class="size-3" /> Lost
+              </span>
+            </div>
+            <div v-if="lead.outcome === 'lost' && lead.lost_reason" class="mt-1 text-xs text-muted-foreground">
+              Reason: {{ lead.lost_reason }}
             </div>
             <div v-if="lead.program_name" class="mt-1 text-xs text-muted-foreground">
               {{ lead.program_name }}

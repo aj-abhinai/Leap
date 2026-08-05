@@ -49,7 +49,7 @@ func (s *Service) list() ([]Pipeline, error) {
 }
 
 func (s *Service) listAllStages(pipelineIDs []string) (map[string][]Stage, error) {
-	query := `SELECT id, pipeline_id, name, "order", COALESCE(color, ''), created_at, updated_at
+	query := `SELECT id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, created_at, updated_at
 		FROM lead_stages
 		WHERE pipeline_id = ANY($1)
 		ORDER BY "order"`
@@ -63,7 +63,7 @@ func (s *Service) listAllStages(pipelineIDs []string) (map[string][]Stage, error
 	for rows.Next() {
 		var st Stage
 		if err := rows.Scan(
-			&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.CreatedAt, &st.UpdatedAt,
+			&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.CreatedAt, &st.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -143,13 +143,14 @@ func (s *Service) deletePipeline(id string) error {
 func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage, error) {
 	var st Stage
 	err := s.db.QueryRow(
-		`INSERT INTO lead_stages (pipeline_id, name, "order", color) VALUES ($1, $2, $3, $4)
-		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), created_at, updated_at`,
+		`INSERT INTO lead_stages (pipeline_id, name, "order", color, is_closing) VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, created_at, updated_at`,
 		pipelineID,
 		req.Name,
 		req.Order,
 		util.NullStr(req.Color),
-	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.CreatedAt, &st.UpdatedAt)
+		req.IsClosing,
+	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.CreatedAt, &st.UpdatedAt)
 	if err != nil {
 		if respond.IsForeignKeyViolation(err) {
 			return nil, ErrNotFound
@@ -166,14 +167,16 @@ func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, e
 			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
 			"order" = COALESCE($3, "order"),
 			color = CASE WHEN $4 IS NOT NULL THEN NULLIF($4, '') ELSE color END,
+			is_closing = COALESCE($5, is_closing),
 			updated_at = now()
 		WHERE id = $1
-		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), created_at, updated_at`,
+		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, created_at, updated_at`,
 		stageID,
 		req.Name,
 		req.Order,
 		req.Color,
-	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.CreatedAt, &st.UpdatedAt)
+		req.IsClosing,
+	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.CreatedAt, &st.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

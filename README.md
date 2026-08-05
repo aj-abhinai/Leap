@@ -35,8 +35,9 @@
 cp .env.example .env
 # Edit .env — set JWT_SECRET, superadmin credentials
 
-# Start the app + Postgres
-docker compose -f docker/docker-compose.yml up -d
+# Start the app + Postgres (builds the image once on first run, then reuses it)
+just docker-up
+# Or, equivalently: docker compose -f docker/docker-compose.yml up -d
 ```
 
 Go to `http://localhost:9000` and log in with the superadmin credentials from your `.env`.
@@ -74,6 +75,7 @@ supplied via environment variables, which override `config.toml`:
 | Environment variable | Overrides |
 |---|---|
 | `APP_PORT` | `[app] port` |
+| `APP_ENV` | `[app] environment` |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSLMODE` | `[db] *` |
 | `JWT_SECRET` / `JWT_ISSUER` | `[auth] jwt_secret` / `jwt_issuer` |
 | `COOKIE_SECURE` | `[auth] secure_cookies` — set `true` when serving over HTTPS |
@@ -84,10 +86,16 @@ supplied via environment variables, which override `config.toml`:
 ```shell
 cp .env.example .env
 # Edit .env — set JWT_SECRET and superadmin credentials (placeholders fail fast)
-docker compose -f docker/docker-compose.yml up -d
+just docker-up
 ```
 
 Go to `http://localhost:9000` and log in with the superadmin credentials from your `.env`.
+
+After changing Go or frontend code, rebuild the image and restart:
+
+```shell
+just docker-rebuild
+```
 
 ### Using an existing PostgreSQL VM with Docker
 
@@ -122,10 +130,23 @@ just dev-backend
 just dev-frontend
 
 # Run tests
-just test
+just test            # with coverage, no race detector (CGO-free)
+just test-race       # with the race detector (requires a C compiler: gcc/mingw on Windows)
+just test-frontend   # Vue component tests via Vitest
+
+# Lint and format
+just fmt vet lint
+just check           # fmt + vet + lint + test
 
 # Build the binary
 just build
+
+# Docker helpers (image is built once and reused)
+just docker-up       # start app + Postgres
+just docker-build    # build/rebuild the image without starting
+just docker-rebuild  # rebuild and start
+just docker-down     # stop the stack
+just docker-reset    # stop and remove volumes (destructive)
 ```
 
 The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `localhost:9000`.
@@ -159,12 +180,6 @@ Development login: `admin@admin.com` / `admin`.
 All secrets can be overridden via environment variables — see `.env.example` and the
 Deployment section. The application refuses to start with placeholder or empty secrets in
 every environment.
-
----
-
-## Architecture decisions
-
-All architecture decisions are documented in [`docs/adr/`](docs/adr/).
 
 ---
 

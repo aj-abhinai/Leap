@@ -110,6 +110,17 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
               <BookOpen class="size-3" />
               <span class="truncate">{{ lead.program_name }}</span>
             </div>
+            <div v-if="lead.outcome" class="mt-1.5 flex items-center gap-1.5">
+              <Badge
+                :variant="lead.outcome === 'won' ? 'default' : 'destructive'"
+                class="text-xs px-1.5"
+              >
+                {{ lead.outcome === 'won' ? 'Won' : 'Lost' }}
+              </Badge>
+              <span v-if="lead.outcome === 'lost' && lead.lost_reason" class="text-xs text-muted-foreground truncate">
+                {{ lead.lost_reason }}
+              </span>
+            </div>
             <div v-if="lead.value" class="mt-1.5 text-sm font-semibold text-primary tabular-nums">
               {{ formatCurrency(lead.value) }}
             </div>

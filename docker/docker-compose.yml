@@ -1,5 +1,6 @@
 services:
   app:
+    image: crm/crm:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -8,16 +9,21 @@ services:
     ports:
       - "9000:9000"
     environment:
-      # Point these at an existing PostgreSQL VM to use it instead of the bundled db service.
+      # DB connection points at the db service (config.toml defaults to localhost).
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${DB_USER:-crm}
       DB_PASSWORD: ${DB_PASSWORD:-crm}
       DB_NAME: ${DB_NAME:-crm}
       APP_ENV: ${APP_ENV:-development}
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-admin@admin.com}
-      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-admin}
+      # Secrets default to empty so the mounted config.toml is the source of truth.
+      # For production, set APP_ENV=production and provide strong values here or in config.toml.
+      JWT_SECRET: ${JWT_SECRET:-}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-}
+    volumes:
+      # Edit config without rebuilding. Path is relative to docker/ (the compose file dir).
+      - ../config.toml:/crm/config.toml:ro
     command: ["./crm", "--config", "config.toml"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9000/healthz"]
