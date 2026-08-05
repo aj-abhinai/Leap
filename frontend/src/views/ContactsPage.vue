@@ -148,8 +148,12 @@ async function handleDelete() {
   <LayoutShell>
     <div class="flex min-w-0 flex-1 flex-col gap-4 p-6 pt-2">
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-xl font-semibold">Contacts</h2>
-        <span class="text-sm text-muted-foreground">{{ store.total }} total</span>
+        <div class="flex min-w-0 flex-col">
+          <h1 class="text-2xl font-semibold tracking-tight">Contacts</h1>
+          <p class="mt-0.5 text-sm text-muted-foreground">
+            <span class="tabular-nums">{{ store.total }}</span> total
+          </p>
+        </div>
       </div>
       <ContactsToolbar
         v-model:search="search"
@@ -205,22 +209,22 @@ async function handleDelete() {
                   </div>
                 </TableCell>
                 <TableCell class="font-medium">{{ c.name }}</TableCell>
-                <TableCell class="text-muted-foreground">{{ c.email || '—' }}</TableCell>
-                <TableCell class="text-muted-foreground">{{ c.phone || '—' }}</TableCell>
+                <TableCell class="text-muted-foreground">{{ c.email || '–' }}</TableCell>
+                <TableCell class="text-muted-foreground">{{ c.phone || '–' }}</TableCell>
                 <TableCell>
                   <Badge v-if="c.status" variant="secondary">{{ c.status.name }}</Badge>
-                  <span v-else class="text-muted-foreground">—</span>
+                  <span v-else class="text-muted-foreground">–</span>
                 </TableCell>
                 <TableCell>
                   <div class="flex flex-wrap gap-1">
                     <Badge v-for="t in (c.tags || [])" :key="t.id" variant="outline" class="text-xs">
                       {{ t.name }}
                     </Badge>
-                    <span v-if="!c.tags?.length" class="text-muted-foreground">—</span>
+                    <span v-if="!c.tags?.length" class="text-muted-foreground">–</span>
                   </div>
                 </TableCell>
-                <TableCell class="text-muted-foreground">{{ c.location || '—' }}</TableCell>
-                <TableCell class="text-muted-foreground">{{ c.age || '—' }}</TableCell>
+                <TableCell class="text-muted-foreground">{{ c.location || '–' }}</TableCell>
+                <TableCell class="text-muted-foreground">{{ c.age || '–' }}</TableCell>
                 <TableCell>
                   <div class="flex gap-1 text-muted-foreground">
                     <Button

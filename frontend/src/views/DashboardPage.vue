@@ -38,6 +38,11 @@ function activityIcon(action: string) {
 <template>
   <LayoutShell>
     <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 pt-2">
+      <div class="flex flex-col">
+        <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p class="mt-0.5 text-sm text-muted-foreground">At a glance across contacts, leads, and activity</p>
+      </div>
+
       <div class="grid gap-4 md:grid-cols-3">
         <Card v-if="loading" class="overflow-hidden">
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -49,7 +54,7 @@ function activityIcon(action: string) {
             <Skeleton class="mt-2 h-3 w-20" />
           </CardContent>
         </Card>
-        <Card v-else class="relative overflow-hidden animate-fade-in-up">
+        <Card v-else class="relative overflow-hidden">
           <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-primary to-primary/60" />
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Total Contacts</CardTitle>
@@ -58,7 +63,7 @@ function activityIcon(action: string) {
             </div>
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">{{ contactsStore.total }}</div>
+            <div class="text-3xl font-bold tracking-tight tabular-nums">{{ contactsStore.total }}</div>
             <p class="mt-1 text-xs text-muted-foreground">All contacts in database</p>
           </CardContent>
         </Card>
@@ -73,7 +78,7 @@ function activityIcon(action: string) {
             <Skeleton class="mt-2 h-3 w-24" />
           </CardContent>
         </Card>
-        <Card v-else class="relative overflow-hidden animate-fade-in-up animate-fade-in-up-delay-1">
+        <Card v-else class="relative overflow-hidden">
           <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-primary to-primary/60" />
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Active Leads</CardTitle>
@@ -82,13 +87,13 @@ function activityIcon(action: string) {
             </div>
           </CardHeader>
           <CardContent>
-            <div class="text-2xl font-bold">{{ leadsStore.total }}</div>
+            <div class="text-3xl font-bold tracking-tight tabular-nums">{{ leadsStore.total }}</div>
             <p class="mt-1 text-xs text-muted-foreground">Open leads across all pipelines</p>
           </CardContent>
         </Card>
       </div>
 
-      <Card class="animate-fade-in-up animate-fade-in-up-delay-3">
+      <Card>
         <CardHeader class="flex flex-row items-center justify-between">
           <div class="flex items-center gap-2">
             <TrendingUp class="size-4 text-muted-foreground" />

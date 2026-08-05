@@ -10,6 +10,24 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* Type scale — product register: compressed, weight + color carry hierarchy */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.3333;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.4286;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.4445;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.4;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 1.3333;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 1.2667;
+  --text-4xl: 2.25rem;
+  --text-4xl--line-height: 1.2222;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -26,6 +44,10 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -46,38 +68,42 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.147 0.004 49.3);
+  --background: oklch(0.99 0.001 40);
+  --foreground: oklch(0.24 0.014 40);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.147 0.004 49.3);
+  --card-foreground: oklch(0.24 0.014 40);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.147 0.004 49.3);
+  --popover-foreground: oklch(0.24 0.014 40);
   --primary: oklch(0.514 0.222 16.935);
   --primary-foreground: oklch(0.969 0.015 12.422);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.96 0.002 17.2);
-  --muted-foreground: oklch(0.547 0.021 43.1);
-  --accent: oklch(0.96 0.002 17.2);
-  --accent-foreground: oklch(0.214 0.009 43.1);
+  --secondary: oklch(0.962 0.004 40);
+  --secondary-foreground: oklch(0.28 0.016 40);
+  --muted: oklch(0.962 0.004 40);
+  --muted-foreground: oklch(0.556 0.014 40);
+  --accent: oklch(0.96 0.005 40);
+  --accent-foreground: oklch(0.28 0.016 40);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0.005 34.3);
-  --input: oklch(0.922 0.005 34.3);
-  --ring: oklch(0.714 0.014 41.2);
+  --success: oklch(0.65 0.15 150);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.68 0.13 70);
+  --warning-foreground: oklch(0.28 0.05 55);
+  --border: oklch(0.915 0.005 40);
+  --input: oklch(0.915 0.005 40);
+  --ring: oklch(0.708 0.02 40);
   --chart-1: oklch(0.808 0.114 19.571);
   --chart-2: oklch(0.637 0.237 25.331);
   --chart-3: oklch(0.577 0.245 27.325);
   --chart-4: oklch(0.505 0.213 27.518);
   --chart-5: oklch(0.444 0.177 26.899);
-  --sidebar: oklch(0.986 0.002 67.8);
-  --sidebar-foreground: oklch(0.147 0.004 49.3);
+  --sidebar: oklch(0.97 0.003 40);
+  --sidebar-foreground: oklch(0.24 0.014 40);
   --sidebar-primary: oklch(0.514 0.222 16.935);
   --sidebar-primary-foreground: oklch(0.969 0.015 12.422);
-  --sidebar-accent: oklch(0.96 0.002 17.2);
-  --sidebar-accent-foreground: oklch(0.214 0.009 43.1);
-  --sidebar-border: oklch(0.922 0.005 34.3);
-  --sidebar-ring: oklch(0.714 0.014 41.2);
+  --sidebar-accent: oklch(0.955 0.005 40);
+  --sidebar-accent-foreground: oklch(0.28 0.016 40);
+  --sidebar-border: oklch(0.915 0.005 40);
+  --sidebar-ring: oklch(0.708 0.02 40);
 }
 
 .dark {
@@ -97,6 +123,10 @@
   --accent-foreground: oklch(0.986 0.002 67.8);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.72 0.13 150);
+  --success-foreground: oklch(0.15 0.03 150);
+  --warning: oklch(0.72 0.12 70);
+  --warning-foreground: oklch(0.15 0.04 55);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.547 0.021 43.1);
@@ -119,9 +149,43 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    text-rendering: optimizeLegibility;
+  }
+  /* Data is the product: align numbers, keep them steady under load */
+  :where(table, [data-slot='table']),
+  :where(.tabular-nums) {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Compact "primary" micro-labels on badges: real font size, not 10px */
+  .text-\[10px\] {
+    font-size: 0.6875rem;
+    line-height: 1.4545;
+  }
+  /* Give the CRM's operating headings a deliberate wrap */
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+  /* Paragraphs stay inside the readable band */
+  p {
+    text-wrap: pretty;
+    max-width: 72ch;
+  }
+  /* No orphaned single words in interface copy */
+  strong,
+  em {
+    text-wrap: balance;
   }
   button,
   [role="button"],
@@ -132,50 +196,38 @@
   }
 }
 
-.page-fade-enter-active,
-.page-fade-leave-active {
+/* iOS Safari auto-zooms focused form fields smaller than 16px; keep forms stable on narrow screens */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 1rem !important;
+  }
+}
+
+/* Motion: dialogs, sheets, and menus animate via tw-animate-css utilities.
+   Dead keyframes removed; reduced motion below keeps functional signals alive. */
+
+/* Page arrival: a short cross-fade on route change orients without performing */
+.page-enter-active,
+.page-leave-active {
   transition: opacity 0.15s ease;
 }
 
-.page-fade-enter-from,
-.page-fade-leave-to {
+.page-enter-from,
+.page-leave-to {
   opacity: 0;
 }
 
-@keyframes fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-fade-in-up {
-  animation: fade-in-up 0.3s ease-out;
-}
-
-.animate-fade-in-up-delay-1 {
-  animation: fade-in-up 0.3s ease-out 0.05s both;
-}
-
-.animate-fade-in-up-delay-2 {
-  animation: fade-in-up 0.3s ease-out 0.1s both;
-}
-
-.animate-fade-in-up-delay-3 {
-  animation: fade-in-up 0.3s ease-out 0.15s both;
-}
-
-@keyframes pulse-soft {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 0.8; }
-}
-
-.animate-pulse-soft {
-  animation: pulse-soft 2s ease-in-out infinite;
 }
 
 * {

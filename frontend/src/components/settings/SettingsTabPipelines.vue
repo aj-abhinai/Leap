@@ -175,7 +175,7 @@ async function deleteStage(stageId: string) {
                 class="h-8 w-40"
                 @keyup.enter="renameStage(s.id)"
               />
-              <Button variant="ghost" size="icon-sm" :title="`Rename ${s.name}`" @click="renameStage(s.id)">
+              <Button variant="ghost" size="icon-sm" :title="`Rename ${s.name}`" :aria-label="`Rename ${s.name}`" @click="renameStage(s.id)">
                 <Pencil class="size-3.5" />
               </Button>
               <Button
@@ -183,6 +183,7 @@ async function deleteStage(stageId: string) {
                 size="icon-sm"
                 :disabled="idx === 0"
                 :title="`Move ${s.name} up`"
+                :aria-label="`Move ${s.name} up`"
                 @click="reorderStage(s.id, s.order - 1)"
               >
                 <ArrowUp class="size-3.5" />
@@ -192,11 +193,12 @@ async function deleteStage(stageId: string) {
                 size="icon-sm"
                 :disabled="idx === (p.stages?.length ?? 0) - 1"
                 :title="`Move ${s.name} down`"
+                :aria-label="`Move ${s.name} down`"
                 @click="reorderStage(s.id, s.order + 1)"
               >
                 <ArrowDown class="size-3.5" />
               </Button>
-              <Button variant="ghost" size="icon-sm" :title="`Delete ${s.name}`" @click="deleteStage(s.id)">
+              <Button variant="ghost" size="icon-sm" :title="`Delete ${s.name}`" :aria-label="`Delete ${s.name}`" @click="deleteStage(s.id)">
                 <Trash2 class="size-3.5" />
               </Button>
             </div>

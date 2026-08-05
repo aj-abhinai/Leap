@@ -57,7 +57,7 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
           <span class="text-sm font-medium">{{ col.name }}</span>
           <Badge variant="secondary" class="text-xs px-1.5">{{ col.leads.length }}</Badge>
         </div>
-        <Button variant="ghost" size="icon-sm" @click="emit('create', col.id)">
+        <Button variant="ghost" size="icon-sm" :aria-label="`Add lead to ${col.name}`" @click="emit('create', col.id)">
           <Plus class="size-3.5" />
         </Button>
       </div>
@@ -81,13 +81,13 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
             <div class="flex items-start justify-between gap-2">
               <div class="font-medium truncate">{{ lead.display_name }}</div>
               <div class="flex items-center gap-0.5 text-muted-foreground">
-                <Button variant="ghost" size="icon-sm" class="size-6" @click.stop="emit('viewActivities', lead)" title="Activities" aria-label="View activities">
-                  <ListChecks class="size-3" />
+                <Button variant="ghost" size="icon-sm" class="size-8" @click.stop="emit('viewActivities', lead)" title="Activities" aria-label="View activities">
+                  <ListChecks class="size-3.5" />
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child @click.stop>
-                    <Button variant="ghost" size="icon-sm" class="size-6 -mr-1 -mt-0.5" aria-label="Lead actions">
-                      <MoreHorizontal class="size-3" />
+                    <Button variant="ghost" size="icon-sm" class="size-8" aria-label="Lead actions">
+                      <MoreHorizontal class="size-3.5" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" class="w-40">
@@ -110,7 +110,7 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
               <BookOpen class="size-3" />
               <span class="truncate">{{ lead.program_name }}</span>
             </div>
-            <div v-if="lead.value" class="mt-1.5 font-semibold text-primary">
+            <div v-if="lead.value" class="mt-1.5 text-sm font-semibold text-primary tabular-nums">
               {{ formatCurrency(lead.value) }}
             </div>
           </div>

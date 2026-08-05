@@ -45,19 +45,19 @@ const emit = defineEmits<{
           @click="emit('rowClick', c.id)"
         >
           <TableCell class="font-medium whitespace-nowrap">{{ c.name }}</TableCell>
-          <TableCell class="text-muted-foreground whitespace-nowrap">{{ c.phone || '—' }}</TableCell>
-          <TableCell class="text-muted-foreground whitespace-nowrap">{{ c.email || '—' }}</TableCell>
-          <TableCell class="text-muted-foreground">{{ c.location || '—' }}</TableCell>
+          <TableCell class="text-muted-foreground whitespace-nowrap">{{ c.phone || '–' }}</TableCell>
+          <TableCell class="text-muted-foreground whitespace-nowrap">{{ c.email || '–' }}</TableCell>
+          <TableCell class="text-muted-foreground">{{ c.location || '–' }}</TableCell>
           <TableCell>
             <Badge v-if="c.status" variant="secondary" class="text-xs">{{ c.status.name }}</Badge>
-            <span v-else class="text-muted-foreground">—</span>
+            <span v-else class="text-muted-foreground">–</span>
           </TableCell>
           <TableCell>
             <div class="flex flex-wrap gap-1">
               <Badge v-for="t in (c.tags || [])" :key="t.id" variant="outline" class="text-xs whitespace-nowrap">
                 {{ t.name }}
               </Badge>
-              <span v-if="!c.tags?.length" class="text-muted-foreground">—</span>
+              <span v-if="!c.tags?.length" class="text-muted-foreground">–</span>
             </div>
           </TableCell>
         </TableRow>

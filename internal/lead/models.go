@@ -13,6 +13,8 @@ type Lead struct {
 	PipelineID   string     `json:"pipeline_id"`
 	StageID      string     `json:"stage_id"`
 	StageName    string     `json:"stage_name,omitempty"`
+	Outcome      string     `json:"outcome,omitempty"`
+	LostReason   string     `json:"lost_reason,omitempty"`
 	ProgramID    *string    `json:"program_id,omitempty"`
 	ProgramName  string     `json:"program_name,omitempty"`
 	Value        *float64   `json:"value,omitempty"`
@@ -63,8 +65,11 @@ type Activity struct {
 	UserName    string     `json:"user_name,omitempty"`
 	Type        string     `json:"type"`
 	Description string     `json:"description"`
+	OutcomeID   string     `json:"outcome_id,omitempty"`
+	OutcomeName string     `json:"outcome_name,omitempty"`
 	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 	RemindAt    *time.Time `json:"remind_at,omitempty"`
+	RespondedAt *time.Time `json:"responded_at,omitempty"`
 	IsDone      bool       `json:"is_done"`
 	IsReminded  bool       `json:"is_reminded"`
 	CreatedAt   time.Time  `json:"created_at"`
@@ -74,6 +79,23 @@ type Activity struct {
 type CreateActivityRequest struct {
 	Type        string     `json:"type"`
 	Description string     `json:"description"`
+	OutcomeID   *string    `json:"outcome_id,omitempty"`
 	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 	RemindAt    *time.Time `json:"remind_at,omitempty"`
+}
+
+type UpdateActivityRequest struct {
+	OutcomeID *string `json:"outcome_id,omitempty"`
+	IsDone    *bool   `json:"is_done,omitempty"`
+}
+
+type StageHistory struct {
+	ID            string    `json:"id"`
+	LeadID        string    `json:"lead_id"`
+	FromStageID   string    `json:"from_stage_id,omitempty"`
+	ToStageID     string    `json:"to_stage_id,omitempty"`
+	FromStageName string    `json:"from_stage_name,omitempty"`
+	ToStageName   string    `json:"to_stage_name,omitempty"`
+	UserID        *string   `json:"user_id,omitempty"`
+	MovedAt       time.Time `json:"moved_at"`
 }

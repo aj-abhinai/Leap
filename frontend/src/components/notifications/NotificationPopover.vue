@@ -19,11 +19,11 @@ watch(isOpen, (open) => {
 <template>
   <Popover v-model:open="isOpen">
     <PopoverTrigger as-child>
-      <Button variant="ghost" size="icon" class="relative h-9 w-9">
+      <Button variant="ghost" size="icon" class="relative h-9 w-9" aria-label="Notifications">
         <Bell class="h-5 w-5" />
         <span
           v-if="store.pendingCount > 0"
-          class="absolute top-0.5 right-0.5 inline-flex size-3.5 items-center justify-center rounded-full bg-destructive text-[9px] font-medium text-destructive-foreground"
+          class="absolute top-0.5 right-0.5 inline-flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-medium leading-none text-destructive-foreground"
         >
           {{ store.pendingCount > 99 ? '99' : store.pendingCount }}
         </span>

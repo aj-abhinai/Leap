@@ -159,7 +159,7 @@ function isProtectedUser(u: User): boolean {
                     {{ u.role.name }}
                     <ShieldCheck v-if="u.role.name === 'superadmin'" class="ml-1 size-3" />
                   </Badge>
-                  <span v-else class="text-xs text-muted-foreground">—</span>
+                  <span v-else class="text-xs text-muted-foreground">–</span>
                 </div>
               </TableCell>
               <TableCell>
@@ -185,7 +185,7 @@ function isProtectedUser(u: User): boolean {
                   <ShieldCheck class="size-3.5 text-muted-foreground" />
                   <span class="text-xs text-muted-foreground">Protected</span>
                 </div>
-                <Button v-else variant="ghost" size="icon-sm" @click="deleteUser(u.id)">
+                <Button v-else variant="ghost" size="icon-sm" :aria-label="`Delete ${u.name}`" @click="deleteUser(u.id)">
                   <Trash2 class="size-3.5" />
                 </Button>
               </TableCell>

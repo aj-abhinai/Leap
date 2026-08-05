@@ -84,7 +84,7 @@ const snapshotValue = computed(() => {
 })
 
 function formatPrice(price?: number) {
-  return formatCurrency(price) || '—'
+  return formatCurrency(price) || '–'
 }
 
 function programIdToSend(): string {
@@ -185,7 +185,8 @@ async function handleSave() {
 </script>
 
 <template>
-  <div class="mt-4 space-y-4">
+  <div class="flex flex-1 min-h-0 flex-col">
+    <div class="flex-1 min-h-0 overflow-y-auto space-y-4 px-4 pb-4">
     <!-- Linked contact banner -->
     <div v-if="hasLinkedContact" class="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
       <Link class="size-3.5 text-muted-foreground" />
@@ -266,7 +267,7 @@ async function handleSave() {
         <SelectContent>
           <SelectItem value="__none__">No program</SelectItem>
           <SelectItem v-for="p in programs" :key="p.id" :value="p.id">
-            {{ p.name }} — {{ formatPrice(p.price) }}
+            {{ p.name }} · {{ formatPrice(p.price) }}
           </SelectItem>
         </SelectContent>
       </Select>
@@ -292,18 +293,21 @@ async function handleSave() {
       </Select>
     </div>
     <div v-if="formError" class="text-sm text-destructive">{{ formError }}</div>
-    <div class="flex gap-2">
-      <Button @click="handleSave" :disabled="saving" class="flex-1">
-        <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-        {{ isEditing ? 'Update' : 'Create' }}
-      </Button>
-      <Button
-        v-if="isEditing"
-        variant="destructive"
-        @click="editingLead && emit('delete', editingLead.id)"
-      >
-        Delete
-      </Button>
+    </div>
+    <div class="border-t p-4">
+      <div class="flex gap-2">
+        <Button @click="handleSave" :disabled="saving" class="flex-1">
+          <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
+          {{ isEditing ? 'Update' : 'Create' }}
+        </Button>
+        <Button
+          v-if="isEditing"
+          variant="destructive"
+          @click="editingLead && emit('delete', editingLead.id)"
+        >
+          Delete
+        </Button>
+      </div>
     </div>
   </div>
 </template>

@@ -93,7 +93,13 @@ onMounted(async () => {
   <LayoutShell>
     <div class="flex min-w-0 flex-1 flex-col gap-4 p-6 pt-2">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 class="text-xl font-semibold">Leads</h2>
+        <div class="flex min-w-0 flex-col">
+          <h1 class="text-2xl font-semibold tracking-tight">Leads</h1>
+          <p v-if="selectedPipeline" class="mt-0.5 text-sm text-muted-foreground">
+            {{ selectedPipeline.name }}
+            <span class="tabular-nums text-muted-foreground/70">{{ kanbanColumns.reduce((n, c) => n + c.leads.length, 0) }} leads</span>
+          </p>
+        </div>
         <div class="flex flex-wrap items-center gap-2">
           <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">
             <SelectTrigger class="w-48">

@@ -146,7 +146,7 @@ const slotProps = computed(() => ({
             :placeholder="getFieldType(f.field) === 'date' ? '' : 'Value...'"
           />
 
-          <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0" @click="removeFilter(i)">
+          <Button variant="ghost" size="icon" class="h-8 w-8 shrink-0" aria-label="Remove filter" @click="removeFilter(i)">
             <Trash2 class="h-4 w-4 text-muted-foreground" />
           </Button>
         </div>

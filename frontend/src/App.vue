@@ -14,6 +14,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <router-view />
+  <RouterView v-slot="{ Component }">
+    <Transition name="page">
+      <component :is="Component" />
+    </Transition>
+  </RouterView>
   <Toaster rich-colors close-button />
 </template>

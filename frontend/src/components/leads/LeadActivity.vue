@@ -104,7 +104,7 @@ defineExpose({ fetchActivities })
                   <span v-if="a.scheduled_at" class="text-xs text-muted-foreground">
                     Scheduled: {{ formatDateTime(a.scheduled_at) }}
                   </span>
-                  <span v-if="a.remind_at" class="text-xs text-amber-600">
+                  <span v-if="a.remind_at" class="text-xs text-warning">
                     Reminder: {{ formatDateTime(a.remind_at) }}
                   </span>
                 </div>
@@ -113,8 +113,8 @@ defineExpose({ fetchActivities })
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="icon-sm" class="size-6 shrink-0" aria-label="Activity actions">
-                  <MoreHorizontal class="size-3" />
+                <Button variant="ghost" size="icon-sm" class="size-8 shrink-0" aria-label="Activity actions">
+                  <MoreHorizontal class="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">

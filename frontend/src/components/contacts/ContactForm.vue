@@ -136,7 +136,8 @@ async function handleSave() {
 </script>
 
 <template>
-  <div class="mt-4 space-y-4">
+  <div class="flex flex-1 min-h-0 flex-col">
+    <div class="flex-1 min-h-0 overflow-y-auto space-y-4 px-4 pb-4">
     <div class="space-y-2">
       <Label for="cname">Name *</Label>
       <Input id="cname" v-model="formName" placeholder="Full name" />
@@ -154,12 +155,13 @@ async function handleSave() {
             variant="ghost"
             size="icon-sm"
             :title="p.is_primary ? 'Primary phone' : 'Set as primary'"
+            :aria-label="p.is_primary ? 'Primary phone' : 'Set as primary'"
             :class="p.is_primary ? 'text-primary' : 'text-muted-foreground'"
             @click="setPhonePrimary(idx)"
           >
             <Star class="size-3.5" :fill="p.is_primary ? 'currentColor' : 'none'" />
           </Button>
-          <Button variant="ghost" size="icon-sm" title="Remove" @click="removePhone(idx)">
+          <Button variant="ghost" size="icon-sm" title="Remove" aria-label="Remove phone" @click="removePhone(idx)">
             <X class="size-3.5" />
           </Button>
         </div>
@@ -177,12 +179,13 @@ async function handleSave() {
             variant="ghost"
             size="icon-sm"
             :title="e.is_primary ? 'Primary email' : 'Set as primary'"
+            :aria-label="e.is_primary ? 'Primary email' : 'Set as primary'"
             :class="e.is_primary ? 'text-primary' : 'text-muted-foreground'"
             @click="setEmailPrimary(idx)"
           >
             <Star class="size-3.5" :fill="e.is_primary ? 'currentColor' : 'none'" />
           </Button>
-          <Button variant="ghost" size="icon-sm" title="Remove" @click="removeEmail(idx)">
+          <Button variant="ghost" size="icon-sm" title="Remove" aria-label="Remove email" @click="removeEmail(idx)">
             <X class="size-3.5" />
           </Button>
         </div>
@@ -224,9 +227,12 @@ async function handleSave() {
       </div>
     </div>
     <div v-if="formError" class="text-sm text-destructive">{{ formError }}</div>
-    <Button @click="handleSave" :disabled="saving" class="w-full">
-      <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-      {{ editingContact ? 'Update' : 'Create' }}
-    </Button>
+    </div>
+    <div class="border-t p-4">
+      <Button @click="handleSave" :disabled="saving" class="w-full">
+        <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
+        {{ editingContact ? 'Update' : 'Create' }}
+      </Button>
+    </div>
   </div>
 </template>

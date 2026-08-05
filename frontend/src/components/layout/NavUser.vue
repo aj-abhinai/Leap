@@ -46,7 +46,7 @@ function handleLogout() {
                   {{ auth.user?.name?.charAt(0)?.toUpperCase() || 'U' }}
                 </AvatarFallback>
               </Avatar>
-              <span class="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-sidebar bg-emerald-500 ring-2 ring-sidebar group-data-[collapsible=icon]:hidden" />
+              <span class="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-sidebar bg-success ring-2 ring-sidebar group-data-[collapsible=icon]:hidden" />
             </div>
             <div class="grid flex-1 text-left text-sm leading-tight">
               <span class="truncate font-semibold">{{ auth.user?.name || 'User' }}</span>

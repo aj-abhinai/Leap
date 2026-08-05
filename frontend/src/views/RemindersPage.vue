@@ -17,7 +17,12 @@ onMounted(() => store.fetchReminders())
 <template>
   <LayoutShell>
     <div class="p-6">
-      <h2 class="text-xl font-semibold mb-4">All Reminders</h2>
+      <div class="mb-4 flex flex-col">
+        <h1 class="text-2xl font-semibold tracking-tight">Reminders</h1>
+        <p v-if="!store.loading && store.reminders.length" class="mt-0.5 text-sm text-muted-foreground">
+          <span class="tabular-nums">{{ store.reminders.length }}</span> pending
+        </p>
+      </div>
 
       <div v-if="store.loading" class="space-y-3">
         <Skeleton v-for="i in 5" :key="i" class="h-16 w-full" />
@@ -39,12 +44,12 @@ onMounted(() => store.fetchReminders())
                   <p class="font-medium text-sm">{{ formatReminderText(reminder) }}</p>
                   <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
                     <span v-if="reminder.scheduled_at">Scheduled: {{ formatDateTime(reminder.scheduled_at) }}</span>
-                    <span v-if="reminder.remind_at" class="text-amber-600">Reminder: {{ formatDateTime(reminder.remind_at) }}</span>
+                    <span v-if="reminder.remind_at" class="text-warning">Reminder: {{ formatDateTime(reminder.remind_at) }}</span>
                   </div>
                   <p class="text-xs text-muted-foreground mt-1">Created {{ formatDateTime(reminder.created_at) }}</p>
                 </div>
               </div>
-              <Button variant="ghost" size="icon-sm" class="shrink-0" @click="store.dismissReminder(reminder.id)" title="Dismiss">
+              <Button variant="ghost" size="icon-sm" class="shrink-0" @click="store.dismissReminder(reminder.id)" title="Dismiss" aria-label="Dismiss reminder">
                 <X class="size-4" />
               </Button>
             </div>

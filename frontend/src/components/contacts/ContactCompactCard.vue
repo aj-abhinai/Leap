@@ -15,7 +15,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <Card class="cursor-pointer hover:shadow-md hover:border-primary/20 transition-all" @click="emit('click')">
+  <Card class="cursor-pointer hover:shadow-md hover:border-primary/20 transition-all active:scale-[0.99]" @click="emit('click')">
     <CardContent class="p-4">
       <div class="flex items-start gap-3">
         <div

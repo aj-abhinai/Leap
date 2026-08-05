@@ -114,8 +114,8 @@ async function handleSave(body: Record<string, any>) {
               {{ getInitials(contact.name) }}
             </div>
             <div>
-              <h2 class="text-xl font-bold">{{ contact.name }}</h2>
-              <Badge v-if="contact.status" variant="secondary" class="mt-1">{{ contact.status.name }}</Badge>
+              <h1 class="text-2xl font-semibold tracking-tight break-words">{{ contact.name }}</h1>
+              <Badge v-if="contact.status" variant="secondary" class="mt-1.5">{{ contact.status.name }}</Badge>
             </div>
           </div>
 

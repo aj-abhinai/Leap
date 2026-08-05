@@ -91,7 +91,7 @@ async function remove() {
           <TableRow v-for="item in items" :key="item.id">
             <TableCell>{{ item.name }}</TableCell>
             <TableCell>
-              <Button variant="ghost" size="icon-sm" @click="confirmDelete(item.id)">
+              <Button variant="ghost" size="icon-sm" :title="`Delete ${item.name}`" :aria-label="`Delete ${item.name}`" @click="confirmDelete(item.id)">
                 <Trash2 class="size-3.5" />
               </Button>
             </TableCell>

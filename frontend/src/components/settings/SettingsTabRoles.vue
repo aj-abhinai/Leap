@@ -242,13 +242,13 @@ const permissionGroups = computed(() => groupPermissions(visiblePermissions.valu
               </Badge>
             </div>
           </TableCell>
-          <TableCell class="text-muted-foreground">{{ role.description || '—' }}</TableCell>
+          <TableCell class="text-muted-foreground">{{ role.description || '–' }}</TableCell>
           <TableCell>
             <span class="text-sm text-muted-foreground">{{ role.permissions?.length ?? 0 }} permissions</span>
           </TableCell>
           <TableCell class="text-right">
             <div class="flex items-center justify-end gap-1">
-              <Button variant="ghost" size="icon-sm" title="Edit role" @click="openEdit(role)">
+              <Button variant="ghost" size="icon-sm" title="Edit role" aria-label="Edit role" @click="openEdit(role)">
                 <Pencil class="size-3.5" />
               </Button>
               <Button
