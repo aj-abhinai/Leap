@@ -48,6 +48,7 @@ const {
   editingLead,
   initialStageId,
   prefillContact,
+  saving,
   openCreate,
   openEdit,
   handleSave,
@@ -126,6 +127,7 @@ onMounted(async () => {
                 :pipeline-id="selectedPipelineId"
                 :initial-stage-id="initialStageId"
                 :prefill-contact="prefillContact"
+                :saving="saving"
                 @save="handleSave"
                 @delete="deleteLead"
               />

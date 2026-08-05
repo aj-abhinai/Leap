@@ -70,7 +70,7 @@ const emit = defineEmits<{
         </Button>
       </div>
     </div>
-    <Button v-if="props.canWrite" class="w-full sm:w-auto">
+    <Button v-if="props.canWrite" class="w-full sm:w-auto" @click="emit('create')">
       <Plus class="mr-2 size-4" /> Add Contact
     </Button>
   </div>

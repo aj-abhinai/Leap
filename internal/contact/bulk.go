@@ -3,7 +3,6 @@ package contact
 import (
 	"crm/internal/util"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -28,20 +27,6 @@ type BulkCreateResponse struct {
 type BulkRowError struct {
 	Row     int    `json:"row"`
 	Message string `json:"message"`
-}
-
-var nonDigit = regexp.MustCompile(`\D`)
-
-// normalizePhone keeps only ASCII digits so identical numbers with different
-// formatting collapse to one lookup key.
-func normalizePhone(phone string) string {
-	return nonDigit.ReplaceAllString(phone, "")
-}
-
-// normalizeEmail trims and lowercases so case/whitespace differences collapse
-// to one lookup key.
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
 }
 
 type contactKeys struct {
@@ -76,10 +61,10 @@ func (s *Service) loadContactKeys() (contactKeys, error) {
 		if err := rows.Scan(&phone, &email); err != nil {
 			return keys, fmt.Errorf("scan contact key: %w", err)
 		}
-		if p := normalizePhone(phone); p != "" {
+		if p := util.NormalizePhone(phone); p != "" {
 			keys.phones[p] = true
 		}
-		if e := normalizeEmail(email); e != "" {
+		if e := util.NormalizeEmail(email); e != "" {
 			keys.emails[e] = true
 		}
 	}
@@ -89,17 +74,17 @@ func (s *Service) loadContactKeys() (contactKeys, error) {
 // recordMatch registers a successfully imported row so later rows in the same
 // file are caught as same-file duplicates.
 func (k *contactKeys) recordMatch(phone, email string) {
-	if p := normalizePhone(phone); p != "" {
+	if p := util.NormalizePhone(phone); p != "" {
 		k.phones[p] = true
 	}
-	if e := normalizeEmail(email); e != "" {
+	if e := util.NormalizeEmail(email); e != "" {
 		k.emails[e] = true
 	}
 }
 
 func (k contactKeys) duplicateReason(phone, email string) string {
-	phoneMatch := normalizePhone(phone) != "" && k.phones[normalizePhone(phone)]
-	emailMatch := normalizeEmail(email) != "" && k.emails[normalizeEmail(email)]
+	phoneMatch := util.NormalizePhone(phone) != "" && k.phones[util.NormalizePhone(phone)]
+	emailMatch := util.NormalizeEmail(email) != "" && k.emails[util.NormalizeEmail(email)]
 	switch {
 	case phoneMatch && emailMatch:
 		return "phone and email match an existing contact"

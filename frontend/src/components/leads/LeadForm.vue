@@ -44,6 +44,7 @@ const props = defineProps<{
   pipelineId: string
   initialStageId?: string
   prefillContact?: PrefillContact | null
+  saving?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -59,7 +60,6 @@ const formNickname = shallowRef(props.editingLead?.nickname || '')
 const formNotes = shallowRef(props.editingLead?.notes || '')
 const formStageId = shallowRef(props.editingLead?.stage_id || props.initialStageId || props.stages[0]?.id || '')
 const formError = shallowRef('')
-const saving = shallowRef(false)
 
 // Contact picker state
 const contactSearch = shallowRef('')
@@ -180,12 +180,7 @@ async function handleSave() {
     body.contact_id = linkedContactId.value
   }
 
-  saving.value = true
-  try {
-    await emit('save', body)
-  } finally {
-    saving.value = false
-  }
+  emit('save', body)
 }
 </script>
 

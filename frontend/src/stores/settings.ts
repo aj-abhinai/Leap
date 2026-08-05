@@ -18,10 +18,12 @@ export const useSettingsStore = defineStore('settings', () => {
   async function fetchTags() {
     loading.value = true
     try {
-      const res = await apiClient.get('/api/tags?type=tag')
-      tags.value = res.data
-      const statusRes = await apiClient.get('/api/tags?type=status')
-      statuses.value = statusRes.data
+      const [tagsRes, statusesRes] = await Promise.all([
+        apiClient.get('/api/tags?type=tag'),
+        apiClient.get('/api/tags?type=status'),
+      ])
+      tags.value = tagsRes.data
+      statuses.value = statusesRes.data
     } finally {
       loading.value = false
     }

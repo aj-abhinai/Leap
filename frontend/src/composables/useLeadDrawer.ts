@@ -9,6 +9,7 @@ export function useLeadDrawer(onSaved: () => void) {
   const editingLead = ref<Lead | null>(null)
   const initialStageId = shallowRef<string | undefined>(undefined)
   const prefillContact = ref<PrefillContact | null>(null)
+  const saving = shallowRef(false)
 
   function openCreate(stageId?: string) {
     editingLead.value = null
@@ -24,6 +25,7 @@ export function useLeadDrawer(onSaved: () => void) {
   }
 
   async function handleSave(body: Record<string, any>) {
+    saving.value = true
     try {
       if (editingLead.value) {
         await apiClient.patch(`/api/leads/${editingLead.value.id}`, body)
@@ -36,6 +38,8 @@ export function useLeadDrawer(onSaved: () => void) {
       onSaved()
     } catch (e: any) {
       toast.error(e.message || 'Failed to save lead')
+    } finally {
+      saving.value = false
     }
   }
 
@@ -55,6 +59,7 @@ export function useLeadDrawer(onSaved: () => void) {
     editingLead,
     initialStageId,
     prefillContact,
+    saving,
     openCreate,
     openEdit,
     handleSave,

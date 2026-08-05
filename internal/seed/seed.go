@@ -113,9 +113,8 @@ func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
 		return err
 	}
 	_, err = db.Exec(
-		`INSERT INTO user_roles (user_id, role_id)
-		SELECT u.id, r.id FROM users u, roles r
-		WHERE u.email = $1 AND r.name = 'superadmin' ON CONFLICT DO NOTHING`,
+		`UPDATE users SET role_id = r.id, updated_at = now()
+		FROM roles r WHERE r.name = 'superadmin' AND users.email = $1`,
 		email,
 	)
 	if err != nil {
@@ -142,7 +141,7 @@ func seedDefaultPipeline(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	stages := []string{"New", "Contacted", "Qualified", "Proposal", "Won", "Lost"}
+	stages := []string{"Lead", "Qualified", "Proposal", "Won"}
 	for i, name := range stages {
 		_, err := db.Exec(
 			`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, $2, $3)`,
@@ -152,7 +151,7 @@ func seedDefaultPipeline(db *sql.DB) error {
 			return fmt.Errorf("seed stage %s: %w", name, err)
 		}
 	}
-	slog.Info("default pipeline seeded with 6 stages")
+	slog.Info("default pipeline seeded with 4 stages")
 	return nil
 }
 

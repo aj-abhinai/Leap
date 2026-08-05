@@ -18,11 +18,6 @@ type Permission struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-type UserRole struct {
-	UserID string `json:"user_id"`
-	RoleID string `json:"role_id"`
-}
-
 type RolePermission struct {
 	RoleID       string `json:"role_id"`
 	PermissionID string `json:"permission_id"`
@@ -36,4 +31,8 @@ type CreateRoleRequest struct {
 type UpdateRoleRequest struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
+}
+
+type SetUserRoleRequest struct {
+	RoleID string `json:"role_id"`
 }

@@ -53,7 +53,9 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 }
 func (h *Handler) writeProtected(w http.ResponseWriter, err error) bool {
 	if !errors.Is(err, ErrSelfDelete) &&
-		!errors.Is(err, ErrSuperadminUserProtected) &&
+		!errors.Is(err, ErrLastSuperadminProtected) &&
+		!errors.Is(err, ErrSelfRoleChange) &&
+		!errors.Is(err, ErrWildcardRestricted) &&
 		!errors.Is(err, ErrSuperadminRoleProtected) &&
 		!errors.Is(err, ErrLastManagerProtected) {
 		return false
@@ -340,12 +342,10 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func (h *Handler) AssignUserRole(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) SetUserRole(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
-	var body struct {
-		RoleID string `json:"role_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	var req SetUserRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -355,30 +355,14 @@ func (h *Handler) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if err := h.svc.assignUserRole(userID, body.RoleID); err != nil {
+	if err := h.svc.setUserRole(userID, req.RoleID, ctxutil.GetUserID(r)); err != nil {
 		h.respondError(w, err)
 		return
 	}
 	respond.JSON(
 		w,
 		http.StatusOK,
-		map[string]string{"message": "Role assigned"},
-		nil,
-		nil,
-	)
-}
-
-func (h *Handler) RemoveUserRole(w http.ResponseWriter, r *http.Request) {
-	userID := chi.URLParam(r, "id")
-	roleID := chi.URLParam(r, "role_id")
-	if err := h.svc.removeUserRole(userID, roleID); err != nil {
-		h.respondError(w, err)
-		return
-	}
-	respond.JSON(
-		w,
-		http.StatusOK,
-		map[string]string{"message": "Role removed"},
+		map[string]string{"message": "Role updated"},
 		nil,
 		nil,
 	)

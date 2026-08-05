@@ -15,7 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Plus, ShieldCheck, Trash2, User, X } from '@lucide/vue'
+import { Plus, ShieldCheck, Trash2, User } from '@lucide/vue'
 
 interface Role {
   id: string
@@ -26,7 +26,8 @@ interface User {
   id: string
   name: string
   email: string
-  roles?: Role[]
+  role?: Role | null
+  protected?: boolean
   created_at: string
 }
 
@@ -97,42 +98,18 @@ async function deleteUser(userId: string) {
   }
 }
 
-async function assignRole(userId: string, roleId: string) {
-  if (!roleId) return
+async function setRole(userId: string, roleId: string) {
   try {
-    await apiClient.post(`/api/users/${userId}/roles`, { role_id: roleId })
-    toast.success('Role assigned')
+    await apiClient.put(`/api/users/${userId}/role`, { role_id: roleId })
+    toast.success('Role updated')
     loadUsers()
   } catch (e: any) {
-    toast.error(e.message || 'Failed to assign role')
+    toast.error(e.message || 'Failed to update role')
   }
-}
-
-async function removeRole(userId: string, roleId: string) {
-  try {
-    await apiClient.delete(`/api/users/${userId}/roles/${roleId}`)
-    toast.success('Role removed')
-    loadUsers()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to remove role')
-  }
-}
-
-function isSuperAdmin(u: User): boolean {
-  return u.roles?.some((r) => r.name === 'superadmin') ?? false
 }
 
 function isProtectedUser(u: User): boolean {
-  return isSuperAdmin(u) || auth.user?.id === u.id
-}
-
-function isSuperadminRole(role: Role): boolean {
-  return role.name === 'superadmin'
-}
-
-function assignableRoles(u: User): Role[] {
-  const assigned = new Set(u.roles?.map((r) => r.id) ?? [])
-  return roles.value.filter((r) => !assigned.has(r.id))
+  return !!u.protected || auth.user?.id === u.id
 }
 </script>
 
@@ -168,8 +145,7 @@ function assignableRoles(u: User): Role[] {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
-              <TableHead>Roles</TableHead>
-              <TableHead class="w-56">Add role</TableHead>
+              <TableHead>Role</TableHead>
               <TableHead class="w-16">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -178,33 +154,30 @@ function assignableRoles(u: User): Role[] {
               <TableCell class="font-medium">{{ u.name }}</TableCell>
               <TableCell class="text-muted-foreground">{{ u.email }}</TableCell>
               <TableCell>
-                <div class="flex flex-wrap gap-1">
-                  <Badge v-for="r in u.roles" :key="r.id" variant="secondary" class="text-xs">
-                    {{ r.name }}
-                    <button
-                      v-if="!isSuperadminRole(r)"
-                      class="ml-1 inline-flex items-center rounded hover:text-destructive"
-                      :title="`Remove role ${r.name}`"
-                      @click="removeRole(u.id, r.id)"
-                    >
-                      <X class="size-3" />
-                    </button>
+                <div class="flex items-center gap-2">
+                  <Badge v-if="u.role" variant="secondary" class="text-xs">
+                    {{ u.role.name }}
+                    <ShieldCheck v-if="u.role.name === 'superadmin'" class="ml-1 size-3" />
                   </Badge>
-                  <span v-if="!u.roles?.length" class="text-xs text-muted-foreground">—</span>
+                  <span v-else class="text-xs text-muted-foreground">—</span>
                 </div>
               </TableCell>
               <TableCell>
                 <div class="flex items-center gap-1.5">
                   <select
-                    v-if="assignableRoles(u).length > 0"
-                    class="h-8 w-full rounded-md border bg-background px-2 text-base sm:text-sm"
-                    :value="''"
-                    @change="assignRole(u.id, ($event.target as HTMLSelectElement).value)"
+                    class="h-8 w-40 rounded-md border bg-background px-2 text-sm"
+                    :value="u.role?.id ?? ''"
+                    :disabled="isProtectedUser(u)"
+                    @change="setRole(u.id, ($event.target as HTMLSelectElement).value)"
                   >
-                    <option value="" disabled>Add role…</option>
-                    <option v-for="r in assignableRoles(u)" :key="r.id" :value="r.id">{{ r.name }}</option>
+                    <option value="">No role</option>
+                    <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
                   </select>
-                  <span v-else class="text-xs text-muted-foreground">—</span>
+                  <ShieldCheck
+                    v-if="u.protected"
+                    class="size-3.5 text-muted-foreground"
+                    title="Protected"
+                  />
                 </div>
               </TableCell>
               <TableCell>

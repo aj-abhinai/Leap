@@ -682,11 +682,47 @@ func diffContact(old, new *Contact) string {
 		diff["status"] = map[string]string{"old": oldStatus, "new": newStatus}
 	}
 
+	// Phones/emails live in child tables (contact_phones/contact_emails); the
+	// scalar fields mirror the primary value, so compare the full lists.
+	if !phoneValuesEqual(old.Phones, new.Phones) {
+		diff["phones"] = map[string]any{"old": old.Phones, "new": new.Phones}
+	}
+	if !emailValuesEqual(old.Emails, new.Emails) {
+		diff["emails"] = map[string]any{"old": old.Emails, "new": new.Emails}
+	}
+
 	if len(diff) == 0 {
 		return ""
 	}
 	b, _ := json.Marshal(diff)
 	return string(b)
+}
+
+// phoneValuesEqual reports whether two phone lists are identical (same values
+// in the same order, ignoring the primary flag which is derived).
+func phoneValuesEqual(a, b []PhoneValue) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Value != b[i].Value {
+			return false
+		}
+	}
+	return true
+}
+
+// emailValuesEqual reports whether two email lists are identical.
+func emailValuesEqual(a, b []EmailValue) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Value != b[i].Value {
+			return false
+		}
+	}
+	return true
 }
 
 func tagsToSet(tags []TagRef) map[string]bool {

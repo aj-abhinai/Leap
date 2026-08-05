@@ -2,12 +2,12 @@ package auth
 
 import (
 	"crm/internal/config"
+	"crm/internal/util"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -27,7 +27,7 @@ func (s *Service) login(email, password string) (*TokenResponse, bool, error) {
 	var u User
 	err := s.db.QueryRow(
 		`SELECT id, name, email, password_hash, must_change_password FROM users WHERE email = $1 AND deleted_at IS NULL`,
-		normalizeEmail(email),
+		util.NormalizeEmail(email),
 	).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.MustChangePassword)
 	if err != nil {
 		return nil, false, ErrInvalidCredentials
@@ -45,7 +45,7 @@ func (s *Service) login(email, password string) (*TokenResponse, bool, error) {
 // normalizeEmail trims and lowercases so case and whitespace differences in
 // stored or submitted addresses never lock a user out of their account.
 func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
+	return util.NormalizeEmail(email)
 }
 
 func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {

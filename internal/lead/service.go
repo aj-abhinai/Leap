@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 )
 
 var (
@@ -226,7 +225,7 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	// is stripped to digits and matched against the stored value with the same
 	// transformation. Any phone/email on a contact counts as a match (not just
 	// the primary), so an alternate number still resolves to the contact.
-	if phone := normalizePhone(nc.Phone); phone != "" {
+	if phone := util.NormalizePhone(nc.Phone); phone != "" {
 		var found string
 		err := tx.QueryRow(
 			`SELECT contact_id FROM contact_phones WHERE regexp_replace(value, '\D', '', 'g') = $1 LIMIT 1`,
@@ -239,7 +238,7 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 			return "", fmt.Errorf("resolve contact by phone: %w", err)
 		}
 	}
-	if email := normalizeEmail(nc.Email); email != "" {
+	if email := util.NormalizeEmail(nc.Email); email != "" {
 		var found string
 		err := tx.QueryRow(
 			`SELECT contact_id FROM contact_emails WHERE lower(trim(value)) = $1 LIMIT 1`,
@@ -379,6 +378,8 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 			return nil, err
 		}
 		desc = fmt.Sprintf("Moved lead from %q to %q", oldStage, l.StageName)
+	} else if old.ContactID != "" && old.ContactID != l.ContactID {
+		desc = fmt.Sprintf("Reassigned contact from %q to %q", old.ContactID, l.ContactID)
 	}
 	s.logActivity(l.ID, "lead", action, desc, userID)
 	return &l, nil
@@ -493,24 +494,6 @@ func (s *Service) stageName(stageID string) (string, error) {
 		return "", fmt.Errorf("load stage name: %w", err)
 	}
 	return name, nil
-}
-
-// normalizePhone keeps only ASCII digits so identical numbers with different
-// formatting collapse to one lookup key (mirrors the contact package).
-func normalizePhone(phone string) string {
-	var b strings.Builder
-	for _, r := range phone {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-// normalizeEmail trims and lowercases so case/whitespace differences collapse
-// to one lookup key (mirrors the contact package).
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
 }
 
 func (s *Service) logActivity(resourceID, resourceType, action, desc, userID string) {

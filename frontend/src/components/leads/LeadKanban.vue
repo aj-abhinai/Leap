@@ -27,12 +27,6 @@ const emit = defineEmits<{
   viewActivities: [lead: Lead]
 }>()
 
-const stageColors: Record<number, string> = {}
-
-function getStageColor(index: number): string {
-  return stageColors[index % Object.keys(stageColors).length]
-}
-
 const moveTargets = computed<Record<string, Stage[]>>(() => {
   const map: Record<string, Stage[]> = {}
   for (const col of props.columns) {

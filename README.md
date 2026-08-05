@@ -39,7 +39,7 @@ cp .env.example .env
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-Go to `http://localhost:9000` and login with the superadmin credentials from your `.env`.
+Go to `http://localhost:9000` and log in with the superadmin credentials from your `.env`.
 
 ### Build from source
 
@@ -87,7 +87,7 @@ cp .env.example .env
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-Go to `http://localhost:9000` and login with the superadmin credentials from your `.env`.
+Go to `http://localhost:9000` and log in with the superadmin credentials from your `.env`.
 
 ### Using an existing PostgreSQL VM with Docker
 

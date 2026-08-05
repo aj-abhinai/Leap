@@ -8,6 +8,7 @@ vi.mock('@/composables/useApi', () => ({
   apiClient: {
     get: vi.fn(),
     post: vi.fn(),
+    put: vi.fn(),
     delete: vi.fn(),
   },
 }))
@@ -20,6 +21,7 @@ vi.mock('@/stores/auth', () => ({
 
 const getMock = vi.mocked(apiClient.get)
 const postMock = vi.mocked(apiClient.post)
+const putMock = vi.mocked(apiClient.put)
 const deleteMock = vi.mocked(apiClient.delete)
 
 describe('SettingsTabUsers', () => {
@@ -27,14 +29,15 @@ describe('SettingsTabUsers', () => {
     setActivePinia(createPinia())
     getMock.mockReset()
     postMock.mockReset()
+    putMock.mockReset()
     deleteMock.mockReset()
 
     getMock.mockImplementation(async (url: string) => {
       if (url === '/api/users') {
         return {
           data: [
-            { id: 'u1', name: 'Alice', email: 'alice@example.com', roles: [{ id: 'r1', name: 'editor' }] },
-            { id: 'u-self', name: 'Me', email: 'me@example.com', roles: [] },
+            { id: 'u1', name: 'Alice', email: 'alice@example.com', role: { id: 'r1', name: 'editor' } },
+            { id: 'u-self', name: 'Me', email: 'me@example.com', role: null },
           ],
         }
       }
@@ -49,10 +52,11 @@ describe('SettingsTabUsers', () => {
       return { data: [] }
     })
     postMock.mockResolvedValue({ data: { message: 'ok' } })
+    putMock.mockResolvedValue({ data: { message: 'ok' } })
     deleteMock.mockResolvedValue({ data: { message: 'ok' } })
   })
 
-  it('lists users with their role badges', async () => {
+  it('lists users with their role badge', async () => {
     const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
@@ -60,7 +64,7 @@ describe('SettingsTabUsers', () => {
     expect(wrapper.html()).toContain('editor')
   })
 
-  it('assigns a role through the users roles endpoint', async () => {
+  it('sets a role through the single-role endpoint', async () => {
     const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
@@ -68,18 +72,17 @@ describe('SettingsTabUsers', () => {
     await select.setValue('r2')
     await flushPromises()
 
-    expect(postMock).toHaveBeenCalledWith('/api/users/u1/roles', { role_id: 'r2' })
+    expect(putMock).toHaveBeenCalledWith('/api/users/u1/role', { role_id: 'r2' })
   })
 
-  it('removes a non-superadmin role from a user', async () => {
+  it('allows clearing a role to no role', async () => {
     const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
-    const removeButton = wrapper.find('button[title="Remove role editor"]')
-    expect(removeButton.exists()).toBe(true)
-    await removeButton.trigger('click')
+    const select = wrapper.find('select')
+    await select.setValue('')
     await flushPromises()
 
-    expect(deleteMock).toHaveBeenCalledWith('/api/users/u1/roles/r1')
+    expect(putMock).toHaveBeenCalledWith('/api/users/u1/role', { role_id: '' })
   })
 })

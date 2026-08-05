@@ -43,6 +43,7 @@ const perPage = 20
 
 const drawerOpen = shallowRef(false)
 const editingContact = ref<Contact | null>(null)
+const saving = shallowRef(false)
 
 const deletingId = shallowRef<string | null>(null)
 const deleteDialogOpen = shallowRef(false)
@@ -103,6 +104,7 @@ function openEdit(contact: Contact) {
 }
 
 async function handleSave(body: Record<string, any>) {
+  saving.value = true
   try {
     if (editingContact.value) {
       await apiClient.patch(`/api/contacts/${editingContact.value.id}`, body)
@@ -118,6 +120,8 @@ async function handleSave(body: Record<string, any>) {
     loadContacts().catch(() => {})
   } catch (e: any) {
     toast.error(e.message || 'Failed to save contact')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -283,6 +287,7 @@ async function handleDelete() {
           <ContactForm
             :key="editingContact?.id ?? 'create'"
             :editing-contact="editingContact"
+            :saving="saving"
             @save="handleSave"
           />
         </SheetContent>

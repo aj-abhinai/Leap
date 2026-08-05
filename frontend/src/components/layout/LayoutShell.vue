@@ -9,7 +9,7 @@ import SiteHeader from './SiteHeader.vue'
     <AppSidebar />
     <SidebarInset>
       <SiteHeader />
-      <div class="flex flex-1 flex-col">
+      <div class="flex min-w-0 flex-1 flex-col">
         <slot />
       </div>
     </SidebarInset>

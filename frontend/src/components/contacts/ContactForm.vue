@@ -18,6 +18,7 @@ import { Loader2, Plus, X, Star } from '@lucide/vue'
 
 const props = defineProps<{
   editingContact: Contact | null
+  saving?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -39,7 +40,6 @@ const emails = ref<{ value: string; is_primary: boolean }[]>(
   (props.editingContact?.emails?.length ? props.editingContact.emails : props.editingContact?.email ? [{ value: props.editingContact.email, is_primary: true }] : [{ value: '', is_primary: true }])
 )
 const formError = shallowRef('')
-const saving = shallowRef(false)
 
 onMounted(() => {
   settings.fetchTags()
@@ -120,23 +120,18 @@ async function handleSave() {
   if (phoneList.length && !phoneList.some(p => p.is_primary)) phoneList[0].is_primary = true
   if (emailList.length && !emailList.some(e => e.is_primary)) emailList[0].is_primary = true
 
-  saving.value = true
-  try {
-    await emit('save', {
-      name: result.data.name,
-      nickname: formNickname.value,
-      location: result.data.location ?? '',
-      age: result.data.age ?? null,
-      tag_ids: selectedTags.value,
-      status_id: formStatusId.value && formStatusId.value !== '__none__' ? formStatusId.value : '',
-      phones: phoneList,
-      emails: emailList,
-      phone: phoneList.find(p => p.is_primary)?.value ?? phoneList[0]?.value ?? '',
-      email: emailList.find(e => e.is_primary)?.value ?? emailList[0]?.value ?? '',
-    })
-  } finally {
-    saving.value = false
-  }
+  await emit('save', {
+    name: result.data.name,
+    nickname: formNickname.value,
+    location: result.data.location ?? '',
+    age: result.data.age ?? null,
+    tag_ids: selectedTags.value,
+    status_id: formStatusId.value && formStatusId.value !== '__none__' ? formStatusId.value : '',
+    phones: phoneList,
+    emails: emailList,
+    phone: phoneList.find(p => p.is_primary)?.value ?? phoneList[0]?.value ?? '',
+    email: emailList.find(e => e.is_primary)?.value ?? emailList[0]?.value ?? '',
+  })
 }
 </script>
 

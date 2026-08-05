@@ -42,6 +42,7 @@ interface Role {
 const roles = shallowRef<Role[]>([])
 const allPermissions = shallowRef<Permission[]>([])
 const loading = shallowRef(false)
+const permsLoading = shallowRef(false)
 
 // Modal state
 const modalOpen = shallowRef(false)
@@ -75,11 +76,14 @@ async function loadRoles() {
 }
 
 async function loadPermissions() {
+  permsLoading.value = true
   try {
     const res = await apiClient.get('/api/permissions')
     allPermissions.value = res.data
   } catch (e: any) {
     toast.error(e.message || 'Failed to load permissions')
+  } finally {
+    permsLoading.value = false
   }
 }
 
@@ -105,8 +109,15 @@ function isSuperadminRole(role: Role): boolean {
   return role.name === 'superadmin'
 }
 
-function permissionIsLocked(role: Role, perm: Permission): boolean {
-  return isSuperadminRole(role) && perm.name === '*'
+// The wildcard may only be assigned to the superadmin role, and the
+// superadmin role is fully governed by it (its permissions are locked).
+const visiblePermissions = computed(() => {
+  const editingSuper = isEditing.value && !!editingRole.value && isSuperadminRole(editingRole.value)
+  return allPermissions.value.filter((p) => p.name !== '*' || editingSuper)
+})
+
+function isPermDisabled(role: Role, _perm: Permission): boolean {
+  return isSuperadminRole(role)
 }
 
 function togglePermission(permId: string) {
@@ -133,18 +144,15 @@ async function saveRole() {
         name: formName.value.trim(),
         description: formDesc.value.trim(),
       })
-      // Sync the permission diff
+      // Sync the permission diff concurrently; the reload below reflects
+      // the true (possibly partial) DB state if any request fails.
       const current = new Set((editingRole.value.permissions ?? []).map((p) => p.id))
-      for (const permId of current) {
-        if (!formPermissions.value.has(permId)) {
-          await apiClient.delete(`/api/roles/${id}/permissions/${permId}`)
-        }
-      }
-      for (const permId of formPermissions.value) {
-        if (!current.has(permId)) {
-          await apiClient.post(`/api/roles/${id}/permissions`, { permission_id: permId })
-        }
-      }
+      const removed = [...current].filter((permId) => !formPermissions.value.has(permId))
+      const added = [...formPermissions.value].filter((permId) => !current.has(permId))
+      await Promise.all([
+        ...removed.map((permId) => apiClient.delete(`/api/roles/${id}/permissions/${permId}`)),
+        ...added.map((permId) => apiClient.post(`/api/roles/${id}/permissions`, { permission_id: permId })),
+      ])
       toast.success('Role updated')
     } else {
       const res = await apiClient.post('/api/roles', {
@@ -152,17 +160,19 @@ async function saveRole() {
         description: formDesc.value.trim(),
       })
       const role = res.data as Role
-      for (const permId of formPermissions.value) {
-        await apiClient.post(`/api/roles/${role.id}/permissions`, { permission_id: permId })
-      }
+      await Promise.all(
+        [...formPermissions.value].map((permId) =>
+          apiClient.post(`/api/roles/${role.id}/permissions`, { permission_id: permId }),
+        ),
+      )
       toast.success('Role created')
     }
     modalOpen.value = false
-    loadRoles()
   } catch (e: any) {
     formError.value = e.message || 'Failed to save role'
   } finally {
     saving.value = false
+    loadRoles()
   }
 }
 
@@ -197,7 +207,7 @@ function groupPermissions(perms: Permission[]): { group: string; perms: Permissi
   return [...groups.entries()].map(([group, perms]) => ({ group, perms }))
 }
 
-const permissionGroups = computed(() => groupPermissions(allPermissions.value))
+const permissionGroups = computed(() => groupPermissions(visiblePermissions.value))
 </script>
 
 <template>
@@ -286,41 +296,49 @@ const permissionGroups = computed(() => groupPermissions(allPermissions.value))
                 variant="ghost"
                 size="sm"
                 @click="
-                  formPermissions.size === allPermissions.length
+                  formPermissions.size === visiblePermissions.length
                     ? (formPermissions = new Set())
-                    : (formPermissions = new Set(allPermissions.map((p) => p.id)))
+                    : (formPermissions = new Set(visiblePermissions.map((p) => p.id)))
                 "
               >
-                {{ formPermissions.size === allPermissions.length ? 'Clear all' : 'Select all' }}
+                {{ formPermissions.size === visiblePermissions.length ? 'Clear all' : 'Select all' }}
               </Button>
             </div>
             <div class="max-h-80 overflow-y-auto rounded-md border p-3">
-              <div v-for="group in permissionGroups" :key="group.group" class="mb-3 last:mb-0">
-                <p class="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {{ group.group }}
-                </p>
-                <div class="grid grid-cols-2 gap-x-3 gap-y-1">
-                  <div
-                    v-for="perm in group.perms"
-                    :key="perm.id"
-                    class="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-muted/50"
-                  >
-                    <Checkbox
-                      :checked="formPermissions.has(perm.id)"
-                      :disabled="isEditing && !!editingRole && permissionIsLocked(editingRole, perm)"
-                      :title="
-                        isEditing && editingRole && permissionIsLocked(editingRole, perm)
-                          ? 'The wildcard permission cannot be removed from the superadmin role'
-                          : perm.description
-                      "
-                      @update:checked="togglePermission(perm.id)"
-                    />
-                    <Label class="cursor-pointer text-sm" :title="perm.description">
-                      {{ permissionLabel(perm) }}
-                    </Label>
+              <div v-if="permsLoading" class="space-y-2">
+                <div v-for="i in 6" :key="i" class="h-4 animate-pulse rounded bg-muted" />
+              </div>
+              <div v-else-if="visiblePermissions.length === 0" class="py-6 text-center text-sm text-muted-foreground">
+                No permissions available
+              </div>
+              <template v-else>
+                <div v-for="group in permissionGroups" :key="group.group" class="mb-3 last:mb-0">
+                  <p class="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {{ group.group }}
+                  </p>
+                  <div class="grid grid-cols-2 gap-x-3 gap-y-1">
+                    <div
+                      v-for="perm in group.perms"
+                      :key="perm.id"
+                      class="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-muted/50"
+                    >
+                      <Checkbox
+                        :checked="formPermissions.has(perm.id)"
+                        :disabled="isEditing && !!editingRole && isPermDisabled(editingRole, perm)"
+                        :title="
+                          isEditing && editingRole && isPermDisabled(editingRole, perm)
+                            ? 'The superadmin role is governed by the wildcard permission'
+                            : perm.description
+                        "
+                        @update:checked="togglePermission(perm.id)"
+                      />
+                      <Label class="cursor-pointer text-sm" :title="perm.description">
+                        {{ permissionLabel(perm) }}
+                      </Label>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </template>
             </div>
           </div>
 

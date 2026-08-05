@@ -85,20 +85,15 @@ func TestDeleteSuperadminUserBlocked(t *testing.T) {
 	roleID := insertRole(t, db, "superadmin")
 	var userID string
 	if err := db.QueryRow(
-		`INSERT INTO users (name, email, password_hash) VALUES ('Super Admin', 'super@example.com', 'hash') RETURNING id`,
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Super Admin', 'super@example.com', 'hash', $1) RETURNING id`,
+		roleID,
 	).Scan(&userID); err != nil {
 		t.Fatalf("insert superadmin user: %v", err)
 	}
-	if _, err := db.Exec(
-		`INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`,
-		userID, roleID,
-	); err != nil {
-		t.Fatalf("assign superadmin role: %v", err)
-	}
 
 	err := svc.deleteUser(userID, "")
-	if !errors.Is(err, ErrSuperadminUserProtected) {
-		t.Fatalf("deleteUser = %v, want ErrSuperadminUserProtected", err)
+	if !errors.Is(err, ErrLastSuperadminProtected) {
+		t.Fatalf("deleteUser = %v, want ErrLastSuperadminProtected", err)
 	}
 
 	var deleted sql.NullTime
@@ -250,16 +245,10 @@ func seedManager(t *testing.T, db *sql.DB, email string) (string, string) {
 	}
 	var userID string
 	if err := db.QueryRow(
-		`INSERT INTO users (name, email, password_hash) VALUES ('Manager', $1, 'hash') RETURNING id`,
-		email,
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Manager', $1, 'hash', $2) RETURNING id`,
+		email, roleID,
 	).Scan(&userID); err != nil {
 		t.Fatalf("insert manager: %v", err)
-	}
-	if _, err := db.Exec(
-		`INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`,
-		userID, roleID,
-	); err != nil {
-		t.Fatalf("assign manager role: %v", err)
 	}
 	return userID, roleID
 }
@@ -312,20 +301,20 @@ func TestRemoveLastManagerRoleBlocked(t *testing.T) {
 
 	managerID, roleID := seedManager(t, db, "manager@example.com")
 
-	err := svc.removeUserRole(managerID, roleID)
+	err := svc.setUserRole(managerID, "", "")
 	if !errors.Is(err, ErrLastManagerProtected) {
-		t.Fatalf("removeUserRole = %v, want ErrLastManagerProtected", err)
+		t.Fatalf("setUserRole = %v, want ErrLastManagerProtected", err)
 	}
 
-	var count int
+	var gotRoleID sql.NullString
 	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM user_roles WHERE user_id = $1 AND role_id = $2`,
-		managerID, roleID,
-	).Scan(&count); err != nil {
-		t.Fatalf("count user_roles: %v", err)
+		`SELECT role_id FROM users WHERE id = $1`,
+		managerID,
+	).Scan(&gotRoleID); err != nil {
+		t.Fatalf("load role_id: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("user_roles count = %d, want 1 (role must survive)", count)
+	if !gotRoleID.Valid || gotRoleID.String != roleID {
+		t.Errorf("role_id = %v, want %q (role must survive)", gotRoleID, roleID)
 	}
 }
 
@@ -333,11 +322,11 @@ func TestRemoveRoleFromSecondManagerAllowed(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	managerA, roleA := seedManager(t, db, "manager-a@example.com")
+	managerA, _ := seedManager(t, db, "manager-a@example.com")
 	seedManager(t, db, "manager-b@example.com")
 
-	if err := svc.removeUserRole(managerA, roleA); err != nil {
-		t.Fatalf("removeUserRole with another manager present: %v", err)
+	if err := svc.setUserRole(managerA, "", ""); err != nil {
+		t.Fatalf("setUserRole with another manager present: %v", err)
 	}
 }
 
@@ -346,40 +335,28 @@ func TestRemoveSuperadminRoleFromLastSuperadminBlocked(t *testing.T) {
 	svc := NewService(db)
 
 	roleID := insertRole(t, db, "superadmin")
-	wildcardID := insertPermission(t, db, "*")
-	if _, err := db.Exec(
-		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)`,
-		roleID, wildcardID,
-	); err != nil {
-		t.Fatalf("assign wildcard: %v", err)
-	}
 	var userID string
 	if err := db.QueryRow(
-		`INSERT INTO users (name, email, password_hash) VALUES ('Super', 'super@example.com', 'hash') RETURNING id`,
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Super', 'super@example.com', 'hash', $1) RETURNING id`,
+		roleID,
 	).Scan(&userID); err != nil {
 		t.Fatalf("insert superadmin user: %v", err)
 	}
-	if _, err := db.Exec(
-		`INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`,
-		userID, roleID,
-	); err != nil {
-		t.Fatalf("assign superadmin role: %v", err)
+
+	err := svc.setUserRole(userID, "", "")
+	if !errors.Is(err, ErrLastSuperadminProtected) {
+		t.Fatalf("setUserRole(superadmin) = %v, want ErrLastSuperadminProtected", err)
 	}
 
-	err := svc.removeUserRole(userID, roleID)
-	if !errors.Is(err, ErrLastManagerProtected) {
-		t.Fatalf("removeUserRole(superadmin) = %v, want ErrLastManagerProtected", err)
-	}
-
-	var count int
+	var gotRoleID sql.NullString
 	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM user_roles WHERE user_id = $1 AND role_id = $2`,
-		userID, roleID,
-	).Scan(&count); err != nil {
-		t.Fatalf("count user_roles: %v", err)
+		`SELECT role_id FROM users WHERE id = $1`,
+		userID,
+	).Scan(&gotRoleID); err != nil {
+		t.Fatalf("load role_id: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("user_roles count = %d, want 1", count)
+	if !gotRoleID.Valid || gotRoleID.String != roleID {
+		t.Errorf("role_id = %v, want %q", gotRoleID, roleID)
 	}
 }
 
@@ -405,19 +382,73 @@ func TestCreateRoleDuplicateReturnsConflictIntegration(t *testing.T) {
 	}
 }
 
-func TestRemoveUserRoleMissingResources(t *testing.T) {
+func TestSetUserRoleMissingResources(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
 	managerID, roleID := seedManager(t, db, "manager@example.com")
 	var missing string
 
-	err := svc.removeUserRole(missing, roleID)
+	err := svc.setUserRole(missing, roleID, "")
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("removeUserRole(missing user) = %v, want ErrNotFound", err)
+		t.Fatalf("setUserRole(missing user) = %v, want ErrNotFound", err)
 	}
-	err = svc.removeUserRole(managerID, missing)
+	err = svc.setUserRole(managerID, missing, "")
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("removeUserRole(missing role) = %v, want ErrNotFound", err)
+		t.Fatalf("setUserRole(missing role) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSetUserRoleSelfChangeBlocked(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	managerID, _ := seedManager(t, db, "manager@example.com")
+	otherRoleID := insertRole(t, db, "sales")
+
+	err := svc.setUserRole(managerID, otherRoleID, managerID)
+	if !errors.Is(err, ErrSelfRoleChange) {
+		t.Fatalf("setUserRole(self) = %v, want ErrSelfRoleChange", err)
+	}
+}
+
+func TestSetUserRoleDemoteSecondSuperadminAllowed(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	superRoleID := insertRole(t, db, "superadmin")
+	regularRoleID := insertRole(t, db, "sales")
+	var a, b string
+	for i, email := range []string{"super-a@example.com", "super-b@example.com"} {
+		var id string
+		if err := db.QueryRow(
+			`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Super', $1, 'hash', $2) RETURNING id`,
+			email, superRoleID,
+		).Scan(&id); err != nil {
+			t.Fatalf("insert superadmin %d: %v", i, err)
+		}
+		if i == 0 {
+			a = id
+		} else {
+			b = id
+		}
+	}
+
+	// Demoting one of two superadmins succeeds; the other remains superadmin.
+	if err := svc.setUserRole(a, regularRoleID, ""); err != nil {
+		t.Fatalf("demote second superadmin: %v", err)
+	}
+	var roleA sql.NullString
+	if err := db.QueryRow(`SELECT role_id FROM users WHERE id = $1`, a).Scan(&roleA); err != nil {
+		t.Fatalf("load role_id for demoted user: %v", err)
+	}
+	if !roleA.Valid || roleA.String != regularRoleID {
+		t.Errorf("demoted user role_id = %v, want %q", roleA, regularRoleID)
+	}
+
+	// Now b is the sole superadmin: demoting b must be blocked.
+	err := svc.setUserRole(b, regularRoleID, "")
+	if !errors.Is(err, ErrLastSuperadminProtected) {
+		t.Fatalf("demote sole superadmin = %v, want ErrLastSuperadminProtected", err)
 	}
 }

@@ -7,6 +7,15 @@ interface ApiResponse<T = any> {
   meta?: { page: number; per_page: number; total: number }
 }
 
+export class ApiError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+  }
+}
+
 async function request<T = any>(method: string, url: string, body?: any): Promise<ApiResponse<T>> {
   const auth = useAuthStore()
   const router = useRouter()
@@ -48,7 +57,7 @@ async function request<T = any>(method: string, url: string, body?: any): Promis
     throw new Error(`Unexpected response from server (${res.status})`)
   }
   if (json.error) {
-    throw new Error(json.error.message)
+    throw new ApiError(json.error.message, json.error.code)
   }
   return json
 }
@@ -57,5 +66,6 @@ export const apiClient = {
   get: <T = any>(url: string) => request<T>('GET', url),
   post: <T = any>(url: string, body?: any) => request<T>('POST', url, body),
   patch: <T = any>(url: string, body?: any) => request<T>('PATCH', url, body),
+  put: <T = any>(url: string, body?: any) => request<T>('PUT', url, body),
   delete: <T = any>(url: string) => request<T>('DELETE', url),
 }

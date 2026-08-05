@@ -43,9 +43,8 @@ func TestSeedSuperadminRoleRepairsExistingRole(t *testing.T) {
 	var assigned bool
 	if err := db.QueryRow(`
 		SELECT EXISTS(
-			SELECT 1 FROM user_roles ur
-			JOIN users u ON u.id = ur.user_id
-			JOIN roles r ON r.id = ur.role_id
+			SELECT 1 FROM users u
+			JOIN roles r ON r.id = u.role_id
 			WHERE u.email = 'super@example.com' AND r.name = 'superadmin'
 		)`,
 	).Scan(&assigned); err != nil {
