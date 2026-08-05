@@ -122,7 +122,7 @@ function onKeydown(e: KeyboardEvent) {
           ref="searchInput"
           v-model="search"
           :placeholder="searchPlaceholder"
-          class="flex h-9 w-full bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
+          class="flex h-9 w-full bg-transparent py-2 text-base outline-none placeholder:text-muted-foreground"
           @keydown="onKeydown"
         />
       </div>

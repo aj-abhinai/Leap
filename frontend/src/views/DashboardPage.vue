@@ -37,7 +37,7 @@ function activityIcon(action: string) {
 
 <template>
   <LayoutShell>
-    <div class="flex flex-col gap-6 p-6 pt-2">
+    <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 pt-2">
       <div class="grid gap-4 md:grid-cols-3">
         <Card v-if="loading" class="overflow-hidden">
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -50,11 +50,11 @@ function activityIcon(action: string) {
           </CardContent>
         </Card>
         <Card v-else class="relative overflow-hidden animate-fade-in-up">
-          <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-blue-500 to-cyan-400" />
+          <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-primary to-primary/60" />
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Total Contacts</CardTitle>
-            <div class="flex size-8 items-center justify-center rounded-lg bg-blue-500/10">
-              <Users class="size-4 text-blue-600 dark:text-blue-400" />
+            <div class="flex size-8 items-center justify-center rounded-lg bg-primary/10">
+              <Users class="size-4 text-primary" />
             </div>
           </CardHeader>
           <CardContent>
@@ -74,11 +74,11 @@ function activityIcon(action: string) {
           </CardContent>
         </Card>
         <Card v-else class="relative overflow-hidden animate-fade-in-up animate-fade-in-up-delay-1">
-          <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-amber-500 to-orange-400" />
+          <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-primary to-primary/60" />
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Active Leads</CardTitle>
-            <div class="flex size-8 items-center justify-center rounded-lg bg-amber-500/10">
-              <FolderOpen class="size-4 text-amber-600 dark:text-amber-400" />
+            <div class="flex size-8 items-center justify-center rounded-lg bg-primary/10">
+              <FolderOpen class="size-4 text-primary" />
             </div>
           </CardHeader>
           <CardContent>
@@ -123,7 +123,7 @@ function activityIcon(action: string) {
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm">
                   <span class="font-medium">{{ entry.action }}</span>
-                  <span class="text-muted-foreground"> &mdash; {{ entry.description }}</span>
+                  <span class="text-muted-foreground"> · {{ entry.description }}</span>
                 </p>
               </div>
               <span class="shrink-0 text-xs text-muted-foreground">

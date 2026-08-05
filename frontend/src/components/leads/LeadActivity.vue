@@ -113,7 +113,7 @@ defineExpose({ fetchActivities })
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="icon-sm" class="size-6 shrink-0">
+                <Button variant="ghost" size="icon-sm" class="size-6 shrink-0" aria-label="Activity actions">
                   <MoreHorizontal class="size-3" />
                 </Button>
               </DropdownMenuTrigger>

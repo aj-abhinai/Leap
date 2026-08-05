@@ -84,8 +84,9 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
 <template>
   <LayoutShell>
     <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
+      <h2 class="text-xl font-semibold">Settings</h2>
       <Tabs defaultValue="general" class="w-full">
-        <TabsList class="mb-4 w-full justify-start rounded-lg border bg-muted/50 p-1">
+        <TabsList class="mb-4 w-full justify-start overflow-x-auto rounded-lg border bg-muted/50 p-1">
           <TabsTrigger value="general" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Settings class="size-4" />
             <span class="hidden sm:inline">General</span>
@@ -144,7 +145,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
               <div class="mb-4 flex flex-wrap gap-2">
                 <select
                   v-model="activityAction"
-                  class="h-8 rounded-md border bg-background px-2 text-sm"
+                  class="h-8 rounded-md border bg-background px-2 text-sm text-base sm:text-sm"
                   @change="applyActivityFilters()"
                 >
                   <option value="">All actions</option>
@@ -155,7 +156,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
                 </select>
                 <select
                   v-model="activityResourceType"
-                  class="h-8 rounded-md border bg-background px-2 text-sm"
+                  class="h-8 rounded-md border bg-background px-2 text-sm text-base sm:text-sm"
                   @change="applyActivityFilters()"
                 >
                   <option value="">All types</option>

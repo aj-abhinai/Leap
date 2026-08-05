@@ -90,60 +90,63 @@ onMounted(async () => {
 
 <template>
   <LayoutShell>
-    <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
-      <div class="flex items-center gap-2">
-        <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">
-          <SelectTrigger class="w-48">
-            <SelectValue placeholder="Select pipeline" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="p in pipelineStore.pipelines"
-              :key="p.id"
-              :value="p.id"
-            >
-              {{ p.name }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <Sheet v-model:open="drawerOpen">
-          <SheetTrigger as-child>
-            <Button v-if="rbac.can('lead:write')" @click="openCreate()">
-              <Plus class="mr-2 size-4" /> Add Lead
-            </Button>
-          </SheetTrigger>
-          <SheetContent>
-            <SheetHeader>
-              <SheetTitle>{{ editingLead ? 'Edit Lead' : 'Add Lead' }}</SheetTitle>
-              <SheetDescription>Enter lead details below.</SheetDescription>
-            </SheetHeader>
-            <LeadForm
-              :key="editingLead?.id ?? 'create'"
-              :editing-lead="editingLead"
-              :stages="selectedPipeline?.stages || []"
-              :pipeline-id="selectedPipelineId"
-              :initial-stage-id="initialStageId"
-              :prefill-contact="prefillContact"
-              @save="handleSave"
-              @delete="deleteLead"
-            />
-          </SheetContent>
-        </Sheet>
+    <div class="flex min-w-0 flex-1 flex-col gap-4 p-6 pt-2">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 class="text-xl font-semibold">Leads</h2>
+        <div class="flex flex-wrap items-center gap-2">
+          <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">
+            <SelectTrigger class="w-48">
+              <SelectValue placeholder="Select pipeline" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="p in pipelineStore.pipelines"
+                :key="p.id"
+                :value="p.id"
+              >
+                {{ p.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <Sheet v-if="rbac.can('lead:write')" v-model:open="drawerOpen">
+            <SheetTrigger as-child>
+              <Button @click="openCreate()">
+                <Plus class="mr-2 size-4" /> Add Lead
+              </Button>
+            </SheetTrigger>
+            <SheetContent>
+              <SheetHeader>
+                <SheetTitle>{{ editingLead ? 'Edit Lead' : 'Add Lead' }}</SheetTitle>
+                <SheetDescription>Enter lead details below.</SheetDescription>
+              </SheetHeader>
+              <LeadForm
+                :key="editingLead?.id ?? 'create'"
+                :editing-lead="editingLead"
+                :stages="selectedPipeline?.stages || []"
+                :pipeline-id="selectedPipelineId"
+                :initial-stage-id="initialStageId"
+                :prefill-contact="prefillContact"
+                @save="handleSave"
+                @delete="deleteLead"
+              />
+            </SheetContent>
+          </Sheet>
 
-        <Sheet v-model:open="activityDrawerOpen">
-          <SheetContent>
-            <SheetHeader>
-              <SheetTitle>Activities</SheetTitle>
-              <SheetDescription v-if="activityLead">
-                Activities for <strong>{{ activityLead.display_name }}</strong>
-              </SheetDescription>
-            </SheetHeader>
-            <div v-if="activityLead" class="mt-4 space-y-4">
-              <LeadActivityForm :lead-id="activityLead.id!" @saved="activityRef?.fetchActivities()" />
-              <LeadActivity ref="activityRef" :lead-id="activityLead.id!" />
-            </div>
-          </SheetContent>
-        </Sheet>
+          <Sheet v-model:open="activityDrawerOpen">
+            <SheetContent>
+              <SheetHeader>
+                <SheetTitle>Activities</SheetTitle>
+                <SheetDescription v-if="activityLead">
+                  Activities for <strong>{{ activityLead.display_name }}</strong>
+                </SheetDescription>
+              </SheetHeader>
+              <div v-if="activityLead" class="mt-4 space-y-4">
+                <LeadActivityForm :lead-id="activityLead.id!" @saved="activityRef?.fetchActivities()" />
+                <LeadActivity ref="activityRef" :lead-id="activityLead.id!" />
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
       </div>
 
       <div v-if="leadsStore.loading" class="flex gap-4 overflow-x-auto pb-4">

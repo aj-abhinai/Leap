@@ -43,7 +43,7 @@ async function handleSave() {
 <template>
   <LayoutShell>
     <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
-      <Card class="mx-auto max-w-md">
+      <Card class="mx-auto w-full max-w-lg">
         <CardHeader>
           <div class="flex items-center gap-2">
             <div class="flex size-8 items-center justify-center rounded-md bg-muted">
@@ -67,10 +67,12 @@ async function handleSave() {
               <Input id="pphone" v-model="formPhone" placeholder="Phone number" />
             </div>
             <div v-if="error" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{{ error }}</div>
-            <Button type="submit" :disabled="saving">
-              <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-              Save
-            </Button>
+            <div class="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-end">
+              <Button type="submit" :disabled="saving" class="w-full sm:w-auto">
+                <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
+                Save
+              </Button>
+            </div>
           </form>
         </CardContent>
       </Card>

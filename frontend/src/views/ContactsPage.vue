@@ -142,7 +142,11 @@ async function handleDelete() {
 
 <template>
   <LayoutShell>
-    <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
+    <div class="flex min-w-0 flex-1 flex-col gap-4 p-6 pt-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-xl font-semibold">Contacts</h2>
+        <span class="text-sm text-muted-foreground">{{ store.total }} total</span>
+      </div>
       <ContactsToolbar
         v-model:search="search"
         v-model:view-mode="viewMode"
@@ -153,7 +157,7 @@ async function handleDelete() {
       />
 
       <template v-if="viewMode === 'table'">
-        <div class="rounded-lg border">
+        <div class="w-full min-w-0 overflow-x-auto rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow class="hover:bg-transparent">
@@ -214,16 +218,17 @@ async function handleDelete() {
                 <TableCell class="text-muted-foreground">{{ c.location || '—' }}</TableCell>
                 <TableCell class="text-muted-foreground">{{ c.age || '—' }}</TableCell>
                 <TableCell>
-                  <div class="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div class="flex gap-1 text-muted-foreground">
                     <Button
                       variant="ghost"
                       size="icon-sm"
                       @click="router.push({ name: 'Leads', query: { contact: c.id } })"
                       title="Create lead from contact"
+                      aria-label="Create lead from contact"
                     >
                       <FolderKanban class="size-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon-sm" @click="openEdit(c)" v-if="rbac.can('contact:write')">
+                    <Button variant="ghost" size="icon-sm" @click="openEdit(c)" v-if="rbac.can('contact:write')" aria-label="Edit contact">
                       <Pencil class="size-3.5" />
                     </Button>
                     <Button
@@ -231,6 +236,7 @@ async function handleDelete() {
                       variant="ghost"
                       size="icon-sm"
                       @click="confirmDelete(c.id)"
+                      aria-label="Delete contact"
                     >
                       <Trash2 class="size-3.5" />
                     </Button>

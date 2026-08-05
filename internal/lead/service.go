@@ -460,7 +460,7 @@ func (s *Service) populateNames(l *Lead) error {
 // for the duration of the transaction so a concurrent archive cannot slip in
 // between the check and the lead insert.
 func (s *Service) snapshotPriceTx(tx *sql.Tx, programID *string) (*float64, error) {
-	if programID == nil {
+	if programID == nil || *programID == "" {
 		return nil, nil
 	}
 	price, err := s.activeProgramPriceTx(tx, *programID)

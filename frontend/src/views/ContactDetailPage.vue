@@ -104,8 +104,8 @@ async function handleSave(body: Record<string, any>) {
         <ArrowLeft class="mr-2 size-4" /> Contacts
       </Button>
 
-      <div class="flex gap-6">
-        <div class="w-1/3 space-y-4">
+      <div class="flex flex-col gap-6 md:flex-row">
+        <div class="w-full md:w-1/3 md:space-y-4">
           <div class="flex items-start gap-4">
             <div
               class="flex size-14 shrink-0 items-center justify-center rounded-full text-lg font-medium"
@@ -178,7 +178,7 @@ async function handleSave(body: Record<string, any>) {
           </Button>
         </div>
 
-        <div class="w-2/3">
+        <div class="w-full md:w-2/3">
           <ContactLeadJourney :contact-id="contact.id" />
           <ContactNotes :contact-id="contact.id" class="mt-6" />
         </div>

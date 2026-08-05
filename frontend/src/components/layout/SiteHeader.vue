@@ -35,22 +35,22 @@ const breadcrumbs = computed(() => {
 
 <template>
   <header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-    <SidebarTrigger class="-ml-1" />
+    <SidebarTrigger class="h-9 w-9 md:h-7 md:w-7" />
     <Separator orientation="vertical" class="mr-2 h-4" />
-    <nav class="flex items-center gap-1 text-sm text-muted-foreground">
-      <Home class="size-3.5" />
+    <nav class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-sm text-muted-foreground">
+      <Home class="size-3.5 shrink-0" />
       <template v-for="(crumb, i) in breadcrumbs" :key="i">
-        <ChevronRight v-if="i > 0" class="size-3.5" />
-        <span v-if="i === breadcrumbs.length - 1" class="font-medium text-foreground">
+        <ChevronRight v-if="i > 0" class="size-3.5 shrink-0" />
+        <span v-if="i === breadcrumbs.length - 1" class="truncate font-medium text-foreground">
           {{ crumb.title }}
         </span>
-        <router-link v-else :to="crumb.path || '/'" class="hover:text-foreground transition-colors">
+        <router-link v-else :to="crumb.path || '/'" class="truncate hover:text-foreground transition-colors">
           {{ crumb.title }}
         </router-link>
       </template>
     </nav>
-    <div class="flex-1" />
     <Button
+      class="ml-auto shrink-0"
       variant="ghost"
       size="icon"
       @click="theme.toggle()"

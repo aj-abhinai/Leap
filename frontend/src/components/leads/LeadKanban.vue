@@ -27,14 +27,7 @@ const emit = defineEmits<{
   viewActivities: [lead: Lead]
 }>()
 
-const stageColors: Record<number, string> = {
-  0: 'border-l-blue-400',
-  1: 'border-l-amber-400',
-  2: 'border-l-emerald-400',
-  3: 'border-l-violet-400',
-  4: 'border-l-rose-400',
-  5: 'border-l-cyan-400',
-}
+const stageColors: Record<number, string> = {}
 
 function getStageColor(index: number): string {
   return stageColors[index % Object.keys(stageColors).length]
@@ -59,15 +52,14 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
 </script>
 
 <template>
-  <div class="flex gap-4 overflow-x-auto pb-4">
+  <div class="flex w-full min-w-0 gap-4 overflow-x-auto pb-4">
     <div
-      v-for="(col, colIdx) in columns"
+      v-for="col in columns"
       :key="col.id"
-      class="min-w-64 max-w-80 flex-1"
+      class="w-64 shrink-0 sm:w-72"
     >
       <div class="mb-2 flex items-center justify-between px-1">
         <div class="flex items-center gap-2">
-          <div class="size-2 rounded-full" :class="getStageColor(colIdx).replace('border-l-', 'bg-')" />
           <span class="text-sm font-medium">{{ col.name }}</span>
           <Badge variant="secondary" class="text-xs px-1.5">{{ col.leads.length }}</Badge>
         </div>
@@ -89,19 +81,18 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
         <template #item="{ element: lead }">
           <div
             :key="lead.id"
-            class="group rounded-lg border bg-card p-3 text-sm shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md hover:border-primary/20 transition-all border-l-2"
-            :class="getStageColor(colIdx)"
+            class="group rounded-lg border bg-card p-3 text-sm shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md hover:border-primary/20 transition-all"
             @click="emit('edit', lead)"
           >
             <div class="flex items-start justify-between gap-2">
               <div class="font-medium truncate">{{ lead.display_name }}</div>
-              <div class="flex items-center gap-0.5">
-                <Button variant="ghost" size="icon-sm" class="size-6 opacity-0 group-hover:opacity-100 transition-opacity" @click.stop="emit('viewActivities', lead)" title="Activities">
+              <div class="flex items-center gap-0.5 text-muted-foreground">
+                <Button variant="ghost" size="icon-sm" class="size-6" @click.stop="emit('viewActivities', lead)" title="Activities" aria-label="View activities">
                   <ListChecks class="size-3" />
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child @click.stop>
-                    <Button variant="ghost" size="icon-sm" class="size-6 -mr-1 -mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button variant="ghost" size="icon-sm" class="size-6 -mr-1 -mt-0.5" aria-label="Lead actions">
                       <MoreHorizontal class="size-3" />
                     </Button>
                   </DropdownMenuTrigger>

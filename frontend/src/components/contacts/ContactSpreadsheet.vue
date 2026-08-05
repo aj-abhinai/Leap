@@ -20,7 +20,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="rounded-lg border overflow-x-auto">
+  <div class="w-full min-w-0 overflow-x-auto rounded-lg border">
     <Table>
       <TableHeader>
         <TableRow class="hover:bg-transparent">

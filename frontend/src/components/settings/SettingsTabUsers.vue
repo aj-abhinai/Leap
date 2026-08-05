@@ -197,7 +197,7 @@ function assignableRoles(u: User): Role[] {
                 <div class="flex items-center gap-1.5">
                   <select
                     v-if="assignableRoles(u).length > 0"
-                    class="h-8 w-full rounded-md border bg-background px-2 text-sm"
+                    class="h-8 w-full rounded-md border bg-background px-2 text-base sm:text-sm"
                     :value="''"
                     @change="assignRole(u.id, ($event.target as HTMLSelectElement).value)"
                   >

@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Plus, Shield, ShieldCheck, Trash2, Pencil } from '@lucide/vue'
 
 interface Permission {
@@ -50,6 +51,9 @@ const formDesc = shallowRef('')
 const formPermissions = shallowRef<Set<string>>(new Set())
 const formError = shallowRef('')
 const saving = shallowRef(false)
+
+// Delete state
+const deletingRole = shallowRef<Role | null>(null)
 
 const isEditing = computed(() => !!editingRole.value)
 
@@ -162,14 +166,20 @@ async function saveRole() {
   }
 }
 
-async function deleteRole(role: Role) {
-  if (!window.confirm(`Delete role "${role.name}"?`)) return
+function requestDeleteRole(role: Role) {
+  deletingRole.value = role
+}
+
+async function deleteRole() {
+  const role = deletingRole.value
+  if (!role) return
   try {
     await apiClient.delete(`/api/roles/${role.id}`)
     toast.success('Role deleted')
-    loadRoles()
   } catch (e: any) {
     toast.error(e.message || 'Failed to delete role')
+  } finally {
+    deletingRole.value = null
   }
 }
 
@@ -236,7 +246,8 @@ const permissionGroups = computed(() => groupPermissions(allPermissions.value))
                 variant="ghost"
                 size="icon-sm"
                 title="Delete role"
-                @click="deleteRole(role)"
+                aria-label="Delete role"
+                @click="requestDeleteRole(role)"
               >
                 <Trash2 class="size-3.5" />
               </Button>
@@ -324,5 +335,15 @@ const permissionGroups = computed(() => groupPermissions(allPermissions.value))
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      :open="!!deletingRole"
+      title="Delete role"
+      :description="`Delete the role &ldquo;${deletingRole?.name ?? ''}&rdquo;? This cannot be undone.`"
+      confirm-text="Delete"
+      destructive
+      @update:open="(v) => { if (!v) deletingRole = null }"
+      @confirm="deleteRole"
+    />
   </div>
 </template>

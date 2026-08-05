@@ -129,7 +129,7 @@ function canDelete(note: Note): boolean {
             </div>
             <DropdownMenu v-if="canDelete(note)">
               <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="icon-sm" class="h-6 w-6">
+                <Button variant="ghost" size="icon-sm" class="h-6 w-6" aria-label="Note actions">
                   <MoreHorizontal class="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>

@@ -186,7 +186,7 @@ function close() {
       <div v-else-if="step === 'result'" class="space-y-4">
         <div class="flex items-center gap-4">
           <div class="text-center">
-            <div class="text-2xl font-bold text-emerald-600">{{ result?.imported || 0 }}</div>
+            <div class="text-2xl font-bold text-chart-2">{{ result?.imported || 0 }}</div>
             <div class="text-xs text-muted-foreground">Imported</div>
           </div>
           <div class="text-center">
