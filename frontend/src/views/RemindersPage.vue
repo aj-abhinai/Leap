@@ -1,17 +1,50 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, shallowRef } from 'vue'
 import { useRemindersStore } from '@/stores/reminders'
+import { useAuthStore } from '@/stores/auth'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { BellOff, X } from '@lucide/vue'
-import { formatReminderText, reminderIcon } from '@/utils/reminders'
-import { formatDateTime } from '@/utils/time'
+import ReminderCard from '@/components/leads/ReminderCard.vue'
+import { BellOff } from '@lucide/vue'
+import { snoozeRemindAt } from '@/utils/reminders'
 
 const store = useRemindersStore()
+const auth = useAuthStore()
+const myOnly = shallowRef(false)
 
 onMounted(() => store.fetchReminders())
+
+const visible = computed(() => {
+  if (!myOnly.value || !auth.user?.id) return store.reminders
+  return store.reminders.filter((r) => r.user_id === auth.user!.id)
+})
+
+const now = () => Date.now()
+
+const overdue = computed(() =>
+  visible.value.filter(
+    (r) => !!r.remind_at && new Date(r.remind_at).getTime() < now() && !r.is_reminded && !r.is_done,
+  ),
+)
+const upcoming = computed(() =>
+  visible.value.filter(
+    (r) =>
+      (!!r.remind_at && new Date(r.remind_at).getTime() >= now() && !r.is_reminded && !r.is_done) ||
+      (!r.remind_at && !r.is_done),
+  ),
+)
+const dismissed = computed(() => visible.value.filter((r) => r.is_reminded && !r.is_done))
+const done = computed(() => visible.value.filter((r) => r.is_done))
+
+async function snooze(reminderId: string, minutes: number) {
+  try {
+    await store.snoozeReminder(reminderId, snoozeRemindAt(minutes))
+  } catch {}
+}
+
+function hasAny(list: unknown[]): boolean {
+  return list.length > 0
+}
 </script>
 
 <template>
@@ -20,41 +53,82 @@ onMounted(() => store.fetchReminders())
       <div class="mb-4 flex flex-col">
         <h1 class="text-2xl font-semibold tracking-tight">Reminders</h1>
         <p v-if="!store.loading && store.reminders.length" class="mt-0.5 text-sm text-muted-foreground">
-          <span class="tabular-nums">{{ store.reminders.length }}</span> pending
+          <span class="tabular-nums">{{ overdue.length + upcoming.length }}</span>
+          {{ myOnly ? 'of my' : '' }} pending
         </p>
+      </div>
+
+      <div class="mb-4 flex items-center gap-3">
+        <label class="flex items-center gap-2 text-sm text-muted-foreground">
+          <input v-model="myOnly" type="checkbox" class="size-4" />
+          My reminders only
+        </label>
       </div>
 
       <div v-if="store.loading" class="space-y-3">
         <Skeleton v-for="i in 5" :key="i" class="h-16 w-full" />
       </div>
 
-      <div v-else-if="store.reminders.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
+      <div
+        v-else-if="visible.length === 0"
+        class="flex flex-col items-center justify-center py-16 text-center"
+      >
         <BellOff class="size-10 text-muted-foreground/40 mb-3" />
         <p class="text-sm font-medium text-muted-foreground">No pending reminders</p>
         <p class="text-xs text-muted-foreground/60 mt-1">Create activities with reminders from the leads kanban</p>
       </div>
 
-      <div v-else class="space-y-3 max-w-2xl">
-        <Card v-for="reminder in store.reminders" :key="reminder.id">
-          <CardContent class="p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div class="flex items-start gap-3">
-                <component :is="reminderIcon(reminder.type)" class="size-5 mt-0.5 text-muted-foreground shrink-0" />
-                <div>
-                  <p class="font-medium text-sm">{{ formatReminderText(reminder) }}</p>
-                  <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-                    <span v-if="reminder.scheduled_at">Scheduled: {{ formatDateTime(reminder.scheduled_at) }}</span>
-                    <span v-if="reminder.remind_at" class="text-warning">Reminder: {{ formatDateTime(reminder.remind_at) }}</span>
-                  </div>
-                  <p class="text-xs text-muted-foreground mt-1">Created {{ formatDateTime(reminder.created_at) }}</p>
-                </div>
-              </div>
-              <Button variant="ghost" size="icon-sm" class="shrink-0" @click="store.dismissReminder(reminder.id)" title="Dismiss" aria-label="Dismiss reminder">
-                <X class="size-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+      <div v-else class="space-y-6 max-w-2xl">
+        <section v-if="hasAny(overdue)">
+          <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-warning">Overdue</h2>
+          <div class="space-y-3">
+            <ReminderCard
+              v-for="reminder in overdue"
+              :key="reminder.id"
+              :reminder="reminder"
+              overdue
+              @snooze="snooze(reminder.id, $event)"
+              @dismiss="store.dismissReminder(reminder.id)"
+            />
+          </div>
+        </section>
+
+        <section v-if="hasAny(upcoming)">
+          <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Upcoming</h2>
+          <div class="space-y-3">
+            <ReminderCard
+              v-for="reminder in upcoming"
+              :key="reminder.id"
+              :reminder="reminder"
+              @snooze="snooze(reminder.id, $event)"
+              @dismiss="store.dismissReminder(reminder.id)"
+            />
+          </div>
+        </section>
+
+        <section v-if="hasAny(dismissed)">
+          <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Dismissed</h2>
+          <div class="space-y-3 opacity-70">
+            <ReminderCard
+              v-for="reminder in dismissed"
+              :key="reminder.id"
+              :reminder="reminder"
+              @snooze="snooze(reminder.id, $event)"
+              @dismiss="store.dismissReminder(reminder.id)"
+            />
+          </div>
+        </section>
+
+        <section v-if="hasAny(done)">
+          <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Done</h2>
+          <div class="space-y-3 opacity-70">
+            <ReminderCard
+              v-for="reminder in done"
+              :key="reminder.id"
+              :reminder="reminder"
+            />
+          </div>
+        </section>
       </div>
     </div>
   </LayoutShell>

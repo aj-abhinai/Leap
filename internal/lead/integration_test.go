@@ -286,6 +286,33 @@ func TestListCapsPerPageHandlerIntegration(t *testing.T) {
 	}
 }
 
+func TestCreateActivityDescriptionRequiredHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db), stubPerms{can: true})
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	svc := NewService(db)
+	lead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/leads/"+lead.ID+"/activities",
+		strings.NewReader(`{"type":"note"}`),
+	)
+	rr := httptest.NewRecorder()
+	h.CreateActivity(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 when description missing", rr.Code)
+	}
+}
+
 func TestCreateLeadBlocksWhileProgramLockedIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -509,6 +536,170 @@ func TestStageMoveOutOfClosingClearsOutcomeIntegration(t *testing.T) {
 	}
 	if back.Outcome != "" || back.LostReason != "" {
 		t.Errorf("outcome/lost_reason = %q/%q, want cleared", back.Outcome, back.LostReason)
+	}
+}
+
+func TestActivityEditFieldsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	lead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	remindAt := time.Now().Add(time.Hour)
+	activity, err := svc.createActivity(lead.ID, stageID, "", CreateActivityRequest{
+		Type:        "Call 1",
+		Description: "Follow up",
+		RemindAt:    &remindAt,
+	})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	newType := "Call 2"
+	newDesc := "Follow up again"
+	newRemind := time.Now().Add(3 * time.Hour)
+	updated, err := svc.updateActivity(lead.ID, activity.ID, UpdateActivityRequest{
+		Type:        &newType,
+		Description: &newDesc,
+		RemindAt:    &newRemind,
+	})
+	if err != nil {
+		t.Fatalf("update activity: %v", err)
+	}
+	if updated.Type != "Call 2" || updated.Description != "Follow up again" {
+		t.Errorf("type/desc = %q/%q, want Call 2/Follow up again", updated.Type, updated.Description)
+	}
+	if updated.RemindAt == nil || !updated.RemindAt.Equal(newRemind) {
+		t.Errorf("remind_at = %v, want %v", updated.RemindAt, newRemind)
+	}
+	// Re-setting remind_at re-opens the reminder.
+	if updated.IsReminded {
+		t.Errorf("is_reminded = true, want false after remind_at edit")
+	}
+}
+
+func TestActivityEditEmptyTypeRejectedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	lead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	activity, err := svc.createActivity(lead.ID, stageID, "", CreateActivityRequest{Type: "note", Description: "hello"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	emptyType := ""
+	_, err = svc.updateActivity(lead.ID, activity.ID, UpdateActivityRequest{Type: &emptyType})
+	if err == nil {
+		t.Fatal("expected error for empty type, got nil")
+	}
+}
+
+func TestActivityEditEmptyDescriptionRejectedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	lead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	activity, err := svc.createActivity(lead.ID, stageID, "", CreateActivityRequest{Type: "note", Description: "hello"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	blankDesc := "   "
+	_, err = svc.updateActivity(lead.ID, activity.ID, UpdateActivityRequest{Description: &blankDesc})
+	if err == nil {
+		t.Fatal("expected error for blank description, got nil")
+	}
+}
+
+func TestSnoozeReminderReopensIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	lead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	remindAt := time.Now().Add(-time.Hour) // overdue
+	activity, err := svc.createActivity(lead.ID, stageID, "", CreateActivityRequest{
+		Type:        "note",
+		Description: "hello",
+		RemindAt:    &remindAt,
+	})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	// Mark reminded so it drops out of pending; snoozing should re-open it.
+	if _, err := svc.dismissReminder(activity.ID); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+
+	future := time.Now().Add(24 * time.Hour)
+	changed, err := svc.snoozeReminder(activity.ID, future)
+	if err != nil {
+		t.Fatalf("snooze: %v", err)
+	}
+	if !changed {
+		t.Fatal("snooze reported no change")
+	}
+
+	var remindAt2 *time.Time
+	var isReminded bool
+	err = db.QueryRow(
+		`SELECT remind_at, is_reminded FROM lead_activities WHERE id = $1`,
+		activity.ID,
+	).Scan(&remindAt2, &isReminded)
+	if err != nil {
+		t.Fatalf("reload activity: %v", err)
+	}
+	if remindAt2 == nil || !remindAt2.Equal(future) {
+		t.Errorf("remind_at = %v, want %v", remindAt2, future)
+	}
+	if isReminded {
+		t.Errorf("is_reminded = true, want false after snooze")
+	}
+}
+
+func TestSnoozeMissingReminderIsCleanNoopIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	changed, err := svc.snoozeReminder("00000000-0000-0000-0000-000000000000", time.Now())
+	if err != nil {
+		t.Fatalf("snooze missing: %v", err)
+	}
+	if changed {
+		t.Error("snooze missing id reported a change, want false")
 	}
 }
 

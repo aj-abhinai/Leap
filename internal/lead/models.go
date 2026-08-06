@@ -86,8 +86,16 @@ type CreateActivityRequest struct {
 }
 
 type UpdateActivityRequest struct {
-	OutcomeID *string `json:"outcome_id,omitempty"`
-	IsDone    *bool   `json:"is_done,omitempty"`
+	OutcomeID   *string    `json:"outcome_id,omitempty"`
+	IsDone      *bool      `json:"is_done,omitempty"`
+	Type        *string    `json:"type,omitempty"`
+	Description *string    `json:"description,omitempty"`
+	RemindAt    *time.Time `json:"remind_at,omitempty"`
+}
+
+type SnoozeRequest struct {
+	// RemindAt is the new reminder time.
+	RemindAt time.Time `json:"remind_at"`
 }
 
 type StageHistory struct {

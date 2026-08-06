@@ -8,6 +8,7 @@ import (
 	"crm/internal/config"
 	"crm/internal/contact"
 	"crm/internal/db"
+	"crm/internal/export"
 	"crm/internal/health"
 	"crm/internal/lead"
 	"crm/internal/middleware"
@@ -125,6 +126,9 @@ func main() {
 	tagSvc := tag.NewService(database)
 	tagH := tag.NewHandler(tagSvc)
 
+	exportSvc := export.NewService(database)
+	exportH := export.NewHandler(exportSvc)
+
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
@@ -189,6 +193,7 @@ func main() {
 
 		r.Get("/api/reminders", middleware.RequirePermission(rbacSvc, "lead:read", leadH.PendingReminders))
 		r.Patch("/api/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
+		r.Post("/api/reminders/{id}/snooze", middleware.RequirePermission(rbacSvc, "lead:write", leadH.SnoozeReminder))
 
 		r.Get("/api/pipelines", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.List))
 		r.Post("/api/pipelines", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Create))
@@ -229,6 +234,8 @@ func main() {
 		r.Get("/api/tags", middleware.RequirePermission(rbacSvc, "contact:read", tagH.List))
 		r.Post("/api/tags", middleware.RequirePermission(rbacSvc, "contact:write", tagH.Create))
 		r.Delete("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "contact:write", tagH.Delete))
+
+		r.Get("/api/export/csv", middleware.RequirePermission(rbacSvc, "data:export", exportH.CSV))
 	})
 
 	r.Get("/", appAssets.ServeFrontend)

@@ -1,16 +1,31 @@
 <script setup lang="ts">
 import { onMounted, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
+import { useSettingsStore } from '@/stores/settings'
 import { toast } from 'vue-sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
-import { MoreHorizontal, Trash2, CheckCircle2 } from '@lucide/vue'
-import { reminderIcon } from '@/utils/reminders'
+import {
+  MoreHorizontal, Trash2, CheckCircle2, Pencil, AlarmClockPlus,
+} from '@lucide/vue'
+import { reminderIcon, snoozePresets, snoozeRemindAt } from '@/utils/reminders'
 import { formatDateTime } from '@/utils/time'
+import { Badge } from '@/components/ui/badge'
 
 interface Activity {
   id: string
@@ -37,7 +52,12 @@ const activities = shallowRef<Activity[]>([])
 const loading = shallowRef(false)
 const loadError = shallowRef('')
 
-onMounted(() => fetchActivities())
+const settings = useSettingsStore()
+
+onMounted(() => {
+  fetchActivities()
+  if (settings.activityTypes.length === 0) settings.fetchTags()
+})
 
 async function fetchActivities() {
   loading.value = true
@@ -76,6 +96,78 @@ async function markResponse(a: Activity) {
   }
 }
 
+async function snooze(a: Activity, minutes: number) {
+  try {
+    await apiClient.post(`/api/reminders/${a.id}/snooze`, {
+      remind_at: snoozeRemindAt(minutes),
+    })
+    toast.success('Reminder snoozed')
+    await fetchActivities()
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to snooze')
+  }
+}
+
+function isOverdue(a: Activity): boolean {
+  return !!a.remind_at && new Date(a.remind_at).getTime() < Date.now() && !a.is_reminded && !a.is_done
+}
+
+// reka-ui menu items emit a native `select` event instead of click.
+function onSnoozeSelect(a: Activity, minutes: number) {
+  snooze(a, minutes)
+}
+
+// --- inline edit state ---
+const editingId = shallowRef<string | null>(null)
+const editType = shallowRef('')
+const editDescription = shallowRef('')
+const editRemindDate = shallowRef('')
+const editRemindTime = shallowRef('')
+const savingEdit = shallowRef(false)
+
+function startEdit(a: Activity) {
+  editingId.value = a.id
+  editType.value = a.type
+  editDescription.value = a.description
+  editRemindDate.value = a.remind_at ? new Date(a.remind_at).toISOString().slice(0, 10) : ''
+  editRemindTime.value = a.remind_at ? new Date(a.remind_at).toISOString().slice(11, 16) : ''
+}
+
+function cancelEdit() {
+  editingId.value = null
+}
+
+function mergeEditDateTime(date: string, time: string): string | null {
+  if (!date || !time) return null
+  return new Date(`${date}T${time}`).toISOString()
+}
+
+async function saveEdit(a: Activity) {
+  if (!editType.value) {
+    toast.error('Type is required')
+    return
+  }
+  if (!editDescription.value.trim()) {
+    toast.error('Description is required')
+    return
+  }
+  savingEdit.value = true
+  try {
+    await apiClient.patch(`/api/leads/${props.leadId}/activities/${a.id}`, {
+      type: editType.value,
+      description: editDescription.value,
+      remind_at: mergeEditDateTime(editRemindDate.value, editRemindTime.value),
+    })
+    toast.success('Activity updated')
+    cancelEdit()
+    await fetchActivities()
+  } catch (e: any) {
+    toast.error(e.message || 'Failed to update')
+  } finally {
+    savingEdit.value = false
+  }
+}
+
 function typeLabel(type: string): string {
   const map: Record<string, string> = {
     call_scheduled: 'Call Scheduled',
@@ -107,15 +199,54 @@ defineExpose({ fetchActivities })
     <div v-else class="space-y-2">
       <Card v-for="a in activities" :key="a.id">
         <CardContent class="p-3">
-          <div class="flex items-start justify-between gap-2">
+          <!-- Inline edit form -->
+          <div v-if="editingId === a.id" class="space-y-3">
+            <div class="space-y-2">
+              <Label class="text-xs">Type</Label>
+              <Select v-model="editType">
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="t in settings.activityTypes" :key="t.id" :value="t.name">
+                    {{ t.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-2">
+              <Label class="text-xs">Description</Label>
+              <Textarea v-model="editDescription" class="min-h-16" />
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="space-y-1.5">
+                <Label class="text-xs">Remind date</Label>
+                <Input v-model="editRemindDate" type="date" />
+              </div>
+              <div class="space-y-1.5">
+                <Label class="text-xs">Remind time</Label>
+                <Input v-model="editRemindTime" type="time" />
+              </div>
+            </div>
+            <div class="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" @click="cancelEdit">Cancel</Button>
+              <Button size="sm" :disabled="savingEdit" @click="saveEdit(a)">
+                {{ savingEdit ? 'Saving…' : 'Save' }}
+              </Button>
+            </div>
+          </div>
+
+          <!-- Read view -->
+          <div v-else class="flex items-start justify-between gap-2">
             <div class="flex items-start gap-2 min-w-0">
               <component :is="reminderIcon(a.type)" class="size-4 mt-0.5 text-muted-foreground shrink-0" />
               <div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="text-xs font-medium">{{ typeLabel(a.type) }}</span>
                   <span v-if="a.outcome_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
                     {{ a.outcome_name }}
                   </span>
+                  <Badge v-if="isOverdue(a)" variant="destructive" class="text-xs">Overdue</Badge>
                   <span class="text-xs text-muted-foreground">{{ a.user_name || 'System' }}</span>
                 </div>
                 <p v-if="a.description" class="text-sm mt-0.5">{{ a.description }}</p>
@@ -140,6 +271,24 @@ defineExpose({ fetchActivities })
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem class="cursor-pointer" @click="startEdit(a)">
+                  <Pencil class="size-3.5 mr-2" /> Edit
+                </DropdownMenuItem>
+                <DropdownMenuSub v-if="a.remind_at && !a.is_done">
+                  <DropdownMenuSubTrigger>
+                    <AlarmClockPlus class="size-3.5 mr-2" /> Snooze
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem
+                      v-for="preset in snoozePresets"
+                      :key="preset.minutes"
+                      class="cursor-pointer"
+                      @select="onSnoozeSelect(a, preset.minutes)"
+                    >
+                      {{ preset.label }}
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
                 <DropdownMenuItem class="cursor-pointer" @click="markResponse(a)">
                   <CheckCircle2 class="size-3.5 mr-2" /> Mark response
                 </DropdownMenuItem>

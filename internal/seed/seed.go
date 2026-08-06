@@ -70,6 +70,7 @@ func seedPermissions(db *sql.DB) error {
 		{Name: "program:manage", Desc: "Create/edit programs and catalog prices"},
 		{Name: "rbac:manage", Desc: "Manage users, roles, permissions"},
 		{Name: "activity:read", Desc: "View audit log"},
+		{Name: "data:export", Desc: "Export contacts and leads to CSV"},
 	}
 	for _, p := range perms {
 		_, err := db.Exec(

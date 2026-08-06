@@ -26,13 +26,13 @@ const store = useRemindersStore()
           </div>
         </div>
       </div>
-      <div v-else-if="store.reminders.length === 0" class="flex flex-col items-center justify-center flex-1 text-muted-foreground py-12">
+      <div v-else-if="store.openReminders.length === 0" class="flex flex-col items-center justify-center flex-1 text-muted-foreground py-12">
         <BellOff class="h-7 w-7 mb-2" />
         <p class="text-xs">No pending reminders</p>
       </div>
       <div v-else class="divide-y">
         <div
-          v-for="reminder in store.reminders"
+          v-for="reminder in store.openReminders"
           :key="reminder.id"
           class="group relative px-3 py-2.5 hover:bg-muted/50 cursor-pointer transition-colors"
         >
@@ -52,7 +52,7 @@ const store = useRemindersStore()
         </div>
       </div>
     </div>
-    <div v-if="store.reminders.length > 0" class="p-2 border-t">
+    <div v-if="store.openReminders.length > 0" class="p-2 border-t">
       <RouterLink to="/reminders">
         <Button variant="ghost" size="sm" class="w-full text-xs" @click="emit('close')">
           View All Reminders

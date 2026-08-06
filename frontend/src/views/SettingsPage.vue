@@ -20,7 +20,8 @@ import SettingsTabRoles from '@/components/settings/SettingsTabRoles.vue'
 import SettingsTabPipelines from '@/components/settings/SettingsTabPipelines.vue'
 import SettingsTabPrograms from '@/components/settings/SettingsTabPrograms.vue'
 import SettingsTabGeneral from '@/components/settings/SettingsTabGeneral.vue'
-import { RefreshCw, User, Shield, Layers, BookOpen, Activity, Settings } from '@lucide/vue'
+import SettingsTabExport from '@/components/settings/SettingsTabExport.vue'
+import { RefreshCw, User, Shield, Layers, BookOpen, Activity, Settings, Download } from '@lucide/vue'
 import { formatDateTime } from '@/utils/time'
 
 const activity = useActivityStore()
@@ -113,6 +114,10 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
           <TabsTrigger v-show="canOrLoading('activity:read')" value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Activity class="size-4" />
             <span class="hidden sm:inline">Activity</span>
+          </TabsTrigger>
+          <TabsTrigger v-show="canOrLoading('data:export')" value="export" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+            <Download class="size-4" />
+            <span class="hidden sm:inline">Export</span>
           </TabsTrigger>
         </TabsList>
 
@@ -221,6 +226,9 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+        <TabsContent v-if="canOrLoading('data:export')" value="export" class="mt-0">
+          <SettingsTabExport />
         </TabsContent>
       </Tabs>
     </div>

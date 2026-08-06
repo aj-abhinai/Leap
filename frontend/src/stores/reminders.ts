@@ -23,7 +23,13 @@ export const useRemindersStore = defineStore('reminders', () => {
   const reminders = ref<Reminder[]>([])
   const loading = ref(false)
 
-  const pendingCount = computed(() => reminders.value.length)
+  const pendingCount = computed(
+    () => reminders.value.filter((r) => !r.is_done && !r.is_reminded).length,
+  )
+
+  const openReminders = computed(() =>
+    reminders.value.filter((r) => !r.is_done && !r.is_reminded),
+  )
 
   async function fetchReminders() {
     loading.value = true
@@ -45,5 +51,16 @@ export const useRemindersStore = defineStore('reminders', () => {
     }
   }
 
-  return { reminders, loading, pendingCount, fetchReminders, dismissReminder }
+  async function snoozeReminder(id: string, remindAt: string) {
+    try {
+      await apiClient.post(`/api/reminders/${id}/snooze`, { remind_at: remindAt })
+      toast.success('Reminder snoozed')
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to snooze reminder')
+    } finally {
+      await fetchReminders()
+    }
+  }
+
+  return { reminders, loading, pendingCount, openReminders, fetchReminders, dismissReminder, snoozeReminder }
 })

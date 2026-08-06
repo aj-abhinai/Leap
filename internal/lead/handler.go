@@ -60,7 +60,8 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive),
 		errors.Is(err, ErrContactRequired), errors.Is(err, ErrNoContactDetail),
-		errors.Is(err, ErrInvalidOutcome):
+		errors.Is(err, ErrInvalidOutcome), errors.Is(err, ErrEmptyType),
+		errors.Is(err, ErrEmptyDescription):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -268,7 +269,7 @@ func (h *Handler) CreateActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	activity, err := h.svc.createActivity(leadID, lead.StageID, userID, req)
 	if err != nil {
-		respond.ServerError(w, err)
+		respondLeadMutationError(w, err)
 		return
 	}
 	respond.JSON(
@@ -360,6 +361,53 @@ func (h *Handler) DismissReminder(w http.ResponseWriter, r *http.Request) {
 		w,
 		http.StatusOK,
 		map[string]string{"message": "dismissed"},
+		nil,
+		nil,
+	)
+}
+
+func (h *Handler) SnoozeReminder(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req SnoozeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	if req.RemindAt.IsZero() {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "remind_at is required"},
+			nil,
+		)
+		return
+	}
+	snoozed, err := h.svc.snoozeReminder(id, req.RemindAt)
+	if err != nil {
+		respond.ServerError(w, err)
+		return
+	}
+	if !snoozed {
+		respond.JSON(
+			w,
+			http.StatusNotFound,
+			nil,
+			&respond.Error{Code: "NOT_FOUND", Message: "Reminder not found"},
+			nil,
+		)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		map[string]string{"message": "snoozed"},
 		nil,
 		nil,
 	)

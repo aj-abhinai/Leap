@@ -55,6 +55,10 @@ async function handleSave() {
     error.value = 'Type is required'
     return
   }
+  if (!description.value.trim()) {
+    error.value = 'Description is required'
+    return
+  }
   saving.value = true
   try {
     await apiClient.post(`/api/leads/${props.leadId}/activities`, {
@@ -97,7 +101,7 @@ async function handleSave() {
       </Select>
     </div>
     <div class="space-y-2">
-      <Label class="text-xs">Description</Label>
+      <Label class="text-xs">Description <span class="text-destructive">*</span></Label>
       <Textarea v-model="description" placeholder="What happened?" class="min-h-20" />
     </div>
     <div class="space-y-2">

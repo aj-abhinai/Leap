@@ -37,3 +37,19 @@ export function formatReminderTime(r: ReminderLike): string {
   }
   return ''
 }
+
+export interface SnoozePreset {
+  label: string
+  minutes: number
+}
+
+export const snoozePresets: SnoozePreset[] = [
+  { label: '15 minutes', minutes: 15 },
+  { label: '1 hour', minutes: 60 },
+  { label: '3 hours', minutes: 180 },
+  { label: 'Tomorrow', minutes: 24 * 60 },
+]
+
+export function snoozeRemindAt(minutes: number): string {
+  return new Date(Date.now() + minutes * 60_000).toISOString()
+}

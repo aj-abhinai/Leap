@@ -62,6 +62,37 @@ async function request<T = any>(method: string, url: string, body?: any): Promis
   return json
 }
 
+// download fetches a URL with auth (refreshing on 401) and returns the
+// response as a Blob, for file downloads (e.g. CSV export).
+export async function apiDownload(url: string): Promise<Blob> {
+  const auth = useAuthStore()
+  const router = useRouter()
+
+  const headers: Record<string, string> = {}
+  if (auth.accessToken) {
+    headers['Authorization'] = `Bearer ${auth.accessToken}`
+  }
+
+  let res = await fetch(url, { headers })
+
+  if (res.status === 401) {
+    try {
+      await auth.refresh()
+      headers['Authorization'] = `Bearer ${auth.accessToken}`
+      res = await fetch(url, { headers })
+    } catch {
+      await auth.logout()
+      router.push('/login')
+      throw new Error('Session expired')
+    }
+  }
+
+  if (!res.ok) {
+    throw new Error(`Export failed (${res.status})`)
+  }
+  return res.blob()
+}
+
 export const apiClient = {
   get: <T = any>(url: string) => request<T>('GET', url),
   post: <T = any>(url: string, body?: any) => request<T>('POST', url, body),
