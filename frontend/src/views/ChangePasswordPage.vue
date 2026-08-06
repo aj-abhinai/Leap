@@ -53,7 +53,6 @@ async function handleSubmit() {
 
 <template>
   <div class="relative flex min-h-screen items-center justify-center p-4">
-    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,oklch(0.6_0.2_25/0.08),transparent_60%)]" />
     <Card class="relative w-full max-w-sm shadow-lg">
       <CardHeader class="text-center pb-2">
         <div class="mx-auto mb-3 flex size-12 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary/70 shadow-sm">

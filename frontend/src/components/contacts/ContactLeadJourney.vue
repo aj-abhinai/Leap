@@ -76,7 +76,7 @@ async function fetchLeads() {
               <span>Pipeline</span>
               <ChevronRight class="size-3" />
               <Badge variant="outline" class="text-xs px-1.5">{{ lead.stage_name || '–' }}</Badge>
-              <span v-if="lead.outcome === 'won'" class="inline-flex items-center gap-1 text-emerald-600 font-medium">
+              <span v-if="lead.outcome === 'won'" class="inline-flex items-center gap-1 text-success font-medium">
                 <Trophy class="size-3" /> Won
               </span>
               <span v-else-if="lead.outcome === 'lost'" class="inline-flex items-center gap-1 text-destructive font-medium">

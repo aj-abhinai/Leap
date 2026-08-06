@@ -126,7 +126,7 @@ defineExpose({ fetchActivities })
                   <span v-if="a.remind_at" class="text-xs text-warning">
                     Reminder: {{ formatDateTime(a.remind_at) }}
                   </span>
-                  <span v-if="a.responded_at" class="text-xs text-emerald-600">
+                  <span v-if="a.responded_at" class="text-xs text-success">
                     Responded: {{ formatDateTime(a.responded_at) }}
                   </span>
                 </div>
