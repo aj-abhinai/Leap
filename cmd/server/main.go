@@ -100,8 +100,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	activitySvc := activity.NewService(database)
+
 	authSvc := auth.NewService(database, cfg.Auth)
-	authH := auth.NewHandler(authSvc, cfg.Auth.AccessTokenTTL, cfg.Auth.RefreshTokenTTL, cfg.Auth.SecureCookies)
+	authH := auth.NewHandler(authSvc, cfg.Auth.AccessTokenTTL, cfg.Auth.RefreshTokenTTL, cfg.Auth.SecureCookies, activitySvc)
 
 	rbacSvc := rbac.NewService(database)
 	rbacH := rbac.NewHandler(rbacSvc)
@@ -118,7 +120,6 @@ func main() {
 	leadSvc := lead.NewService(database)
 	leadH := lead.NewHandler(leadSvc, rbacSvc)
 
-	activitySvc := activity.NewService(database)
 	activityH := activity.NewHandler(activitySvc)
 
 	tagSvc := tag.NewService(database)

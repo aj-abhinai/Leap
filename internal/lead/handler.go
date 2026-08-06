@@ -44,13 +44,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	leads, total, err := h.svc.list(pipelineID, stageID, contactID, page, perPage)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -91,13 +85,7 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 			nil,
 		)
 	default:
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 	}
 }
 
@@ -213,13 +201,7 @@ func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	leadID := chi.URLParam(r, "id")
 	history, err := h.svc.listHistory(leadID)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(w, http.StatusOK, history, nil, nil)
@@ -257,13 +239,17 @@ func (h *Handler) CreateActivity(w http.ResponseWriter, r *http.Request) {
 	userID := ctxutil.GetUserID(r)
 	lead, err := h.svc.get(leadID)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusNotFound,
-			nil,
-			&respond.Error{Code: "NOT_FOUND", Message: "Lead not found"},
-			nil,
-		)
+		if errors.Is(err, ErrNotFound) || respond.IsNotFound(err) {
+			respond.JSON(
+				w,
+				http.StatusNotFound,
+				nil,
+				&respond.Error{Code: "NOT_FOUND", Message: "Lead not found"},
+				nil,
+			)
+			return
+		}
+		respond.ServerError(w, err)
 		return
 	}
 	var req CreateActivityRequest
@@ -282,13 +268,7 @@ func (h *Handler) CreateActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	activity, err := h.svc.createActivity(leadID, lead.StageID, userID, req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -347,13 +327,7 @@ func (h *Handler) UpdateActivity(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) PendingReminders(w http.ResponseWriter, r *http.Request) {
 	reminders, err := h.svc.getPendingReminders()
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -369,13 +343,7 @@ func (h *Handler) DismissReminder(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	dismissed, err := h.svc.dismissReminder(id)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	if !dismissed {

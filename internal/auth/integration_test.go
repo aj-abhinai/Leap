@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crm/internal/activity"
 	"crm/internal/config"
 	"crm/internal/testdb"
 	"database/sql"
@@ -16,7 +17,7 @@ func TestLoginIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	resp, mustChange, err := svc.login("alice@example.com", "correct-horse")
+	_, resp, mustChange, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -39,7 +40,7 @@ func TestLoginWrongPasswordIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	_, _, err := svc.login("alice@example.com", "wrong-password")
+	_, _, _, err := svc.login("alice@example.com", "wrong-password")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("expected ErrInvalidCredentials, got %v", err)
 	}
@@ -49,7 +50,7 @@ func TestLoginUnknownUserIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db, authTestConfig())
 
-	_, _, err := svc.login("nobody@example.com", "whatever-password")
+	_, _, _, err := svc.login("nobody@example.com", "whatever-password")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("expected ErrInvalidCredentials, got %v", err)
 	}
@@ -60,7 +61,7 @@ func TestRefreshRotationIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	first, _, err := svc.login("alice@example.com", "correct-horse")
+	_, first, _, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestRefreshReuseOldTokenRejectedIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	first, _, err := svc.login("alice@example.com", "correct-horse")
+	_, first, _, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestRefreshRejectedAfterUserDeactivationIntegration(t *testing.T) {
 	userID := seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	resp, _, err := svc.login("alice@example.com", "correct-horse")
+	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestAccessTokenValidationIntegration(t *testing.T) {
 	userID := seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	resp, _, err := svc.login("alice@example.com", "correct-horse")
+	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestLoginMustChangePasswordFlagIntegration(t *testing.T) {
 	id := seedUserWithFlag(t, db, "bob@example.com", "correct-horse", true)
 	svc := NewService(db, authTestConfig())
 
-	resp, mustChange, err := svc.login("bob@example.com", "correct-horse")
+	_, resp, mustChange, err := svc.login("bob@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestChangePasswordSuccessIntegration(t *testing.T) {
 	}
 
 	// Log in with the new password, flag should now be false.
-	_, mustChange, err := svc.login("carol@example.com", "new-password")
+	_, _, mustChange, err := svc.login("carol@example.com", "new-password")
 	if err != nil {
 		t.Fatalf("login with new password: %v", err)
 	}
@@ -221,11 +222,11 @@ func TestChangePasswordRevokesSessionsIntegration(t *testing.T) {
 	svc := NewService(db, authTestConfig())
 
 	// Create two refresh-token sessions.
-	resp1, _, err := svc.login("frank@example.com", "frank-pw")
+	_, resp1, _, err := svc.login("frank@example.com", "frank-pw")
 	if err != nil {
 		t.Fatalf("login 1: %v", err)
 	}
-	resp2, _, err := svc.login("frank@example.com", "frank-pw")
+	_, resp2, _, err := svc.login("frank@example.com", "frank-pw")
 	if err != nil {
 		t.Fatalf("login 2: %v", err)
 	}
@@ -250,6 +251,78 @@ func authTestConfig() config.Auth {
 		JWTIssuer:       "crm-test",
 		AccessTokenTTL:  15 * time.Minute,
 		RefreshTokenTTL: 7 * 24 * time.Hour,
+	}
+}
+
+func TestLoginRecordsLastLoginIntegration(t *testing.T) {
+	db := testdb.New(t)
+	userID := seedUser(t, db, "alice@example.com", "correct-horse")
+	svc := NewService(db, authTestConfig())
+
+	// Before login, last_login_at is NULL.
+	u, err := svc.getUser(userID)
+	if err != nil {
+		t.Fatalf("getUser: %v", err)
+	}
+	if u.LastLoginAt != nil {
+		t.Fatalf("expected last_login_at to be NULL before login, got %v", u.LastLoginAt)
+	}
+
+	_, _, _, err = svc.login("alice@example.com", "correct-horse")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	// After login, last_login_at is set.
+	u, err = svc.getUser(userID)
+	if err != nil {
+		t.Fatalf("getUser: %v", err)
+	}
+	if u.LastLoginAt == nil {
+		t.Fatal("expected last_login_at to be set after login")
+	}
+}
+
+func TestLoginLogoutAuditIntegration(t *testing.T) {
+	db := testdb.New(t)
+	userID := seedUser(t, db, "alice@example.com", "correct-horse")
+	svc := NewService(db, authTestConfig())
+	act := activity.NewService(db)
+
+	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	act.LogLogin(userID, "Test User")
+
+	var loginCount int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM audit_logs WHERE action = 'login' AND user_id = $1`, userID,
+	).Scan(&loginCount); err != nil {
+		t.Fatalf("count login audit: %v", err)
+	}
+	if loginCount != 1 {
+		t.Errorf("expected 1 login audit entry, got %d", loginCount)
+	}
+
+	act.LogLogout(userID, "Test User")
+	var logoutCount int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM audit_logs WHERE action = 'logout' AND user_id = $1`, userID,
+	).Scan(&logoutCount); err != nil {
+		t.Fatalf("count logout audit: %v", err)
+	}
+	if logoutCount != 1 {
+		t.Errorf("expected 1 logout audit entry, got %d", logoutCount)
+	}
+
+	// Logout via the service should revoke the token and still identify the actor.
+	gotID, gotName, err := svc.logout(resp.RefreshToken)
+	if err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if gotID != userID || gotName != "Test User" {
+		t.Errorf("expected logout to return user %q, got id=%q name=%q", userID, gotID, gotName)
 	}
 }
 

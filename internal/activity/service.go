@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 type Service struct {
@@ -12,6 +13,28 @@ type Service struct {
 
 func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
+}
+
+// LogLogin records a successful sign-in in the audit log.
+func (s *Service) LogLogin(userID, userName string) {
+	if _, err := s.db.Exec(
+		`INSERT INTO audit_logs (description, user_id, user_name, action, resource_type)
+		VALUES ('user logged in', $1, $2, 'login', 'user')`,
+		userID, userName,
+	); err != nil {
+		slog.Error("log login", "error", err, "user_id", userID)
+	}
+}
+
+// LogLogout records a sign-out in the audit log.
+func (s *Service) LogLogout(userID, userName string) {
+	if _, err := s.db.Exec(
+		`INSERT INTO audit_logs (description, user_id, user_name, action, resource_type)
+		VALUES ('user logged out', $1, $2, 'logout', 'user')`,
+		userID, userName,
+	); err != nil {
+		slog.Error("log logout", "error", err, "user_id", userID)
+	}
 }
 
 func (s *Service) list(page, perPage int, filters ActivityFilters) ([]Entry, int, error) {
@@ -78,7 +101,7 @@ func (s *Service) list(page, perPage int, filters ActivityFilters) ([]Entry, int
 			&changes,
 			&e.CreatedAt,
 		); err != nil {
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("list activity: scan: %w", err)
 		}
 		if len(changes) > 0 {
 			raw := json.RawMessage(changes)

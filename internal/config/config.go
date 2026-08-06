@@ -90,14 +90,14 @@ func applyEnvironment(cfg *Config) error {
 	if value := os.Getenv("APP_PORT"); value != "" {
 		port, err := strconv.Atoi(value)
 		if err != nil {
-			return fmt.Errorf("APP_PORT must be an integer, got %q", value)
+			return fmt.Errorf("APP_PORT must be an integer")
 		}
 		cfg.App.Port = port
 	}
 	if value := os.Getenv("DB_PORT"); value != "" {
 		port, err := strconv.Atoi(value)
 		if err != nil {
-			return fmt.Errorf("DB_PORT must be an integer, got %q", value)
+			return fmt.Errorf("DB_PORT must be an integer")
 		}
 		cfg.DB.Port = port
 	}
@@ -115,7 +115,7 @@ func applyEnvironment(cfg *Config) error {
 	if value := os.Getenv("COOKIE_SECURE"); value != "" {
 		secure, err := strconv.ParseBool(value)
 		if err != nil {
-			return fmt.Errorf("COOKIE_SECURE must be a boolean, got %q", value)
+			return fmt.Errorf("COOKIE_SECURE must be a boolean")
 		}
 		cfg.Auth.SecureCookies = secure
 	}
@@ -240,6 +240,6 @@ func (l Log) SlogLevel() (slog.Level, error) {
 	case "error":
 		return slog.LevelError, nil
 	default:
-		return 0, fmt.Errorf("invalid log level %q (use debug, info, warn or error)", l.Level)
+		return 0, fmt.Errorf("invalid log level (use debug, info, warn or error)")
 	}
 }

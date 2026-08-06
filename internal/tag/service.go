@@ -51,7 +51,7 @@ func (s *Service) list(tagType string) ([]Tag, error) {
 	for rows.Next() {
 		var t Tag
 		if err := rows.Scan(&t.ID, &t.Name, &t.Type, &t.Color, &t.CreatedAt); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list tags: scan: %w", err)
 		}
 		tags = append(tags, t)
 	}

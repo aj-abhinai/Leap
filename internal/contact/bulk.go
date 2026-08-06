@@ -107,12 +107,12 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 
 	tagIDs, err := s.loadTagIDs(req.Contacts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("bulk create: load tag ids: %w", err)
 	}
 
 	keys, err := s.loadContactKeys()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("bulk create: load duplicate keys: %w", err)
 	}
 
 	pending := []pendingContact{}
@@ -155,7 +155,7 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 	}
 
 	if err := s.insertContactsBulk(pending); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("bulk create: %w", err)
 	}
 	resp.Imported = len(pending)
 	return resp, nil
@@ -200,13 +200,13 @@ func (s *Service) insertContactsBulk(pending []pendingContact) error {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return err
+			return fmt.Errorf("bulk insert contacts: scan id: %w", err)
 		}
 		createdIDs = append(createdIDs, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return err
+		return fmt.Errorf("bulk insert contacts: iterate: %w", err)
 	}
 
 	tagContactIDs := []string{}

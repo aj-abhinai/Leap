@@ -1,7 +1,10 @@
 package auth
 
 import (
+	"crm/internal/activity"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -10,9 +13,10 @@ import (
 )
 
 type Handler struct {
-	svc  *Service
-	cfg  cookieConfig
-	ttls TokenTTLs
+	svc    *Service
+	cfg    cookieConfig
+	ttls   TokenTTLs
+	actLog *activity.Service
 }
 
 type TokenTTLs struct {
@@ -20,11 +24,12 @@ type TokenTTLs struct {
 	Refresh time.Duration
 }
 
-func NewHandler(svc *Service, accessTTL, refreshTTL time.Duration, secureCookies bool) *Handler {
+func NewHandler(svc *Service, accessTTL, refreshTTL time.Duration, secureCookies bool, actLog *activity.Service) *Handler {
 	return &Handler{
-		svc:  svc,
-		cfg:  cookieConfig{secure: secureCookies},
-		ttls: TokenTTLs{Access: accessTTL, Refresh: refreshTTL},
+		svc:    svc,
+		cfg:    cookieConfig{secure: secureCookies},
+		ttls:   TokenTTLs{Access: accessTTL, Refresh: refreshTTL},
+		actLog: actLog,
 	}
 }
 
@@ -50,9 +55,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	resp, mustChange, err := h.svc.login(req.Email, req.Password)
+	u, resp, mustChange, err := h.svc.login(req.Email, req.Password)
 	if err != nil {
-		if ae, ok := err.(*AuthError); ok {
+		var ae *AuthError
+		if errors.As(err, &ae) {
 			respond.JSON(
 				w,
 				http.StatusUnauthorized,
@@ -62,14 +68,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "Login failed"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
+	}
+	if h.actLog != nil {
+		h.actLog.LogLogin(u.ID, u.Name)
 	}
 	h.cfg.setRefreshCookie(w, resp.RefreshToken, h.ttls.Refresh)
 	h.cfg.setCSRFCookie(w)
@@ -102,7 +105,8 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.refresh(cookie.Value)
 	if err != nil {
 		h.cfg.clearRefreshCookie(w)
-		if ae, ok := err.(*AuthError); ok {
+		var ae *AuthError
+		if errors.As(err, &ae) {
 			respond.JSON(
 				w,
 				http.StatusUnauthorized,
@@ -112,13 +116,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "Refresh failed"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	h.cfg.setRefreshCookie(w, resp.RefreshToken, h.ttls.Refresh)
@@ -136,7 +134,12 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(RefreshCookieName); err == nil && cookie.Value != "" {
-		_ = h.svc.logout(cookie.Value)
+		userID, userName, err := h.svc.logout(cookie.Value)
+		if err != nil {
+			slog.Error("logout revoke failed", "error", err)
+		} else if h.actLog != nil && userID != "" {
+			h.actLog.LogLogout(userID, userName)
+		}
 	}
 	h.cfg.clearRefreshCookie(w)
 	h.cfg.clearCSRFCookie(w)
@@ -153,13 +156,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	userID := ctxutil.GetUserID(r)
 	u, err := h.svc.getUser(userID)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "Failed to load user"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -186,13 +183,7 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := h.svc.updateProfile(userID, req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "Failed to update profile"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -228,7 +219,8 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.changePassword(userID, req.CurrentPassword, req.NewPassword); err != nil {
-		if ae, ok := err.(*AuthError); ok {
+		var ae *AuthError
+		if errors.As(err, &ae) {
 			respond.JSON(
 				w,
 				http.StatusBadRequest,
@@ -238,13 +230,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "Failed to change password"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(

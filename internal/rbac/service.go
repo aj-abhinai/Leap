@@ -59,7 +59,7 @@ func (s *Service) listPermissions() ([]Permission, error) {
 	for rows.Next() {
 		var p Permission
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list permissions: scan: %w", err)
 		}
 		perms = append(perms, p)
 	}
@@ -175,7 +175,7 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest) (*Role, error) {
 func (s *Service) deleteRole(id string) error {
 	var name string
 	err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, id).Scan(&name)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
@@ -196,13 +196,13 @@ func (s *Service) assignPermission(roleID, permissionID string) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		return fmt.Errorf("assign permission: lookup role: %w", err)
 	}
 	if err := s.db.QueryRow(`SELECT name FROM permissions WHERE id = $1`, permissionID).Scan(&permName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		return fmt.Errorf("assign permission: lookup permission: %w", err)
 	}
 	if roleName != "superadmin" && permName == "*" {
 		return ErrWildcardRestricted
@@ -215,7 +215,7 @@ func (s *Service) assignPermission(roleID, permissionID string) error {
 		if respond.IsForeignKeyViolation(err) {
 			return ErrNotFound
 		}
-		return err
+		return fmt.Errorf("assign permission: %w", err)
 	}
 	return nil
 }
@@ -226,20 +226,23 @@ func (s *Service) removePermission(roleID, permissionID string) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		return fmt.Errorf("remove permission: lookup role: %w", err)
 	}
 	var permName string
 	if err := s.db.QueryRow(`SELECT name FROM permissions WHERE id = $1`, permissionID).Scan(&permName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		return fmt.Errorf("remove permission: lookup permission: %w", err)
 	}
 	if roleName == "superadmin" && permName == "*" {
 		return ErrSuperadminRoleProtected
 	}
 	_, err := s.db.Exec(`DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2`, roleID, permissionID)
-	return err
+	if err != nil {
+		return fmt.Errorf("remove permission: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) GetUserPermissions(userID string) ([]string, error) {
@@ -256,7 +259,7 @@ func (s *Service) GetUserPermissions(userID string) ([]string, error) {
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get user permissions: scan: %w", err)
 		}
 		if name == "*" {
 			return []string{"*"}, nil
@@ -280,7 +283,7 @@ func (s *Service) getRolePermissions(roleID string) ([]Permission, error) {
 	for rows.Next() {
 		var p Permission
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get role permissions: scan: %w", err)
 		}
 		perms = append(perms, p)
 	}
@@ -392,7 +395,7 @@ func (s *Service) listUsers() ([]UserInfo, error) {
 			&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt,
 			&roleID, &roleName, &roleDesc, &roleCreatedAt, &roleUpdatedAt,
 		); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list users: scan: %w", err)
 		}
 		if roleID.Valid {
 			u.Role = &Role{
@@ -406,11 +409,11 @@ func (s *Service) listUsers() ([]UserInfo, error) {
 		users = append(users, u)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list users: iterate: %w", err)
 	}
 	totalSuperadmins, err := s.countSuperadminsAll()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list users: count superadmins: %w", err)
 	}
 	for i := range users {
 		users[i].Protected = totalSuperadmins == 1 && users[i].Role != nil && users[i].Role.Name == "superadmin"
@@ -497,8 +500,10 @@ func (s *Service) deleteUser(id, actorID string) error {
 // manager so concurrent deletions cannot both pass the count check.
 func lockRBACMutations(tx *sql.Tx) error {
 	const rbacMutationLockKey = 748391621
-	_, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, rbacMutationLockKey)
-	return err
+	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock($1)`, rbacMutationLockKey); err != nil {
+		return fmt.Errorf("acquire rbac mutation lock: %w", err)
+	}
+	return nil
 }
 
 // userHasRole reports whether the user holds a role with the given name.

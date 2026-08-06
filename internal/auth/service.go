@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -23,23 +25,33 @@ func NewService(db *sql.DB, cfg config.Auth) *Service {
 	return &Service{db: db, cfg: cfg}
 }
 
-func (s *Service) login(email, password string) (*TokenResponse, bool, error) {
+func (s *Service) login(email, password string) (*User, *TokenResponse, bool, error) {
 	var u User
 	err := s.db.QueryRow(
-		`SELECT id, name, email, password_hash, must_change_password FROM users WHERE email = $1 AND deleted_at IS NULL`,
+		`SELECT id, name, email, password_hash, must_change_password, last_login_at FROM users WHERE email = $1 AND deleted_at IS NULL`,
 		util.NormalizeEmail(email),
-	).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.MustChangePassword)
+	).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.MustChangePassword, &u.LastLoginAt)
 	if err != nil {
-		return nil, false, ErrInvalidCredentials
+		return nil, nil, false, ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
-		return nil, false, ErrInvalidCredentials
+		return nil, nil, false, ErrInvalidCredentials
 	}
 	resp, err := s.generateTokenPair(u.ID)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	return resp, u.MustChangePassword, nil
+	s.recordLogin(u.ID)
+	return &u, resp, u.MustChangePassword, nil
+}
+
+// recordLogin updates the user's last successful sign-in timestamp. It is a
+// best-effort bookkeeping write: a failure must not fail an already-successful
+// login or orphan the refresh token just issued.
+func (s *Service) recordLogin(userID string) {
+	if _, err := s.db.Exec(`UPDATE users SET last_login_at = now() WHERE id = $1`, userID); err != nil {
+		slog.Error("record last login", "error", err, "user_id", userID)
+	}
 }
 
 // normalizeEmail trims and lowercases so case and whitespace differences in
@@ -69,14 +81,16 @@ func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {
 		FOR UPDATE OF rt`,
 		hash,
 	).Scan(&userID, &revoked, &expiresAt, &userDeleted)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInvalidToken
 	}
 	if err != nil {
 		return nil, fmt.Errorf("refresh: %w", err)
 	}
 	if revoked || time.Now().After(expiresAt) || userDeleted {
-		_, _ = tx.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)
+		if _, err := tx.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash); err != nil {
+			return nil, fmt.Errorf("refresh: revoke stale token: %w", err)
+		}
 		return nil, ErrTokenRevoked
 	}
 	_, err = tx.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)
@@ -89,10 +103,28 @@ func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {
 	return s.generateTokenPair(userID)
 }
 
-func (s *Service) logout(refreshToken string) error {
+// logout revokes the refresh token and returns the owning user's id and name
+// so the caller can record a logout audit entry.
+func (s *Service) logout(refreshToken string) (string, string, error) {
 	hash := hashToken(refreshToken)
-	_, err := s.db.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)
-	return err
+	var userID, name string
+	err := s.db.QueryRow(
+		`SELECT u.id, u.name FROM refresh_tokens rt
+		JOIN users u ON u.id = rt.user_id
+		WHERE rt.token_hash = $1 AND NOT rt.revoked`,
+		hash,
+	).Scan(&userID, &name)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Unknown or already-revoked token: nothing to revoke, no actor to log.
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("logout: lookup user: %w", err)
+	}
+	if _, err := s.db.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash); err != nil {
+		return "", "", fmt.Errorf("logout: revoke token: %w", err)
+	}
+	return userID, name, nil
 }
 
 func (s *Service) generateTokenPair(userID string) (*TokenResponse, error) {
@@ -160,11 +192,11 @@ func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 func (s *Service) getUser(userID string) (*User, error) {
 	var u User
 	err := s.db.QueryRow(
-		`SELECT id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), must_change_password, created_at, updated_at
+		`SELECT id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), must_change_password, last_login_at, created_at, updated_at
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL`,
 		userID,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.MustChangePassword, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -179,9 +211,9 @@ func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*User,
 			phone = COALESCE($3, phone),
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), must_change_password, created_at, updated_at`,
+		RETURNING id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), must_change_password, last_login_at, created_at, updated_at`,
 		userID, req.Name, req.Phone,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.MustChangePassword, &u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("update profile: %w", err)
 	}

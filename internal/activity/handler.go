@@ -36,13 +36,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	entries, total, err := h.svc.list(page, perPage, filters)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(

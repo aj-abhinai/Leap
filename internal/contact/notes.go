@@ -29,7 +29,7 @@ func (s *Service) listNotes(contactID string, page, perPage int) ([]Note, int, e
 	for rows.Next() {
 		var n Note
 		if err := rows.Scan(&n.ID, &n.ContactID, &n.UserID, &n.UserName, &n.Note, &n.CreatedAt, &n.UpdatedAt); err != nil {
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("list notes: scan: %w", err)
 		}
 		notes = append(notes, n)
 	}
@@ -68,7 +68,7 @@ func (s *Service) deleteNote(contactID, noteID, userID string, canDeleteAny bool
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("delete note: rows affected: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound

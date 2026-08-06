@@ -10,6 +10,7 @@ type User struct {
 	PasswordHash       string     `json:"-"`
 	AvatarURL          *string    `json:"avatar_url,omitempty"`
 	MustChangePassword bool       `json:"must_change_password"`
+	LastLoginAt        *time.Time `json:"last_login_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 	DeletedAt          *time.Time `json:"deleted_at,omitempty"`

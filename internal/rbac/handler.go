@@ -42,13 +42,7 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 			nil,
 		)
 	default:
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 	}
 }
 func (h *Handler) writeProtected(w http.ResponseWriter, err error) bool {
@@ -73,13 +67,7 @@ func (h *Handler) writeProtected(w http.ResponseWriter, err error) bool {
 func (h *Handler) ListRoles(w http.ResponseWriter, r *http.Request) {
 	roles, err := h.svc.listRoles()
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -172,13 +160,7 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListPermissions(w http.ResponseWriter, r *http.Request) {
 	perms, err := h.svc.listPermissions()
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -238,13 +220,7 @@ func (h *Handler) GetRolePermissions(w http.ResponseWriter, r *http.Request) {
 	roleID := chi.URLParam(r, "id")
 	perms, err := h.svc.getRolePermissions(roleID)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -259,13 +235,7 @@ func (h *Handler) GetRolePermissions(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.svc.listUsers()
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -372,13 +342,7 @@ func (h *Handler) MePermissions(w http.ResponseWriter, r *http.Request) {
 	userID := ctxutil.GetUserID(r)
 	perms, err := h.svc.GetUserPermissions(userID)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "Failed to load permissions"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(

@@ -28,7 +28,7 @@ func NewService(db *sql.DB) *Service {
 func (s *Service) list() ([]Pipeline, error) {
 	pipelines, err := s.listPipelines()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list pipelines: %w", err)
 	}
 	if len(pipelines) == 0 {
 		return pipelines, nil
@@ -40,7 +40,7 @@ func (s *Service) list() ([]Pipeline, error) {
 	}
 	stageMap, err := s.listAllStages(pipelineIDs)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list stages: %w", err)
 	}
 	for i := range pipelines {
 		pipelines[i].Stages = stageMap[pipelines[i].ID]
@@ -65,12 +65,12 @@ func (s *Service) listAllStages(pipelineIDs []string) (map[string][]Stage, error
 		if err := rows.Scan(
 			&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.CreatedAt, &st.UpdatedAt,
 		); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list all stages: scan: %w", err)
 		}
 		stageMap[st.PipelineID] = append(stageMap[st.PipelineID], st)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list all stages: iterate: %w", err)
 	}
 	return stageMap, nil
 }
@@ -87,7 +87,7 @@ func (s *Service) listPipelines() ([]Pipeline, error) {
 	for rows.Next() {
 		var p Pipeline
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list pipelines: scan: %w", err)
 		}
 		pipelines = append(pipelines, p)
 	}

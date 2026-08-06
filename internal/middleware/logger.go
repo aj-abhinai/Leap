@@ -18,18 +18,31 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer so
+// features like Flush, Hijack, and sendfile work through the wrapper.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		requestID, _ := r.Context().Value(middleware.RequestIDKey).(string)
-		slog.Info("request",
+		level := slog.LevelInfo
+		switch {
+		case rw.statusCode >= 500:
+			level = slog.LevelError
+		case rw.statusCode >= 400:
+			level = slog.LevelWarn
+		}
+		slog.Log(r.Context(), level, "request",
 			"request_id", requestID,
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rw.statusCode,
-			"duration", time.Since(start).String(),
+			"duration", time.Since(start),
 		)
 	})
 }

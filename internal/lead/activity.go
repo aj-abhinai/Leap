@@ -197,7 +197,7 @@ func (s *Service) deleteActivity(leadID, activityID string) error {
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("delete activity: rows affected: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound
@@ -211,11 +211,11 @@ func (s *Service) deleteActivity(leadID, activityID string) error {
 func (s *Service) dismissReminder(activityID string) (bool, error) {
 	res, err := s.db.Exec(`UPDATE lead_activities SET is_reminded = true WHERE id = $1 AND NOT is_reminded`, activityID)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("dismiss reminder: %w", err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("dismiss reminder: rows affected: %w", err)
 	}
 	return rows > 0, nil
 }
@@ -228,7 +228,7 @@ func (s *Service) getPendingReminders() ([]Activity, error) {
 		time.Now(),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get pending reminders: %w", err)
 	}
 	defer rows.Close()
 	activities := []Activity{}
@@ -242,7 +242,7 @@ func (s *Service) getPendingReminders() ([]Activity, error) {
 			&a.ScheduledAt, &a.RemindAt, &a.RespondedAt, &a.IsDone, &a.IsReminded,
 			&a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get pending reminders: scan: %w", err)
 		}
 		a.OutcomeID = outcomeID.String
 		a.OutcomeName = outcomeName.String

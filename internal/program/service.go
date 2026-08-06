@@ -7,7 +7,11 @@ import (
 	"fmt"
 )
 
-var ErrNotFound = errors.New("program not found")
+var (
+	ErrNotFound      = errors.New("program not found")
+	ErrNameRequired  = errors.New("name is required")
+	ErrNegativePrice = errors.New("price cannot be negative")
+)
 
 type Service struct {
 	db *sql.DB
@@ -22,7 +26,7 @@ const selectColumns = `id, name, COALESCE(description, ''), price, (deleted_at I
 func (s *Service) scanProgram(row interface{ Scan(...any) error }) (*Program, error) {
 	var p Program
 	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Archived, &p.CreatedAt, &p.UpdatedAt); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scan program: %w", err)
 	}
 	return &p, nil
 }
@@ -56,7 +60,7 @@ func collect(rows *sql.Rows) ([]Program, error) {
 	for rows.Next() {
 		var p Program
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Archived, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan program: %w", err)
 		}
 		programs = append(programs, p)
 	}
@@ -73,10 +77,10 @@ func (s *Service) getActive(id string) (*Program, error) {
 
 func (s *Service) create(req CreateRequest) (*Program, error) {
 	if req.Name == "" {
-		return nil, errors.New("name is required")
+		return nil, ErrNameRequired
 	}
 	if req.Price < 0 {
-		return nil, errors.New("price cannot be negative")
+		return nil, ErrNegativePrice
 	}
 	return s.scanProgram(s.db.QueryRow(
 		`INSERT INTO programs (name, description, price) VALUES ($1, $2, $3)
@@ -87,10 +91,10 @@ func (s *Service) create(req CreateRequest) (*Program, error) {
 
 func (s *Service) update(id string, req UpdateRequest) (*Program, error) {
 	if req.Name != nil && *req.Name == "" {
-		return nil, errors.New("name is required")
+		return nil, ErrNameRequired
 	}
 	if req.Price != nil && *req.Price < 0 {
-		return nil, errors.New("price cannot be negative")
+		return nil, ErrNegativePrice
 	}
 	p, err := s.scanProgram(s.db.QueryRow(
 		`UPDATE programs SET
@@ -121,7 +125,9 @@ func (s *Service) archive(id string) error {
 	if err != nil {
 		return fmt.Errorf("archive program: %w", err)
 	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
+	if rows, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("archive program: rows affected: %w", err)
+	} else if rows == 0 {
 		return ErrNotFound
 	}
 	return nil
@@ -132,7 +138,9 @@ func (s *Service) restore(id string) error {
 	if err != nil {
 		return fmt.Errorf("restore program: %w", err)
 	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
+	if rows, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("restore program: rows affected: %w", err)
+	} else if rows == 0 {
 		return ErrNotFound
 	}
 	return nil

@@ -45,13 +45,7 @@ func respondError(w http.ResponseWriter, err error) {
 			nil,
 		)
 	default:
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 	}
 }
 
@@ -71,13 +65,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	contacts, total, err := h.svc.list(page, perPage, search)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -160,13 +148,7 @@ func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := h.svc.bulkCreate(req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -182,7 +164,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	c, err := h.svc.get(id)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			respond.JSON(
 				w,
 				http.StatusNotFound,
@@ -192,13 +174,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -307,13 +283,7 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 	note, err := h.svc.createNote(contactID, userID, req.Note)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(

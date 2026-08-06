@@ -31,13 +31,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(
@@ -94,13 +88,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 				nil,
 			)
 		default:
-			respond.JSON(
-				w,
-				http.StatusInternalServerError,
-				nil,
-				&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-				nil,
-			)
+			respond.ServerError(w, err)
 		}
 		return
 	}
@@ -116,13 +104,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.delete(id); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(

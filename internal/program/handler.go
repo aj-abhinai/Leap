@@ -21,13 +21,7 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) ListActive(w http.ResponseWriter, r *http.Request) {
 	programs, err := h.svc.listActive()
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(w, http.StatusOK, programs, nil, nil)
@@ -36,13 +30,7 @@ func (h *Handler) ListActive(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListAll(w http.ResponseWriter, r *http.Request) {
 	programs, err := h.svc.listAll()
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(w, http.StatusOK, programs, nil, nil)
@@ -62,13 +50,26 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.svc.create(req)
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusBadRequest,
-			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
-			nil,
-		)
+		switch {
+		case errors.Is(err, ErrNameRequired), errors.Is(err, ErrNegativePrice):
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+				nil,
+			)
+		case errors.Is(err, ErrNotFound):
+			respond.JSON(
+				w,
+				http.StatusNotFound,
+				nil,
+				&respond.Error{Code: "NOT_FOUND", Message: "Program not found"},
+				nil,
+			)
+		default:
+			respond.ServerError(w, err)
+		}
 		return
 	}
 	respond.JSON(w, http.StatusCreated, p, nil, nil)
@@ -99,13 +100,26 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		respond.JSON(
-			w,
-			http.StatusBadRequest,
-			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
-			nil,
-		)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			respond.JSON(
+				w,
+				http.StatusNotFound,
+				nil,
+				&respond.Error{Code: "NOT_FOUND", Message: "Program not found"},
+				nil,
+			)
+		case errors.Is(err, ErrNameRequired), errors.Is(err, ErrNegativePrice):
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+				nil,
+			)
+		default:
+			respond.ServerError(w, err)
+		}
 		return
 	}
 	respond.JSON(w, http.StatusOK, p, nil, nil)
@@ -124,13 +138,7 @@ func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Program archived"}, nil, nil)
@@ -149,13 +157,7 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 			)
 			return
 		}
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 		return
 	}
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Program restored"}, nil, nil)

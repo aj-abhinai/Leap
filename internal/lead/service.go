@@ -139,7 +139,10 @@ func (s *Service) get(id string) (*Lead, error) {
 		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get lead: %w", err)
 	}
 	l.DisplayName = l.displayName()
 	return &l, nil
@@ -289,10 +292,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	}
 	old, err := s.get(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
+		return nil, fmt.Errorf("update lead: load current: %w", err)
 	}
 
 	tx, err := s.db.Begin()
@@ -437,11 +437,11 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 func (s *Service) delete(id string, userID string) error {
 	res, err := s.db.Exec(`UPDATE leads SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete lead: %w", err)
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("delete lead: rows affected: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound
@@ -470,7 +470,7 @@ func (s *Service) validateStageForPipelineTx(tx *sql.Tx, pipelineID, stageID str
 func (s *Service) populateNames(l *Lead) error {
 	stageName, err := s.stageName(l.StageID)
 	if err != nil {
-		return err
+		return fmt.Errorf("populate names: load stage name: %w", err)
 	}
 	l.StageName = stageName
 	if l.ProgramID != nil {

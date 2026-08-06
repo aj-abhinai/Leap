@@ -281,15 +281,15 @@ func (s *Service) get(id string) (*Contact, error) {
 		&c.ID, &c.Name, &c.Nickname, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get contact: %w", err)
 	}
 	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get contact: populate tags and status: %w", err)
 	}
 	c = populated[0]
 	if err := s.loadAllPhonesEmails(&c); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get contact: load phones and emails: %w", err)
 	}
 	return &c, nil
 }
@@ -297,8 +297,7 @@ func (s *Service) get(id string) (*Contact, error) {
 func (s *Service) create(req CreateRequest) (*Contact, error) {
 	keys, err := s.loadContactKeys()
 	if err != nil {
-		slog.Error("load contact keys for duplicate check", "error", err)
-		keys = contactKeys{phones: map[string]bool{}, emails: map[string]bool{}}
+		return nil, fmt.Errorf("create contact: load duplicate keys: %w", err)
 	}
 	return s.createWithKeys(req, keys)
 }
@@ -318,7 +317,7 @@ func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact,
 	if statusID != nil {
 		valid, err := statusTagExists(tx, *statusID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("create contact: validate status: %w", err)
 		}
 		if !valid {
 			return nil, ErrInvalidStatus
@@ -345,12 +344,12 @@ func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact,
 
 	// sync phones/emails child rows (also writes the primary flag)
 	if err := syncPhonesEmailsTx(tx, c.ID, req.Phones, req.Emails, req.Phone, req.Email); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create contact: %w", err)
 	}
 
 	unknownTags, err := syncTags(tx, c.ID, req.TagIDs)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create contact: sync tags: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit contact: %w", err)
@@ -358,10 +357,10 @@ func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact,
 
 	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create contact: populate tags and status: %w", err)
 	}
 	if err := s.loadAllPhonesEmails(&populated[0]); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create contact: load phones and emails: %w", err)
 	}
 	if reason := keys.duplicateReason(req.Phone, req.Email); reason != "" {
 		populated[0].Warnings = append(populated[0].Warnings, reason)
@@ -392,7 +391,7 @@ func syncPhonesEmailsTx(q queryer, contactID string, phones []PhoneValue, emails
 			return fmt.Errorf("clear contact phones: %w", err)
 		}
 		if err := insertPhoneRows(q, contactID, phones); err != nil {
-			return err
+			return fmt.Errorf("sync contact phones: %w", err)
 		}
 	}
 	if emails != nil {
@@ -400,7 +399,7 @@ func syncPhonesEmailsTx(q queryer, contactID string, phones []PhoneValue, emails
 			return fmt.Errorf("clear contact emails: %w", err)
 		}
 		if err := insertEmailRows(q, contactID, emails); err != nil {
-			return err
+			return fmt.Errorf("sync contact emails: %w", err)
 		}
 	}
 	return nil
@@ -469,7 +468,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 	if req.StatusID != nil && *req.StatusID != "" {
 		valid, err := statusTagExists(tx, *req.StatusID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("update contact: validate status: %w", err)
 		}
 		if !valid {
 			return nil, ErrInvalidStatus
@@ -519,7 +518,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 			return nil, ErrNoContactDetail
 		}
 		if err := syncPhonesEmailsTx(tx, id, phones, emails, "", ""); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("update contact: sync phones and emails: %w", err)
 		}
 	}
 
@@ -530,7 +529,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		}
 		unknownTags, err = syncTags(tx, id, req.TagIDs)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("update contact: sync tags: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -539,10 +538,10 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 
 	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("update contact: populate tags and status: %w", err)
 	}
 	if err := s.loadAllPhonesEmails(&populated[0]); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("update contact: load phones and emails: %w", err)
 	}
 	if len(unknownTags) > 0 {
 		populated[0].Warnings = append(populated[0].Warnings, "ignored unknown tag id(s)")
@@ -580,13 +579,13 @@ func syncTags(q queryer, contactID string, tagIDs []string) ([]string, error) {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, fmt.Errorf("validate contact tags: scan: %w", err)
 		}
 		valid[id] = true
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate contact tags: iterate: %w", err)
 	}
 	unknown := []string{}
 	for _, id := range tagIDs {
@@ -607,11 +606,11 @@ func syncTags(q queryer, contactID string, tagIDs []string) ([]string, error) {
 func (s *Service) delete(id string, userID string) error {
 	res, err := s.db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete contact: %w", err)
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("delete contact: rows affected: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound

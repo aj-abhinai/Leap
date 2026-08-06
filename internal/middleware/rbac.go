@@ -28,13 +28,7 @@ func RequirePermission(rbacSvc PermissionChecker, permission string, next http.H
 		}
 		perms, err := rbacSvc.GetUserPermissions(userID)
 		if err != nil {
-			respond.JSON(
-				w,
-				http.StatusInternalServerError,
-				nil,
-				&respond.Error{Code: "INTERNAL", Message: "Failed to check permissions"},
-				nil,
-			)
+			respond.ServerError(w, err)
 			return
 		}
 		for _, p := range perms {

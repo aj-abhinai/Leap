@@ -33,7 +33,7 @@ func seedSuperadmin(db *sql.DB, cfg config.Auth, superadmin config.Superadmin) e
 
 	var exists bool
 	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`, email).Scan(&exists); err != nil {
-		return err
+		return fmt.Errorf("check existing superadmin: %w", err)
 	}
 	if exists {
 		slog.Info("superadmin already exists, skipping")
@@ -41,16 +41,16 @@ func seedSuperadmin(db *sql.DB, cfg config.Auth, superadmin config.Superadmin) e
 	}
 	hash, err := auth.HashPassword(password, cfg.BcryptCost)
 	if err != nil {
-		return err
+		return fmt.Errorf("hash superadmin password: %w", err)
 	}
 	_, err = db.Exec(
 		`INSERT INTO users (name, email, password_hash, must_change_password) VALUES ('Super Admin', $1, $2, true)`,
 		email, hash,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("insert superadmin: %w", err)
 	}
-	slog.Info("superadmin user created", "email", email)
+	slog.Info("superadmin user created")
 	return nil
 }
 
@@ -89,11 +89,11 @@ func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
 
 	var exists bool
 	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM roles WHERE name = 'superadmin')`).Scan(&exists); err != nil {
-		return err
+		return fmt.Errorf("check existing superadmin role: %w", err)
 	}
 	if !exists {
 		if _, err := db.Exec(`INSERT INTO roles (name, description) VALUES ('superadmin', 'Full system access')`); err != nil {
-			return err
+			return fmt.Errorf("insert superadmin role: %w", err)
 		}
 	}
 	_, err := db.Exec(
@@ -101,7 +101,7 @@ func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
 		ON CONFLICT (name) DO NOTHING`,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("seed wildcard permission: %w", err)
 	}
 	_, err = db.Exec(
 		`INSERT INTO role_permissions (role_id, permission_id)
@@ -110,7 +110,7 @@ func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
 		ON CONFLICT DO NOTHING`,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("link wildcard permission: %w", err)
 	}
 	_, err = db.Exec(
 		`UPDATE users SET role_id = r.id, updated_at = now()
@@ -118,7 +118,7 @@ func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
 		email,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("assign superadmin role: %w", err)
 	}
 	slog.Info("superadmin role seeded")
 	return nil
@@ -129,7 +129,7 @@ func seedDefaultPipeline(db *sql.DB) error {
 	if err := db.QueryRow(
 		`SELECT EXISTS(SELECT 1 FROM pipelines WHERE name = 'Default Pipeline')`,
 	).Scan(&exists); err != nil {
-		return err
+		return fmt.Errorf("check default pipeline: %w", err)
 	}
 	if exists {
 		return nil
@@ -139,7 +139,7 @@ func seedDefaultPipeline(db *sql.DB) error {
 		`INSERT INTO pipelines (name, description) VALUES ('Default Pipeline', 'Default sales pipeline') RETURNING id`,
 	).Scan(&pipelineID)
 	if err != nil {
-		return err
+		return fmt.Errorf("insert default pipeline: %w", err)
 	}
 	stages := []struct {
 		name      string

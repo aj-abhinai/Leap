@@ -37,13 +37,7 @@ func respondError(w http.ResponseWriter, err error) {
 			nil,
 		)
 	default:
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respond.ServerError(w, err)
 	}
 }
 
