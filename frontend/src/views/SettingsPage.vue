@@ -2,7 +2,6 @@
 import { shallowRef, computed, onMounted } from 'vue'
 import { useActivityStore } from '@/stores/activity'
 import { useRBACStore } from '@/stores/rbac'
-import { useSettingsStore } from '@/stores/settings'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -21,13 +20,11 @@ import SettingsTabRoles from '@/components/settings/SettingsTabRoles.vue'
 import SettingsTabPipelines from '@/components/settings/SettingsTabPipelines.vue'
 import SettingsTabPrograms from '@/components/settings/SettingsTabPrograms.vue'
 import SettingsTabGeneral from '@/components/settings/SettingsTabGeneral.vue'
-import SettingsTagStatusCard from '@/components/settings/SettingsTagStatusCard.vue'
-import { RefreshCw, User, Shield, Layers, BookOpen, Activity, Settings, Tags } from '@lucide/vue'
+import { RefreshCw, User, Shield, Layers, BookOpen, Activity, Settings } from '@lucide/vue'
 import { formatDateTime } from '@/utils/time'
 
 const activity = useActivityStore()
 const rbac = useRBACStore()
-const settings = useSettingsStore()
 const activityPage = shallowRef(1)
 const activityPerPage = 20
 const activityAction = shallowRef('')
@@ -41,7 +38,6 @@ onMounted(async () => {
   await rbac.fetchPermissions()
   permissionsLoaded.value = true
   loadActivity()
-  settings.fetchTags()
 })
 
 function canOrLoading(permission: string): boolean {
@@ -117,10 +113,6 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
           <TabsTrigger v-show="canOrLoading('activity:read')" value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Activity class="size-4" />
             <span class="hidden sm:inline">Activity</span>
-          </TabsTrigger>
-          <TabsTrigger value="catalog" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            <Tags class="size-4" />
-            <span class="hidden sm:inline">Catalog</span>
           </TabsTrigger>
         </TabsList>
 
@@ -229,13 +221,6 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
-        <TabsContent value="catalog" class="mt-0">
-          <div class="grid gap-4 lg:grid-cols-2">
-            <SettingsTagStatusCard kind="activity_type" title="Activity Types" placeholder="e.g. Call 3, Email" />
-            <SettingsTagStatusCard kind="status" title="Activity Statuses" placeholder="e.g. No Reply, Shared Details" />
-            <SettingsTagStatusCard kind="loss_reason" title="Loss Reasons" placeholder="e.g. Not interested, Budget" />
-          </div>
         </TabsContent>
       </Tabs>
     </div>
