@@ -130,6 +130,7 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.SecurityHeaders)
+	r.Use(middleware.BodyLimit)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
@@ -188,7 +189,7 @@ func main() {
 		r.Get("/api/reminders", middleware.RequirePermission(rbacSvc, "lead:read", leadH.PendingReminders))
 		r.Patch("/api/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
 
-		r.Get("/api/pipelines", pipelineH.List)
+		r.Get("/api/pipelines", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.List))
 		r.Post("/api/pipelines", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Create))
 		r.Patch("/api/pipelines/{id}", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Update))
 		r.Delete("/api/pipelines/{id}", middleware.RequirePermission(rbacSvc, "pipeline:manage", pipelineH.Delete))
@@ -224,7 +225,7 @@ func main() {
 
 		r.Get("/api/activity", middleware.RequirePermission(rbacSvc, "activity:read", activityH.List))
 
-		r.Get("/api/tags", tagH.List)
+		r.Get("/api/tags", middleware.RequirePermission(rbacSvc, "contact:read", tagH.List))
 		r.Post("/api/tags", middleware.RequirePermission(rbacSvc, "contact:write", tagH.Create))
 		r.Delete("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "contact:write", tagH.Delete))
 	})

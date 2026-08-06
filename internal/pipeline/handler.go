@@ -128,13 +128,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.deletePipeline(id); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(
@@ -213,13 +207,7 @@ func (h *Handler) UpdateStage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteStage(w http.ResponseWriter, r *http.Request) {
 	stageID := chi.URLParam(r, "stage_id")
 	if err := h.svc.deleteStage(stageID); err != nil {
-		respond.JSON(
-			w,
-			http.StatusInternalServerError,
-			nil,
-			&respond.Error{Code: "INTERNAL", Message: "An internal error occurred"},
-			nil,
-		)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(

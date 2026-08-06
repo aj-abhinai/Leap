@@ -91,10 +91,20 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	var outcomeID sql.NullString
 	var outcomeName sql.NullString
 	err := s.db.QueryRow(`
-		INSERT INTO lead_activities (lead_id, stage_id, user_id, type, description, outcome_id, scheduled_at, remind_at, responded_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, lead_id, stage_id, '', user_id, '', type, description, outcome_id, '',
-			scheduled_at, remind_at, responded_at, is_done, is_reminded, created_at, updated_at`,
+		WITH ins AS (
+			INSERT INTO lead_activities (lead_id, stage_id, user_id, type, description, outcome_id, scheduled_at, remind_at, responded_at)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, NULLIF($6, '')::uuid, $7, $8, $9)
+			RETURNING id, lead_id, stage_id, user_id, type, description, outcome_id,
+				scheduled_at, remind_at, responded_at, is_done, is_reminded, created_at, updated_at
+		)
+		SELECT ins.id, ins.lead_id, ins.stage_id, COALESCE(ls.name, ''), ins.user_id, COALESCE(u.name, ''),
+			ins.type, ins.description, ins.outcome_id, COALESCE(t.name, ''),
+			ins.scheduled_at, ins.remind_at, ins.responded_at, ins.is_done, ins.is_reminded,
+			ins.created_at, ins.updated_at
+		FROM ins
+		LEFT JOIN users u ON u.id = ins.user_id
+		LEFT JOIN lead_stages ls ON ls.id = ins.stage_id
+		LEFT JOIN tags t ON t.id = ins.outcome_id`,
 		leadID, stageID, userID, req.Type, req.Description, req.OutcomeID, req.ScheduledAt, req.RemindAt, respondedAt,
 	).Scan(
 		&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
@@ -196,9 +206,10 @@ func (s *Service) deleteActivity(leadID, activityID string) error {
 }
 
 // dismissReminder marks an activity as reminded and reports whether a row
-// actually existed; a missing id is a clean (false, nil) instead of an error.
+// actually changed; a missing or already-reminded id is a clean (false, nil)
+// instead of an error.
 func (s *Service) dismissReminder(activityID string) (bool, error) {
-	res, err := s.db.Exec(`UPDATE lead_activities SET is_reminded = true WHERE id = $1`, activityID)
+	res, err := s.db.Exec(`UPDATE lead_activities SET is_reminded = true WHERE id = $1 AND NOT is_reminded`, activityID)
 	if err != nil {
 		return false, err
 	}

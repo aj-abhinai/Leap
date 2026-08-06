@@ -25,10 +25,14 @@ func TestDismissReminderFoundIntegration(t *testing.T) {
 	svc := NewService(db)
 
 	pipelineID, stageID := seedPipelineAndStage(t, db)
+	var contactID string
+	if err := db.QueryRow(`INSERT INTO contacts (name) VALUES ('Alice') RETURNING id`).Scan(&contactID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
 	var leadID string
 	if err := db.QueryRow(
-		`INSERT INTO leads (name, pipeline_id, stage_id) VALUES ('Lead A', $1, $2) RETURNING id`,
-		pipelineID, stageID,
+		`INSERT INTO leads (contact_id, pipeline_id, stage_id) VALUES ($1, $2, $3) RETURNING id`,
+		contactID, pipelineID, stageID,
 	).Scan(&leadID); err != nil {
 		t.Fatalf("seed lead: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -358,6 +359,22 @@ func TestUpdateLeadMissingReturnsNotFoundIntegration(t *testing.T) {
 	}
 }
 
+func TestPatchMissingLeadReturnsNotFoundHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db), stubPerms{can: true})
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/leads/00000000-0000-0000-0000-000000000000",
+		strings.NewReader(`{"stage_id":"00000000-0000-0000-0000-000000000000"}`),
+	)
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (not 500)", rr.Code)
+	}
+}
+
 func TestCreateLeadRejectsForeignStageIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -492,6 +509,34 @@ func TestStageMoveOutOfClosingClearsOutcomeIntegration(t *testing.T) {
 	}
 	if back.Outcome != "" || back.LostReason != "" {
 		t.Errorf("outcome/lost_reason = %q/%q, want cleared", back.Outcome, back.LostReason)
+	}
+}
+
+func TestPatchLeadStageMoveSucceedsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	// Lead in a pipeline with two stages; move between them.
+	pipelineID, stageA := seedPipelineAndStage(t, db)
+	var stageB string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name) VALUES ($1, 'Contacted') RETURNING id`, pipelineID).Scan(&stageB); err != nil {
+		t.Fatalf("seed second stage: %v", err)
+	}
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageA,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	updated, err := svc.update(created.ID, UpdateRequest{StageID: &stageB}, "")
+	if err != nil {
+		t.Fatalf("move lead: %v", err)
+	}
+	if updated.StageID != stageB {
+		t.Errorf("stage_id = %q, want %q", updated.StageID, stageB)
 	}
 }
 

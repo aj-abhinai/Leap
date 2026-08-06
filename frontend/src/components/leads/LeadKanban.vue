@@ -67,7 +67,7 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
         item-key="id"
         class="space-y-2 min-h-12"
         ghost-class="opacity-40"
-        drag-class="shadow-xl rotate-1 z-50"
+        drag-class="lead-kanban-dragging"
         :animation="200"
         :sort="false"
         @change="(evt: any) => handleDragChange(evt, col.id)"
@@ -144,3 +144,11 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
     </div>
   </div>
 </template>
+
+<style scoped>
+:global(.lead-kanban-dragging) {
+  transform: rotate(1deg);
+  z-index: 50;
+  box-shadow: var(--shadow-xl);
+}
+</style>

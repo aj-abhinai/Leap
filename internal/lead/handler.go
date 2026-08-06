@@ -1,6 +1,7 @@
 package lead
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -73,7 +74,7 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
 			nil,
 		)
-	case errors.Is(err, ErrNotFound), respond.IsNotFound(err):
+	case errors.Is(err, ErrNotFound), errors.Is(err, sql.ErrNoRows), respond.IsNotFound(err):
 		respond.JSON(
 			w,
 			http.StatusNotFound,

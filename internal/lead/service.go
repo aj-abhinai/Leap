@@ -365,16 +365,16 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	var l Lead
 	err = tx.QueryRow(
 		`UPDATE leads SET
-			nickname = CASE WHEN $2 IS NOT NULL THEN NULLIF($2, '') ELSE nickname END,
-			contact_id = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '')::uuid ELSE contact_id END,
-			pipeline_id = COALESCE($4, pipeline_id),
-			stage_id = COALESCE($5, stage_id),
-			outcome = CASE WHEN $6 IS NOT NULL THEN NULLIF($6, '') ELSE outcome END,
-			lost_reason = CASE WHEN $7 IS NOT NULL THEN NULLIF($7, '') ELSE lost_reason END,
-			program_id = CASE WHEN $8 IS NOT NULL THEN NULLIF($8, '')::uuid ELSE program_id END,
-			value = CASE WHEN $8 IS NOT NULL AND NULLIF($8, '') IS NULL THEN NULL ELSE COALESCE($9, value) END,
-			notes = CASE WHEN $10 IS NOT NULL THEN NULLIF($10, '') ELSE notes END,
-			assigned_to = CASE WHEN $11 IS NOT NULL THEN NULLIF($11, '')::uuid ELSE assigned_to END,
+			nickname = CASE WHEN $2::text IS NOT NULL THEN NULLIF($2::text, '') ELSE nickname END,
+			contact_id = CASE WHEN $3::text IS NOT NULL THEN NULLIF($3::text, '')::uuid ELSE contact_id END,
+			pipeline_id = COALESCE($4::uuid, pipeline_id),
+			stage_id = COALESCE($5::uuid, stage_id),
+			outcome = CASE WHEN $6::text IS NOT NULL THEN NULLIF($6::text, '') ELSE outcome END,
+			lost_reason = CASE WHEN $7::text IS NOT NULL THEN NULLIF($7::text, '') ELSE lost_reason END,
+			program_id = CASE WHEN $8::text IS NOT NULL THEN NULLIF($8::text, '')::uuid ELSE program_id END,
+			value = CASE WHEN $8::text IS NOT NULL AND NULLIF($8::text, '') IS NULL THEN NULL ELSE COALESCE($9, value) END,
+			notes = CASE WHEN $10::text IS NOT NULL THEN NULLIF($10::text, '') ELSE notes END,
+			assigned_to = CASE WHEN $11::text IS NOT NULL THEN NULLIF($11::text, '')::uuid ELSE assigned_to END,
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, COALESCE(nickname, ''), contact_id, pipeline_id, stage_id,
@@ -403,7 +403,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	if targetStage != nil {
 		if _, err := tx.Exec(
 			`INSERT INTO lead_stage_history (lead_id, from_stage_id, to_stage_id, from_stage_name, to_stage_name, user_id)
-			VALUES ($1, $2, $3, $4, $5, $6)`,
+			VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid)`,
 			id, old.StageID, l.StageID, old.StageName, targetStage.Name, userID,
 		); err != nil {
 			return nil, fmt.Errorf("record stage history: %w", err)
@@ -539,7 +539,14 @@ func (s *Service) activeProgramPriceTx(tx *sql.Tx, programID string) (float64, e
 
 func (s *Service) stageName(stageID string) (string, error) {
 	var name string
-	if err := s.db.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, stageID).Scan(&name); err != nil {
+	err := s.db.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, stageID).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The stage row no longer exists (e.g. an old pipeline stage removed by
+		// migration). Callers use the name only for display/history; an empty
+		// name is safer than failing the whole update.
+		return "", nil
+	}
+	if err != nil {
 		return "", fmt.Errorf("load stage name: %w", err)
 	}
 	return name, nil
@@ -608,7 +615,7 @@ func (s *Service) logActivity(resourceID, resourceType, action, desc, userID str
 	}
 	if _, err := s.db.Exec(
 		`INSERT INTO audit_logs (description, resource_type, resource_id, action, user_id, user_name)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''))`,
+		VALUES ($1, $2, $3, $4, NULLIF($5, '')::uuid, NULLIF($6, ''))`,
 		desc, resourceType, resourceID, action, userID, userName,
 	); err != nil {
 		slog.Error("log activity", "error", err, "resource_type", resourceType, "resource_id", resourceID)
