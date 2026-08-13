@@ -14,16 +14,11 @@ import (
 )
 
 type Handler struct {
-	svc   *Service
-	perms PermissionChecker
+	svc *Service
 }
 
-type PermissionChecker interface {
-	UserCan(userID, permission string) (bool, error)
-}
-
-func NewHandler(svc *Service, perms PermissionChecker) *Handler {
-	return &Handler{svc: svc, perms: perms}
+func NewHandler(svc *Service) *Handler {
+	return &Handler{svc: svc}
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +72,7 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "NOT_FOUND", Message: ErrNotFound.Error()},
 			nil,
 		)
-	case errors.Is(err, ErrStageNotInPipeline):
+	case errors.Is(err, ErrStageNotInPipeline), errors.Is(err, ErrClosingStageAtCreate):
 		respond.JSON(
 			w,
 			http.StatusUnprocessableEntity,
@@ -151,23 +146,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if req.StageID != nil && *req.StageID != "" {
-		canMove, err := h.perms.UserCan(userID, "lead:move_stage")
-		if err != nil {
-			respondLeadMutationError(w, err)
-			return
-		}
-		if !canMove {
-			respond.JSON(
-				w,
-				http.StatusForbidden,
-				nil,
-				&respond.Error{Code: "FORBIDDEN", Message: "lead:move_stage permission required to move leads between stages"},
-				nil,
-			)
-			return
-		}
-	}
+	// Stage moves are a lead-module write capability (ADR 012); the route
+	// gate already enforces lead:write, so Update proceeds directly.
 	l, err := h.svc.update(id, req, userID)
 	if err != nil {
 		respondLeadMutationError(w, err)

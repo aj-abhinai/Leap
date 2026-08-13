@@ -269,6 +269,42 @@ func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string)
 	return contacts, nil
 }
 
+// resolveByPhone returns the contacts whose stored phone matches the given
+// number after normalization (digits only). Used by lead entry to ask the
+// user whether to link or create (ADR 012) — phone is the duplicate signal.
+func (s *Service) resolveByPhone(phone string) ([]ResolveMatch, error) {
+	key := util.NormalizePhone(phone)
+	if key == "" {
+		return []ResolveMatch{}, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT DISTINCT ON (c.id) c.id, c.name,
+			COALESCE(c.email, ''), COALESCE(pcp.value, '')
+		FROM contacts c
+		JOIN contact_phones cp ON cp.contact_id = c.id
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_phones WHERE contact_id = c.id AND is_primary LIMIT 1
+		) pcp ON true
+		WHERE c.deleted_at IS NULL
+		  AND regexp_replace(cp.value, '\D', '', 'g') = $1
+		ORDER BY c.id, c.updated_at DESC`,
+		key,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("resolve contact by phone: %w", err)
+	}
+	defer rows.Close()
+	matches := []ResolveMatch{}
+	for rows.Next() {
+		var m ResolveMatch
+		if err := rows.Scan(&m.ID, &m.Name, &m.Email, &m.Phone); err != nil {
+			return nil, fmt.Errorf("resolve contact by phone: scan: %w", err)
+		}
+		matches = append(matches, m)
+	}
+	return matches, rows.Err()
+}
+
 func (s *Service) get(id string) (*Contact, error) {
 	var c Contact
 	err := s.db.QueryRow(

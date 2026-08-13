@@ -60,15 +60,10 @@ func seedPermissions(db *sql.DB) error {
 		Desc string
 	}{
 		{Name: "contact:read", Desc: "View contacts"},
-		{Name: "contact:write", Desc: "Create and update contacts"},
-		{Name: "contact:delete", Desc: "Delete contacts"},
-		{Name: "lead:read", Desc: "View leads"},
-		{Name: "lead:write", Desc: "Create and update leads"},
-		{Name: "lead:delete", Desc: "Delete leads"},
-		{Name: "lead:move_stage", Desc: "Move leads between pipeline stages"},
-		{Name: "pipeline:manage", Desc: "Create/edit pipelines and stages"},
-		{Name: "program:manage", Desc: "Create/edit programs and catalog prices"},
-		{Name: "rbac:manage", Desc: "Manage users, roles, permissions"},
+		{Name: "contact:write", Desc: "Create, update and delete contacts"},
+		{Name: "lead:read", Desc: "View leads and pipelines"},
+		{Name: "lead:write", Desc: "Create, update, move and delete leads"},
+		{Name: "settings:manage", Desc: "Manage settings: pipelines, programs, tags, users, roles, permissions"},
 		{Name: "activity:read", Desc: "View audit log"},
 		{Name: "data:export", Desc: "Export contacts and leads to CSV"},
 	}

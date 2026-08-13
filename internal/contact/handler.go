@@ -160,6 +160,28 @@ func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+// Resolve returns the contacts matching a phone number (normalized digits)
+// so lead entry can ask the user whether to link or create (ADR 012).
+func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
+	phone := r.URL.Query().Get("phone")
+	if phone == "" {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "phone query parameter is required"},
+			nil,
+		)
+		return
+	}
+	matches, err := h.svc.resolveByPhone(phone)
+	if err != nil {
+		respond.ServerError(w, err)
+		return
+	}
+	respond.JSON(w, http.StatusOK, matches, nil, nil)
+}
+
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	c, err := h.svc.get(id)

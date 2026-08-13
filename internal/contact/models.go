@@ -84,3 +84,12 @@ type Note struct {
 type CreateNoteRequest struct {
 	Note string `json:"note"`
 }
+
+// ResolveMatch is a compact contact result for the lead-entry phone resolve
+// endpoint (ADR 012): id, name, and the primary phone/email for display.
+type ResolveMatch struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Phone string `json:"phone,omitempty"`
+	Email string `json:"email,omitempty"`
+}

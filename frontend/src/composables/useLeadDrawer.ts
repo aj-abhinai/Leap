@@ -32,6 +32,9 @@ export function useLeadDrawer(onSaved: () => void) {
         toast.success('Lead updated')
       } else {
         await apiClient.post('/api/leads', body)
+        if (body.new_contact) {
+          toast.success('Contact created & linked')
+        }
         toast.success('Lead created')
       }
       drawerOpen.value = false

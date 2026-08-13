@@ -265,7 +265,7 @@ func TestOneContactTwoProgramsIntegration(t *testing.T) {
 
 func TestListCapsPerPageHandlerIntegration(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db), stubPerms{can: true})
+	h := NewHandler(NewService(db))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/leads?per_page=9999", nil)
 	rr := httptest.NewRecorder()
@@ -288,7 +288,7 @@ func TestListCapsPerPageHandlerIntegration(t *testing.T) {
 
 func TestCreateActivityDescriptionRequiredHandlerIntegration(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db), stubPerms{can: true})
+	h := NewHandler(NewService(db))
 
 	pipelineID, stageID := seedPipelineAndStage(t, db)
 	svc := NewService(db)
@@ -363,15 +363,6 @@ func TestCreateLeadBlocksWhileProgramLockedIntegration(t *testing.T) {
 	}
 }
 
-// stubPerms satisfies the handler's PermissionChecker for handler-level tests.
-type stubPerms struct {
-	can bool
-}
-
-func (p stubPerms) UserCan(_ string, _ string) (bool, error) {
-	return p.can, nil
-}
-
 func TestUpdateLeadMissingReturnsNotFoundIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -388,7 +379,7 @@ func TestUpdateLeadMissingReturnsNotFoundIntegration(t *testing.T) {
 
 func TestPatchMissingLeadReturnsNotFoundHandlerIntegration(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db), stubPerms{can: true})
+	h := NewHandler(NewService(db))
 
 	req := httptest.NewRequest(
 		http.MethodPatch,
@@ -772,4 +763,107 @@ func seedPipelineAndStage(t *testing.T, db *sql.DB) (string, string) {
 		t.Fatalf("seed stage: %v", err)
 	}
 	return pipelineID, stageID
+}
+
+func TestCreateLeadRejectsClosingStageIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var pipelineID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Closing Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	var closingStage string
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Closed Lost', 0, true) RETURNING id`,
+		pipelineID,
+	).Scan(&closingStage); err != nil {
+		t.Fatalf("seed closing stage: %v", err)
+	}
+
+	_, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    closingStage,
+	}, "")
+	if !errors.Is(err, ErrClosingStageAtCreate) {
+		t.Errorf("create into closing stage = %v, want ErrClosingStageAtCreate", err)
+	}
+
+	var leadCount, contactCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM leads`).Scan(&leadCount); err != nil {
+		t.Fatalf("count leads: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM contacts`).Scan(&contactCount); err != nil {
+		t.Fatalf("count contacts: %v", err)
+	}
+	if leadCount != 0 || contactCount != 0 {
+		t.Errorf("expected no leads/contacts after rejected create, got %d/%d", leadCount, contactCount)
+	}
+}
+
+func TestCreateLeadAuditsContactCreationIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	userID := seedTestUser(t, db, "audit@example.com")
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Audited Person", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, userID)
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	var auditCount int
+	var gotUserID, gotUserName sql.NullString
+	err = db.QueryRow(
+		`SELECT COUNT(*), MIN(user_id::text), MIN(user_name) FROM audit_logs
+		WHERE resource_type = 'contact' AND resource_id = $1 AND action = 'create'`,
+		created.ContactID,
+	).Scan(&auditCount, &gotUserID, &gotUserName)
+	if err != nil {
+		t.Fatalf("query contact audit: %v", err)
+	}
+	if auditCount != 1 {
+		t.Errorf("audit rows = %d, want 1 for contact created from lead entry", auditCount)
+	}
+	if !gotUserID.Valid || gotUserID.String != userID {
+		t.Errorf("user_id = %+v, want %q", gotUserID, userID)
+	}
+	if !gotUserName.Valid || gotUserName.String != "Test User" {
+		t.Errorf("user_name = %+v, want Test User", gotUserName)
+	}
+}
+
+func TestCreateLeadAuditWithoutActorIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "No Actor", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	var gotUserID, gotUserName sql.NullString
+	err = db.QueryRow(
+		`SELECT user_id, user_name FROM audit_logs
+		WHERE resource_type = 'contact' AND resource_id = $1 AND action = 'create'`,
+		created.ContactID,
+	).Scan(&gotUserID, &gotUserName)
+	if err != nil {
+		t.Fatalf("query contact audit: %v", err)
+	}
+	if gotUserID.Valid || gotUserName.Valid {
+		t.Errorf("expected NULL actor for system-created contact, got %+v/%+v", gotUserID, gotUserName)
+	}
 }

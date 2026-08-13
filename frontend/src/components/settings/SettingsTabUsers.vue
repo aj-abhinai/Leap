@@ -43,7 +43,7 @@ const newUserError = shallowRef('')
 const creatingUser = shallowRef(false)
 
 // Only wildcard holders may assign the superadmin role; hide the option for
-// everyone else so rbac:manage users never hit a confusing 403.
+// everyone else so settings:manage users never hit a confusing 403.
 const selectableRoles = computed(() => {
   if (rbac.can('*')) return roles.value
   return roles.value.filter((r) => r.name !== 'superadmin')

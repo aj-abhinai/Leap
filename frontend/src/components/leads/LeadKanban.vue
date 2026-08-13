@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { type Lead } from '@/stores/leads'
 import { type Stage } from '@/stores/pipeline'
+import { useRBACStore } from '@/stores/rbac'
 import draggable from 'vuedraggable'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +14,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Plus, MoreHorizontal, ChevronRight, ListChecks, BookOpen } from '@lucide/vue'
 import { formatCurrency, formatContactDetail } from '@/utils/format'
+
+const rbac = useRBACStore()
 
 const props = defineProps<{
   columns: (Stage & { leads: Lead[] })[]
@@ -57,7 +60,13 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
           <span class="text-sm font-medium">{{ col.name }}</span>
           <Badge variant="secondary" class="text-xs px-1.5">{{ col.leads.length }}</Badge>
         </div>
-        <Button variant="ghost" size="icon-sm" :aria-label="`Add lead to ${col.name}`" @click="emit('create', col.id)">
+        <Button
+          v-if="rbac.can('lead:write')"
+          variant="ghost"
+          size="icon-sm"
+          :aria-label="`Add lead to ${col.name}`"
+          @click="emit('create', col.id)"
+        >
           <Plus class="size-3.5" />
         </Button>
       </div>
@@ -133,6 +142,7 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
         >
           <p class="text-xs text-muted-foreground">No leads</p>
           <Button
+            v-if="rbac.can('lead:write')"
             variant="ghost"
             size="sm"
             class="mt-1 text-xs"

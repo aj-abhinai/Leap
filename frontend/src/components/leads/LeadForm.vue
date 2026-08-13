@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef } from 'vue'
+import { useRouter } from 'vue-router'
 import { type Lead } from '@/stores/leads'
 import { apiClient } from '@/composables/useApi'
 import { useSettingsStore } from '@/stores/settings'
+import { useRBACStore } from '@/stores/rbac'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -33,6 +35,13 @@ interface Program {
 }
 
 interface ContactOption {
+  id: string
+  name: string
+  phone?: string
+  email?: string
+}
+
+interface ResolveMatch {
   id: string
   name: string
   phone?: string
@@ -74,9 +83,21 @@ const newContactMode = shallowRef(false)
 const newContactName = shallowRef('')
 const newContactPhone = shallowRef('')
 const newContactEmail = shallowRef('')
+// phone resolve picker (ADR 012): matches are offered before the lead submits
+const resolveMatches = shallowRef<ResolveMatch[]>([])
+const resolvedOnce = shallowRef(false)
+
+const router = useRouter()
+const rbac = useRBACStore()
 
 const hasLinkedContact = computed(() => !!linkedContactId.value)
 const isEditing = computed(() => !!props.editingLead)
+
+// Closing stages are unreachable at create (ADR 012): the form hides them in
+// create mode, and the backend rejects them (ErrClosingStageAtCreate).
+const createStages = computed(() =>
+  isEditing.value ? props.stages : props.stages.filter(s => !s.is_closing),
+)
 
 const selectedStage = computed(() => props.stages.find(s => s.id === formStageId.value))
 const isClosingStage = computed(() => !!selectedStage.value?.is_closing)
@@ -171,7 +192,7 @@ async function handleSave() {
       body.contact_id = linkedContactId.value
     }
   } else if (newContactMode.value) {
-    // Resolve-or-create: lead service finds or creates the contact.
+    // Resolve-or-create: ask on phone match (ADR 012), then submit.
     if (!newContactName.value.trim()) {
       formError.value = 'Contact name is required'
       return
@@ -179,6 +200,19 @@ async function handleSave() {
     if (!newContactPhone.value.trim() && !newContactEmail.value.trim()) {
       formError.value = 'A phone or email is required for a new contact'
       return
+    }
+    if (!resolvedOnce.value && newContactPhone.value.trim()) {
+      try {
+        const res = await apiClient.get(`/api/contacts/resolve?phone=${encodeURIComponent(newContactPhone.value.trim())}`)
+        const matches = (res.data ?? []) as ResolveMatch[]
+        if (matches.length > 0) {
+          resolveMatches.value = matches
+          resolvedOnce.value = true
+          return // show the picker; do not submit yet
+        }
+      } catch {
+        // Resolve is best-effort: fall through to the new-contact submission.
+      }
     }
     body.new_contact = {
       name: newContactName.value.trim(),
@@ -194,6 +228,20 @@ async function handleSave() {
   }
 
   emit('save', body)
+}
+
+function linkResolvedMatch(m: ResolveMatch) {
+  linkedContactId.value = m.id
+  linkedContactName.value = m.name
+  newContactMode.value = false
+  resolveMatches.value = []
+  resolvedOnce.value = false
+}
+
+function createNewPersonInstead() {
+  resolveMatches.value = []
+  resolvedOnce.value = true
+  router.push('/contacts')
 }
 </script>
 
@@ -218,11 +266,15 @@ async function handleSave() {
               v-model="contactSearch"
               placeholder="Search by name, phone or email"
               class="pl-8"
+              :disabled="!rbac.can('contact:read')"
               @input="searchContacts"
             />
           </div>
           <Button variant="outline" @click="chooseNewContact">New contact</Button>
         </div>
+        <p v-if="!rbac.can('contact:read')" class="text-xs text-muted-foreground">
+          contact:read permission required to search contacts
+        </p>
         <div v-if="searchingContacts" class="text-sm text-muted-foreground">Searching…</div>
         <div v-else-if="contactResults.length" class="max-h-56 overflow-y-auto rounded-md border">
           <button
@@ -261,6 +313,30 @@ async function handleSave() {
         <p class="text-xs text-muted-foreground">
           A phone or email is required. If the phone matches an existing contact, the lead links to it.
         </p>
+
+        <!-- Phone-match picker: ask before linking (ADR 012) -->
+        <div v-if="resolveMatches.length" class="space-y-2">
+          <Label class="text-sm font-medium">Matching contacts</Label>
+          <div class="max-h-48 overflow-y-auto rounded-md border">
+            <button
+              v-for="m in resolveMatches"
+              :key="m.id"
+              class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/50"
+              @click="linkResolvedMatch(m)"
+            >
+              <span class="min-w-0">
+                <span class="block truncate text-sm font-medium">{{ m.name }}</span>
+                <span class="block truncate text-xs text-muted-foreground">
+                  {{ formatContactDetail(m.phone, m.email) }}
+                </span>
+              </span>
+              <span class="shrink-0 text-xs text-primary">Link to {{ m.name }}</span>
+            </button>
+          </div>
+          <Button variant="outline" size="sm" class="w-full" @click="createNewPersonInstead">
+            Create new person on Contacts page
+          </Button>
+        </div>
       </div>
     </template>
 
@@ -299,11 +375,14 @@ async function handleSave() {
           <SelectValue placeholder="Select stage" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem v-for="s in stages" :key="s.id" :value="s.id">
+          <SelectItem v-for="s in createStages" :key="s.id" :value="s.id">
             {{ s.name }}
           </SelectItem>
         </SelectContent>
       </Select>
+      <p v-if="!isEditing && createStages.length < stages.length" class="text-xs text-muted-foreground">
+        Closing stages are only reachable by moving an existing lead
+      </p>
     </div>
     <div v-if="isClosingStage" class="space-y-2">
       <Label>Loss reason</Label>

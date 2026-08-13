@@ -240,7 +240,7 @@ async function handleDelete() {
                       <Pencil class="size-3.5" />
                     </Button>
                     <Button
-                      v-if="rbac.can('contact:delete')"
+                      v-if="rbac.can('contact:write')"
                       variant="ghost"
                       size="icon-sm"
                       @click="confirmDelete(c.id)"

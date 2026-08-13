@@ -23,6 +23,9 @@ var (
 	ErrContactRequired = errors.New("a lead must reference a contact")
 	// ErrNoContactDetail marks a new_contact with neither a phone nor an email.
 	ErrNoContactDetail = errors.New("new contact must have at least one phone or one email")
+	// ErrClosingStageAtCreate marks lead creation into a closing stage; closing
+	// is reachable only by moving an existing lead (ADR 012).
+	ErrClosingStageAtCreate = errors.New("a lead cannot be created in a closing stage")
 )
 
 type Service struct {
@@ -167,13 +170,22 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 	defer tx.Rollback()
 
 	// Resolve-or-create the backing contact.
-	contactID, err := s.resolveOrCreateContactTx(tx, req.ContactID, req.NewContact)
+	contactID, err := s.resolveOrCreateContactTx(tx, req.ContactID, req.NewContact, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := s.validateStageForPipelineTx(tx, req.PipelineID, req.StageID); err != nil {
 		return nil, err
+	}
+	// Closing stages are unreachable at create: a lead must be moved into them
+	// so the stage history records the move (ADR 012).
+	info, err := s.stageInfoTx(tx, req.StageID)
+	if err != nil {
+		return nil, err
+	}
+	if info.IsClosing {
+		return nil, ErrClosingStageAtCreate
 	}
 	programPrice, err := s.snapshotPriceTx(tx, req.ProgramID)
 	if err != nil {
@@ -215,7 +227,7 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 // resolves an existing contact by phone (primary) / email (secondary) from the
 // new_contact details, creating a new contact in the same transaction when none
 // matches. This is the "contact is the single source of truth" entry flow.
-func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *NewContact) (string, error) {
+func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *NewContact, userID string) (string, error) {
 	if contactID != nil && *contactID != "" {
 		return *contactID, nil
 	}
@@ -224,6 +236,19 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	}
 	if nc.Phone == "" && nc.Email == "" {
 		return "", ErrNoContactDetail
+	}
+
+	// Serialize concurrent lead entries that could create a duplicate contact
+	// for the same phone/email. The lock is namespaced (ADR 012, plan 042) and
+	// released automatically at commit/rollback.
+	key := util.NormalizePhone(nc.Phone)
+	if key == "" {
+		key = util.NormalizeEmail(nc.Email)
+	}
+	if key != "" {
+		if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext($1))`, "lead_resolve:"+key); err != nil {
+			return "", fmt.Errorf("lock contact resolve: %w", err)
+		}
 	}
 
 	// Phone primary, email secondary (ADR 009). The child tables store the raw
@@ -283,6 +308,21 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 			return "", fmt.Errorf("insert lead contact email: %w", err)
 		}
 	}
+
+	// Audit the contact creation inside the same transaction. Best-effort: a
+	// failed audit must never roll back the business mutation (ADR 009).
+	userName := ""
+	if userID != "" {
+		_ = tx.QueryRow(`SELECT name FROM users WHERE id = $1`, userID).Scan(&userName)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO audit_logs (description, resource_type, resource_id, action, user_id, user_name)
+		VALUES ($1, 'contact', $2, 'create', NULLIF($3, '')::uuid, NULLIF($4, ''))`,
+		"Contact created from lead entry", id, userID, userName,
+	); err != nil {
+		slog.Warn("log contact create from lead", "error", err)
+	}
+
 	return id, nil
 }
 

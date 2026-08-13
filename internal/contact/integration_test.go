@@ -679,3 +679,115 @@ func assertAuditRow(t *testing.T, db *sql.DB, resourceID, action string) {
 		t.Errorf("expected an audit_logs row for %s of contact %s", action, resourceID)
 	}
 }
+
+func TestResolveByPhoneMatchesFormattedDifferentlyIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{
+		Name:  "Alice Example",
+		Phone: "9876543210",
+	}); err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	matches, err := svc.resolveByPhone("98765 43210")
+	if err != nil {
+		t.Fatalf("resolve by phone: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("matches = %d, want 1", len(matches))
+	}
+	if matches[0].Name != "Alice Example" {
+		t.Errorf("name = %q, want Alice Example", matches[0].Name)
+	}
+	if matches[0].Phone != "9876543210" {
+		t.Errorf("phone = %q, want 9876543210", matches[0].Phone)
+	}
+}
+
+func TestResolveByPhoneNoMatchIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{
+		Name:  "Alice Example",
+		Phone: "9876543210",
+	}); err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	matches, err := svc.resolveByPhone("1111111111")
+	if err != nil {
+		t.Fatalf("resolve by phone: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Errorf("matches = %d, want 0", len(matches))
+	}
+}
+
+func TestResolveByPhoneEmptyReturnsEmptySliceIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	matches, err := svc.resolveByPhone("")
+	if err != nil {
+		t.Fatalf("resolve by phone: %v", err)
+	}
+	if matches == nil || len(matches) != 0 {
+		t.Errorf("matches = %#v, want empty non-nil slice", matches)
+	}
+}
+
+func TestResolveHandlerRequiresPhoneParamIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db), stubPerms{can: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/contacts/resolve", nil)
+	rr := httptest.NewRecorder()
+	h.Resolve(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+	var body struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error == nil || body.Error.Message != "phone query parameter is required" {
+		t.Errorf("error = %+v, want missing-param message", body.Error)
+	}
+}
+
+func TestResolveHandlerReturnsMatchesIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	if _, err := svc.create(CreateRequest{
+		Name:  "Alice Example",
+		Phone: "9876543210",
+	}); err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+	h := NewHandler(svc, stubPerms{can: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/contacts/resolve?phone=98765%2043210", nil)
+	rr := httptest.NewRecorder()
+	h.Resolve(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var body struct {
+		Data []ResolveMatch `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Data) != 1 || body.Data[0].Name != "Alice Example" {
+		t.Errorf("data = %+v, want one Alice Example match", body.Data)
+	}
+}

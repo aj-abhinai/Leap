@@ -95,19 +95,19 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
             <Settings class="size-4" />
             <span class="hidden sm:inline">General</span>
           </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('rbac:manage')" value="users" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <TabsTrigger v-show="canOrLoading('settings:manage')" value="users" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <User class="size-4" />
             <span class="hidden sm:inline">Users</span>
           </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('rbac:manage')" value="roles" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <TabsTrigger v-show="canOrLoading('settings:manage')" value="roles" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Shield class="size-4" />
             <span class="hidden sm:inline">Roles</span>
           </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('pipeline:manage')" value="pipelines" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <TabsTrigger v-show="canOrLoading('settings:manage')" value="pipelines" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <Layers class="size-4" />
             <span class="hidden sm:inline">Pipelines</span>
           </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('program:manage')" value="programs" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <TabsTrigger v-show="canOrLoading('settings:manage')" value="programs" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
             <BookOpen class="size-4" />
             <span class="hidden sm:inline">Programs</span>
           </TabsTrigger>
@@ -125,19 +125,19 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
           <SettingsTabGeneral />
         </TabsContent>
 
-        <TabsContent v-if="canOrLoading('rbac:manage')" value="users" class="mt-0">
+        <TabsContent v-if="canOrLoading('settings:manage')" value="users" class="mt-0">
           <SettingsTabUsers />
         </TabsContent>
 
-        <TabsContent v-if="canOrLoading('rbac:manage')" value="roles" class="mt-0">
+        <TabsContent v-if="canOrLoading('settings:manage')" value="roles" class="mt-0">
           <SettingsTabRoles />
         </TabsContent>
 
-        <TabsContent v-if="canOrLoading('pipeline:manage')" value="pipelines" class="mt-0">
+        <TabsContent v-if="canOrLoading('settings:manage')" value="pipelines" class="mt-0">
           <SettingsTabPipelines />
         </TabsContent>
 
-        <TabsContent v-if="canOrLoading('program:manage')" value="programs" class="mt-0">
+        <TabsContent v-if="canOrLoading('settings:manage')" value="programs" class="mt-0">
           <SettingsTabPrograms />
         </TabsContent>
 
