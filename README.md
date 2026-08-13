@@ -169,17 +169,20 @@ Development login: `admin@admin.com` / `admin`.
 | `[db]` | `password` | `crm` | Database password |
 | `[db]` | `name` | `crm` | Database name |
 | `[db]` | `sslmode` | `disable` | SSL mode |
-| `[auth]` | `jwt_secret` | dev placeholder | **Required.** At least 32 characters, never a placeholder. |
+| `[auth]` | `jwt_secret` | dev placeholder | **Required.** At least 32 characters, never a placeholder. The committed development secret is rejected outside `development`. |
 | `[auth]` | `access_token_ttl` | `15m` | Access token lifetime |
 | `[auth]` | `refresh_token_ttl` | `168h` | Refresh token lifetime |
 | `[auth]` | `bcrypt_cost` | `12` | Password hash cost |
-| `[auth]` | `secure_cookies` | `false` | Add the `Secure` flag to auth cookies; set `true` behind HTTPS |
+| `[auth]` | `secure_cookies` | `false` | Add the `Secure` flag to auth cookies. Honored as configured in `development`; forced `true` outside development. |
 | `[superadmin]` | `email` | dev placeholder | **Required.** Seeded superadmin email |
 | `[superadmin]` | `password` | dev placeholder | **Required.** At least 12 characters, never a placeholder |
 
 All secrets can be overridden via environment variables — see `.env.example` and the
 Deployment section. The application refuses to start with placeholder or empty secrets in
-every environment.
+production, including the committed development JWT secret. In `development`, the local
+`config.toml` dev credentials (the dev secret and `admin`/`admin@admin.com`) are accepted
+for convenience; a production deployment must supply a strong `JWT_SECRET` and
+`SUPERADMIN_*` via environment variables or a non-dev config file.
 
 ---
 

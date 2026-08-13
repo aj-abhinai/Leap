@@ -70,6 +70,11 @@ func Load(path string) (*Config, error) {
 	if err := applyEnvironment(&cfg); err != nil {
 		return nil, err
 	}
+	if !cfg.App.IsDevelopment() {
+		// Auth cookies carry the 7-day refresh token; outside development the
+		// Secure flag is forced so browsers only send them over HTTPS.
+		cfg.Auth.SecureCookies = true
+	}
 	if err := Validate(cfg); err != nil {
 		return nil, err
 	}
@@ -160,6 +165,8 @@ func Validate(cfg Config) error {
 		}
 	}
 
+	development := cfg.App.IsDevelopment()
+
 	secret := strings.TrimSpace(cfg.Auth.JWTSecret)
 	if secret == "" {
 		return fmt.Errorf("auth.jwt_secret must be set")
@@ -170,9 +177,11 @@ func Validate(cfg Config) error {
 	if len(secret) < 32 {
 		return fmt.Errorf("auth.jwt_secret must be at least 32 characters")
 	}
+	if !development && isDevelopmentSecret(secret) {
+		return fmt.Errorf("auth.jwt_secret: the shipped development secret must not be used outside development")
+	}
 
 	email := strings.TrimSpace(cfg.Superadmin.Email)
-	development := cfg.App.IsDevelopment()
 	if email == "" || strings.EqualFold(email, "admin@crm.local") ||
 		(!development && strings.EqualFold(email, "admin@admin.com")) || !strings.Contains(email, "@") {
 		return fmt.Errorf("superadmin.email must be an explicit non-placeholder email")
@@ -198,6 +207,13 @@ func isPlaceholder(value string) bool {
 	default:
 		return false
 	}
+}
+
+// isDevelopmentSecret reports whether the value is the JWT secret shipped in
+// config.toml/.env.example for local development. It is committed in git
+// history (burned) and must only be accepted in development environments.
+func isDevelopmentSecret(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), "dev-only-jwt-secret-0123456789abcdef")
 }
 
 func WriteTemplate(path string) error {
@@ -228,6 +244,8 @@ jwt_issuer = "crm"
 access_token_ttl = "15m"
 refresh_token_ttl = "168h"
 bcrypt_cost = 12
+# false in development (plain HTTP); forced true outside development so auth
+# cookies are only sent over HTTPS.
 secure_cookies = false
 
 [superadmin]

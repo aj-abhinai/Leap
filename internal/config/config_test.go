@@ -243,6 +243,66 @@ func TestEnvTrustedProxies(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsDevSecretOutsideDevelopment(t *testing.T) {
+	cfg := &Config{}
+	cfg.App.Environment = "production"
+	cfg.Auth.JWTSecret = "dev-only-jwt-secret-0123456789abcdef"
+	cfg.Superadmin.Email = "admin@example.com"
+	cfg.Superadmin.Password = "a-strong-password-12+"
+
+	if err := Validate(*cfg); err == nil {
+		t.Fatal("expected Validate to reject the shipped dev JWT secret in production")
+	}
+}
+
+func TestValidateAllowsDevSecretInDevelopment(t *testing.T) {
+	cfg := &Config{}
+	cfg.App.Environment = "development"
+	cfg.Auth.JWTSecret = "dev-only-jwt-secret-0123456789abcdef"
+	cfg.Superadmin.Email = "admin@admin.com"
+	cfg.Superadmin.Password = "admin"
+
+	if err := Validate(*cfg); err != nil {
+		t.Fatalf("development must accept the shipped dev JWT secret: %v", err)
+	}
+}
+
+func TestLoadForcesSecureCookiesOutsideDevelopment(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("SUPERADMIN_EMAIL", "admin@example.com")
+	t.Setenv("SUPERADMIN_PASSWORD", "a-strong-password-12+")
+
+	cfg, err := Load(writeTemp(t, validTOML))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Auth.SecureCookies {
+		t.Error("SecureCookies must be forced true outside development")
+	}
+}
+
+func TestLoadKeepsSecureCookiesInDevelopment(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Load(writeTemp(t, validTOML))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Auth.SecureCookies {
+		t.Error("SecureCookies must stay false in development by default")
+	}
+
+	clearEnv(t)
+	t.Setenv("COOKIE_SECURE", "true")
+	cfg, err = Load(writeTemp(t, validTOML))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Auth.SecureCookies {
+		t.Error("COOKIE_SECURE=true must be honored in development")
+	}
+}
+
 func TestWriteTemplate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := WriteTemplate(path); err != nil {
