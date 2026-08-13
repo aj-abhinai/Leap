@@ -6,8 +6,26 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 )
+
+// formulaLeaders are the characters spreadsheet applications treat as formula
+// triggers (CWE-1236). Values starting with one of them are neutralized on
+// export so stored data renders as text, never executes.
+var formulaLeaders = []string{"=", "+", "-", "@", "\t", "\r"}
+
+// sanitizeCell neutralizes spreadsheet formula triggers in exported cells by
+// prefixing a single quote. It is applied to every user-controlled field at
+// the output boundary; system-generated cells (ids, timestamps) are exempt.
+func sanitizeCell(v string) string {
+	for _, p := range formulaLeaders {
+		if strings.HasPrefix(v, p) {
+			return "'" + v
+		}
+	}
+	return v
+}
 
 // Service streams CRM data out as CSV for backup and spreadsheet work.
 type Service struct {
@@ -80,9 +98,17 @@ func (s *Service) ExportContactsCSV(w io.Writer) error {
 			age = strconv.Itoa(*c.age)
 		}
 		if err := cw.Write([]string{
-			c.id, c.name, c.nickname, phones[c.id].primary, phones[c.id].all,
-			emails[c.id].primary, emails[c.id].all,
-			c.status, tags[c.id], c.location, age,
+			c.id,
+			sanitizeCell(c.name),
+			sanitizeCell(c.nickname),
+			sanitizeCell(phones[c.id].primary),
+			sanitizeCell(phones[c.id].all),
+			sanitizeCell(emails[c.id].primary),
+			sanitizeCell(emails[c.id].all),
+			sanitizeCell(c.status),
+			sanitizeCell(tags[c.id]),
+			sanitizeCell(c.location),
+			age,
 			c.createdAt.UTC().Format(time.RFC3339), c.updatedAt.UTC().Format(time.RFC3339),
 		}); err != nil {
 			return fmt.Errorf("write contact row: %w", err)
@@ -259,8 +285,19 @@ func (s *Service) ExportLeadsCSV(w io.Writer) error {
 			val = strconv.FormatFloat(*value, 'f', 2, 64)
 		}
 		if err := cw.Write([]string{
-			id, nickname, contactName, contactPhone, contactEmail, pipeline, stage,
-			outcome, lostReason, program, val, assignedTo, notes,
+			id,
+			sanitizeCell(nickname),
+			sanitizeCell(contactName),
+			sanitizeCell(contactPhone),
+			sanitizeCell(contactEmail),
+			sanitizeCell(pipeline),
+			sanitizeCell(stage),
+			sanitizeCell(outcome),
+			sanitizeCell(lostReason),
+			sanitizeCell(program),
+			val,
+			sanitizeCell(assignedTo),
+			sanitizeCell(notes),
 			createdAt.UTC().Format(time.RFC3339), updatedAt.UTC().Format(time.RFC3339),
 		}); err != nil {
 			return fmt.Errorf("write lead row: %w", err)

@@ -7,6 +7,35 @@ import (
 	"testing"
 )
 
+func TestSanitizeCell(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "equals sign",
+			input: "=HYPERLINK(\"https://evil.example\",\"click\")",
+			want:  "'=HYPERLINK(\"https://evil.example\",\"click\")",
+		},
+		{name: "plus sign", input: "+cmd|'/C calc'!A0", want: "'+cmd|'/C calc'!A0"},
+		{name: "minus sign", input: "-2+3", want: "'-2+3"},
+		{name: "at sign", input: "@SUM(A1:A9)", want: "'@SUM(A1:A9)"},
+		{name: "tab", input: "\t=cmd", want: "'\t=cmd"},
+		{name: "carriage return", input: "\r=cmd", want: "'\r=cmd"},
+		{name: "plain text", input: "Alice Example", want: "Alice Example"},
+		{name: "empty", input: "", want: ""},
+		{name: "embedded formula leader", input: "call +91 123", want: "call +91 123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeCell(tt.input); got != tt.want {
+				t.Errorf("sanitizeCell(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExportContactsCSVIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -45,6 +74,12 @@ func TestExportContactsCSVIntegration(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2)`, contactID, tagID); err != nil {
 		t.Fatalf("attach tag: %v", err)
 	}
+	// A planted formula payload must be neutralized on export.
+	if _, err := db.Exec(
+		`INSERT INTO contacts (name, nickname) VALUES ('=HYPERLINK("https://evil.example","click")', '+cmd')`,
+	); err != nil {
+		t.Fatalf("seed evil contact: %v", err)
+	}
 	// A deleted contact must not appear.
 	var deletedID string
 	if err := db.QueryRow(`INSERT INTO contacts (name) VALUES ('Ghost') RETURNING id`).Scan(&deletedID); err != nil {
@@ -63,16 +98,27 @@ func TestExportContactsCSVIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse csv: %v", err)
 	}
-	if len(records) != 2 { // header + 1 live contact
-		t.Fatalf("rows = %d, want 2 (header + Alice)", len(records))
+	if len(records) != 3 { // header + Alice + evil contact
+		t.Fatalf("rows = %d, want 3 (header + Alice + evil)", len(records))
 	}
 	header := records[0]
-	row := records[1]
 	if header[0] != "id" || header[1] != "name" {
 		t.Errorf("header = %v, want id,name,...", header)
 	}
-	if row[1] != "Alice Example" {
-		t.Errorf("name = %q, want Alice Example", row[1])
+	var row, evilRow []string
+	for _, r := range records[1:] {
+		switch r[1] {
+		case "Alice Example":
+			row = r
+		case "'=HYPERLINK(\"https://evil.example\",\"click\")":
+			evilRow = r
+		}
+	}
+	if row == nil {
+		t.Fatal("Alice row not found in export")
+	}
+	if evilRow == nil {
+		t.Fatal("evil contact row not found in export")
 	}
 	if row[3] != "+91 98765 43210" {
 		t.Errorf("primary_phone = %q, want primary", row[3])
@@ -88,6 +134,9 @@ func TestExportContactsCSVIntegration(t *testing.T) {
 	}
 	if row[8] != "VIP" {
 		t.Errorf("tags = %q, want VIP", row[8])
+	}
+	if evilRow[2] != "'+cmd" {
+		t.Errorf("evil nickname = %q, want apostrophe-prefixed formula", evilRow[2])
 	}
 }
 
@@ -120,8 +169,9 @@ func TestExportLeadsCSVIntegration(t *testing.T) {
 		t.Fatalf("seed program: %v", err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO leads (nickname, contact_id, pipeline_id, stage_id, program_id, value, outcome, lost_reason)
-		VALUES ('Lead Nick', $1, $2, $3, $4, 25000, 'lost', 'Not intrested')`,
+		INSERT INTO leads (nickname, contact_id, pipeline_id, stage_id, program_id, value, outcome, lost_reason, notes)
+		VALUES ('=HYPERLINK("https://evil.example","click")', $1, $2, $3, $4, 25000, 'lost', 'Not intrested',
+			'+cmd|''/C calc''!A0')`,
 		contactID, pipelineID, stageID, programID,
 	); err != nil {
 		t.Fatalf("seed lead: %v", err)
@@ -140,8 +190,8 @@ func TestExportLeadsCSVIntegration(t *testing.T) {
 		t.Fatalf("rows = %d, want 2 (header + lead)", len(records))
 	}
 	row := records[1]
-	if row[1] != "Lead Nick" {
-		t.Errorf("nickname = %q, want Lead Nick", row[1])
+	if row[1] != "'=HYPERLINK(\"https://evil.example\",\"click\")" {
+		t.Errorf("nickname = %q, want apostrophe-prefixed formula", row[1])
 	}
 	if row[2] != "Alice Example" {
 		t.Errorf("contact_name = %q, want Alice Example", row[2])
@@ -166,5 +216,8 @@ func TestExportLeadsCSVIntegration(t *testing.T) {
 	}
 	if row[10] != "25000.00" {
 		t.Errorf("value = %q, want 25000.00", row[10])
+	}
+	if row[12] != "'+cmd|'/C calc'!A0" {
+		t.Errorf("notes = %q, want apostrophe-prefixed formula", row[12])
 	}
 }
