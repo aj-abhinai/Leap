@@ -412,6 +412,81 @@ func TestSetUserRoleSelfChangeBlocked(t *testing.T) {
 	}
 }
 
+func TestSetUserRoleSuperadminByManagerBlocked(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	managerID, _ := seedManager(t, db, "manager@example.com")
+	superRoleID := insertRole(t, db, "superadmin")
+	wildcardID := insertPermission(t, db, "*")
+	if _, err := db.Exec(
+		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)`,
+		superRoleID, wildcardID,
+	); err != nil {
+		t.Fatalf("assign wildcard: %v", err)
+	}
+	var puppetID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Puppet', 'puppet@example.com', 'hash') RETURNING id`,
+	).Scan(&puppetID); err != nil {
+		t.Fatalf("insert puppet user: %v", err)
+	}
+
+	err := svc.setUserRole(puppetID, superRoleID, managerID)
+	if !errors.Is(err, ErrSuperadminAssignmentRestricted) {
+		t.Fatalf("setUserRole(superadmin by manager) = %v, want ErrSuperadminAssignmentRestricted", err)
+	}
+
+	var gotRoleID sql.NullString
+	if err := db.QueryRow(`SELECT role_id FROM users WHERE id = $1`, puppetID).Scan(&gotRoleID); err != nil {
+		t.Fatalf("load puppet role_id: %v", err)
+	}
+	if gotRoleID.Valid {
+		t.Errorf("puppet role_id = %v, want NULL (assignment must be blocked)", gotRoleID.String)
+	}
+}
+
+func TestSetUserRoleSuperadminBySuperadminAllowed(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	superRoleID := insertRole(t, db, "superadmin")
+	wildcardID := insertPermission(t, db, "*")
+	if _, err := db.Exec(
+		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)`,
+		superRoleID, wildcardID,
+	); err != nil {
+		t.Fatalf("assign wildcard: %v", err)
+	}
+	var actorID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Super', 'super@example.com', 'hash', $1) RETURNING id`,
+		superRoleID,
+	).Scan(&actorID); err != nil {
+		t.Fatalf("insert superadmin actor: %v", err)
+	}
+	var puppetID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Puppet', 'puppet@example.com', 'hash') RETURNING id`,
+	).Scan(&puppetID); err != nil {
+		t.Fatalf("insert puppet user: %v", err)
+	}
+
+	if err := svc.setUserRole(puppetID, superRoleID, actorID); err != nil {
+		t.Fatalf("setUserRole(superadmin by superadmin): %v", err)
+	}
+	var roleName sql.NullString
+	if err := db.QueryRow(
+		`SELECT r.name FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = $1`,
+		puppetID,
+	).Scan(&roleName); err != nil {
+		t.Fatalf("load puppet role: %v", err)
+	}
+	if !roleName.Valid || roleName.String != "superadmin" {
+		t.Errorf("puppet role = %v, want superadmin", roleName)
+	}
+}
+
 func TestSetUserRoleDemoteSecondSuperadminAllowed(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

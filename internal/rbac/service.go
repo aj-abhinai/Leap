@@ -25,6 +25,10 @@ var (
 	// assigned to a non-superadmin role.
 	ErrWildcardRestricted = errors.New("the wildcard permission can only be assigned to the superadmin role")
 
+	// ErrSuperadminAssignmentRestricted is returned when an actor who does not
+	// hold the wildcard tries to assign a wildcard-carrying role to a user.
+	ErrSuperadminAssignmentRestricted = errors.New("only a superadmin can assign the superadmin role")
+
 	// ErrSuperadminRoleProtected is returned when an operation would delete,
 	// rename, or strip the wildcard permission from the superadmin role.
 	ErrSuperadminRoleProtected = errors.New("the superadmin role is protected")
@@ -329,12 +333,29 @@ func (s *Service) setUserRole(userID, roleID, actorID string) error {
 	}
 
 	if roleID != "" {
-		var isSuperadmin bool
+		var isSuperadmin, hasWildcard bool
 		if err := tx.QueryRow(
-			`SELECT r.name = 'superadmin' FROM roles r WHERE r.id = $1`,
+			`SELECT r.name = 'superadmin', EXISTS(
+				SELECT 1 FROM role_permissions rp
+				JOIN permissions p ON p.id = rp.permission_id
+				WHERE rp.role_id = r.id AND p.name = '*'
+			)
+			FROM roles r WHERE r.id = $1`,
 			roleID,
-		).Scan(&isSuperadmin); err != nil {
+		).Scan(&isSuperadmin, &hasWildcard); err != nil {
 			return fmt.Errorf("set user role: %w", err)
+		}
+		if hasWildcard {
+			// Only an actor who already holds the wildcard may assign a role
+			// that carries it (the superadmin role); rbac:manage alone must
+			// not mint new superadmins.
+			actorIsSuper, err := userHoldsWildcard(tx, actorID)
+			if err != nil {
+				return fmt.Errorf("set user role: %w", err)
+			}
+			if !actorIsSuper {
+				return ErrSuperadminAssignmentRestricted
+			}
 		}
 		if !isSuperadmin {
 			// Demotion (or role swap): protect the last superadmin.
@@ -518,6 +539,25 @@ func userHasRole(tx *sql.Tx, userID, roleName string) (bool, error) {
 		userID, roleName,
 	).Scan(&exists)
 	return exists, err
+}
+
+// userHoldsWildcard reports whether the user's role carries the wildcard
+// permission. An empty userID (no authenticated actor) reports false.
+func userHoldsWildcard(tx *sql.Tx, userID string) (bool, error) {
+	if userID == "" {
+		return false, nil
+	}
+	var holds bool
+	err := tx.QueryRow(
+		`SELECT EXISTS(
+			SELECT 1 FROM role_permissions rp
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE rp.role_id = (SELECT role_id FROM users WHERE id = $1)
+			  AND p.name = '*'
+		)`,
+		userID,
+	).Scan(&holds)
+	return holds, err
 }
 
 // userCanManageRBAC reports whether the user could manage roles and users,

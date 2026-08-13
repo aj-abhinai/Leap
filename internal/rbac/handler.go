@@ -50,6 +50,7 @@ func (h *Handler) writeProtected(w http.ResponseWriter, err error) bool {
 		!errors.Is(err, ErrLastSuperadminProtected) &&
 		!errors.Is(err, ErrSelfRoleChange) &&
 		!errors.Is(err, ErrWildcardRestricted) &&
+		!errors.Is(err, ErrSuperadminAssignmentRestricted) &&
 		!errors.Is(err, ErrSuperadminRoleProtected) &&
 		!errors.Is(err, ErrLastManagerProtected) {
 		return false

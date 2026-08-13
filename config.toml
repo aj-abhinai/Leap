@@ -2,6 +2,7 @@
 port = 9000
 name = "CRM"
 environment = "development"
+trusted_proxies = []
 
 [db]
 host = "localhost"

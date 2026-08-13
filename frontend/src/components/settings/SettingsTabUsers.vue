@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, shallowRef } from 'vue'
+import { onMounted, shallowRef, computed } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
+import { useRBACStore } from '@/stores/rbac'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,11 +35,30 @@ interface User {
 const users = shallowRef<User[]>([])
 const roles = shallowRef<Role[]>([])
 const auth = useAuthStore()
+const rbac = useRBACStore()
 const newUserName = shallowRef('')
 const newUserEmail = shallowRef('')
 const newUserPassword = shallowRef('')
 const newUserError = shallowRef('')
 const creatingUser = shallowRef(false)
+
+// Only wildcard holders may assign the superadmin role; hide the option for
+// everyone else so rbac:manage users never hit a confusing 403.
+const selectableRoles = computed(() => {
+  if (rbac.can('*')) return roles.value
+  return roles.value.filter((r) => r.name !== 'superadmin')
+})
+
+// roleOptionsFor returns the options for a user's role dropdown, always
+// including the user's current role so the select never misrepresents a
+// stored superadmin role as "No role" for viewers who cannot assign it.
+function roleOptionsFor(u: User): Role[] {
+  const current = u.role
+  if (current && !selectableRoles.value.some((r) => r.id === current.id)) {
+    return [current, ...selectableRoles.value]
+  }
+  return selectableRoles.value
+}
 
 onMounted(() => {
   loadUsers()
@@ -171,7 +191,7 @@ function isProtectedUser(u: User): boolean {
                     @change="setRole(u.id, ($event.target as HTMLSelectElement).value)"
                   >
                     <option value="">No role</option>
-                    <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
+                    <option v-for="r in roleOptionsFor(u)" :key="r.id" :value="r.id">{{ r.name }}</option>
                   </select>
                   <ShieldCheck
                     v-if="u.protected"

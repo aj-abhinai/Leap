@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -22,9 +23,10 @@ type Config struct {
 }
 
 type App struct {
-	Port        int    `toml:"port"`
-	Name        string `toml:"name"`
-	Environment string `toml:"environment"`
+	Port           int      `toml:"port"`
+	Name           string   `toml:"name"`
+	Environment    string   `toml:"environment"`
+	TrustedProxies []string `toml:"trusted_proxies"`
 }
 
 type DB struct {
@@ -94,6 +96,9 @@ func applyEnvironment(cfg *Config) error {
 		}
 		cfg.App.Port = port
 	}
+	if value := os.Getenv("TRUSTED_PROXIES"); value != "" {
+		cfg.App.TrustedProxies = splitCSV(value)
+	}
 	if value := os.Getenv("DB_PORT"); value != "" {
 		port, err := strconv.Atoi(value)
 		if err != nil {
@@ -128,7 +133,33 @@ func setString(target *string, key string) {
 	}
 }
 
+// splitCSV parses a comma-separated environment value into trimmed,
+// non-empty entries.
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// IsDevelopment reports whether the configured environment is a development
+// environment.
+func (a App) IsDevelopment() bool {
+	return strings.EqualFold(strings.TrimSpace(a.Environment), "development") ||
+		strings.EqualFold(strings.TrimSpace(a.Environment), "dev")
+}
+
 func Validate(cfg Config) error {
+	for _, p := range cfg.App.TrustedProxies {
+		if _, err := netip.ParsePrefix(strings.TrimSpace(p)); err != nil {
+			return fmt.Errorf("app.trusted_proxies: %q is not a valid CIDR prefix", p)
+		}
+	}
+
 	secret := strings.TrimSpace(cfg.Auth.JWTSecret)
 	if secret == "" {
 		return fmt.Errorf("auth.jwt_secret must be set")
@@ -141,8 +172,7 @@ func Validate(cfg Config) error {
 	}
 
 	email := strings.TrimSpace(cfg.Superadmin.Email)
-	development := strings.EqualFold(strings.TrimSpace(cfg.App.Environment), "development") ||
-		strings.EqualFold(strings.TrimSpace(cfg.App.Environment), "dev")
+	development := cfg.App.IsDevelopment()
 	if email == "" || strings.EqualFold(email, "admin@crm.local") ||
 		(!development && strings.EqualFold(email, "admin@admin.com")) || !strings.Contains(email, "@") {
 		return fmt.Errorf("superadmin.email must be an explicit non-placeholder email")
@@ -178,6 +208,11 @@ func WriteTemplate(path string) error {
 port = 9000
 name = "CRM"
 environment = "production"
+# Comma-separated CIDR prefixes of reverse proxies in front of this server.
+# Only requests arriving through these prefixes may contribute a real client
+# IP via X-Forwarded-For; all other requests are keyed on the socket peer.
+# Leave empty when the server is reached directly (no proxy).
+trusted_proxies = []
 
 [db]
 host = "localhost"

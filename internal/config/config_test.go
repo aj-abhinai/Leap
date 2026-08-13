@@ -52,7 +52,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"APP_ENV", "APP_PORT", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE",
-		"JWT_SECRET", "JWT_ISSUER", "SUPERADMIN_EMAIL", "SUPERADMIN_PASSWORD",
+		"JWT_SECRET", "JWT_ISSUER", "SUPERADMIN_EMAIL", "SUPERADMIN_PASSWORD", "TRUSTED_PROXIES",
 	} {
 		t.Setenv(k, "")
 	}
@@ -187,6 +187,59 @@ func TestValidate(t *testing.T) {
 	cfg.Superadmin.Password = "admin"
 	if err := Validate(*cfg); err == nil {
 		t.Fatal("production should reject development credentials")
+	}
+}
+
+func TestValidateTrustedProxies(t *testing.T) {
+	cfg := &Config{}
+	cfg.App.Environment = "development"
+	cfg.Auth.JWTSecret = "0123456789abcdef0123456789abcdef"
+	cfg.Superadmin.Email = "admin@admin.com"
+	cfg.Superadmin.Password = "admin"
+
+	tests := []struct {
+		name    string
+		proxies []string
+		wantOK  bool
+	}{
+		{name: "empty list", proxies: nil, wantOK: true},
+		{name: "valid CIDR", proxies: []string{"10.0.0.0/8"}, wantOK: true},
+		{name: "valid CIDRs", proxies: []string{"10.0.0.0/8", " 192.168.1.0/24 "}, wantOK: true},
+		{name: "invalid CIDR", proxies: []string{"not-a-prefix"}, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg.App.TrustedProxies = tt.proxies
+			err := Validate(*cfg)
+			if (err == nil) != tt.wantOK {
+				t.Fatalf("Validate(proxies=%v) err = %v, wantOK %v", tt.proxies, err, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestLoadTrustedProxiesFromTOML(t *testing.T) {
+	clearEnv(t)
+	path := writeTemp(t, strings.Replace(validTOML, "environment = \"development\"",
+		"environment = \"development\"\ntrusted_proxies = [\"10.0.0.0/8\", \"192.168.0.0/16\"]", 1))
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.App.TrustedProxies) != 2 || cfg.App.TrustedProxies[0] != "10.0.0.0/8" {
+		t.Errorf("trusted proxies = %v, want [10.0.0.0/8 192.168.0.0/16]", cfg.App.TrustedProxies)
+	}
+}
+
+func TestEnvTrustedProxies(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("TRUSTED_PROXIES", "10.0.0.0/8, 192.168.0.0/16")
+	cfg, err := Load(writeTemp(t, validTOML))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.App.TrustedProxies) != 2 || cfg.App.TrustedProxies[1] != "192.168.0.0/16" {
+		t.Errorf("trusted proxies = %v, want [10.0.0.0/8 192.168.0.0/16]", cfg.App.TrustedProxies)
 	}
 }
 

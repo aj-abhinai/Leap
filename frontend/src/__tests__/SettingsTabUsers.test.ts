@@ -19,6 +19,12 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 
+vi.mock('@/stores/rbac', () => ({
+  useRBACStore: () => ({
+    can: (permission: string) => false,
+  }),
+}))
+
 const getMock = vi.mocked(apiClient.get)
 const postMock = vi.mocked(apiClient.post)
 const putMock = vi.mocked(apiClient.put)
@@ -46,6 +52,7 @@ describe('SettingsTabUsers', () => {
           data: [
             { id: 'r1', name: 'editor' },
             { id: 'r2', name: 'manager' },
+            { id: 'r3', name: 'superadmin' },
           ],
         }
       }
@@ -84,5 +91,20 @@ describe('SettingsTabUsers', () => {
     await flushPromises()
 
     expect(putMock).toHaveBeenCalledWith('/api/users/u1/role', { role_id: '' })
+  })
+
+  it('hides the superadmin option from non-wildcard users', async () => {
+    const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
+    await flushPromises()
+
+    const selects = wrapper.findAll('select')
+    // The first user (editor) and the second (no role) are not superadmins,
+    // so neither dropdown may offer the superadmin option.
+    for (const select of selects) {
+      const options = select.findAll('option').map((o) => o.text())
+      expect(options).not.toContain('superadmin')
+      expect(options).toContain('editor')
+      expect(options).toContain('manager')
+    }
   })
 })

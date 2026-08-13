@@ -131,7 +131,10 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	// ClientIP resolves the client IP for rate limiting from the socket peer,
+	// honoring forwarded headers only from explicitly trusted proxies (never
+	// from client-supplied values).
+	r.Use(middleware.ClientIP(cfg.App.TrustedProxies))
 	r.Use(middleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.SecurityHeaders)

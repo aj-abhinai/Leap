@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"crm/internal/ctxutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -71,5 +72,51 @@ func TestPerIPIsolation(t *testing.T) {
 	}
 	if !l.Allow("5.6.7.8") {
 		t.Error("different IP should have its own bucket")
+	}
+}
+
+func TestKeyOfUsesResolvedClientIP(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req = req.WithContext(ctxutil.WithClientIP(req.Context(), "203.0.113.9"))
+	req.RemoteAddr = "10.0.0.2:1234"
+
+	if got := keyOf(req); got != "203.0.113.9" {
+		t.Errorf("keyOf = %q, want resolved client IP 203.0.113.9", got)
+	}
+}
+
+func TestKeyOfFallsBackToSocketPeer(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.RemoteAddr = "10.0.0.2:1234"
+
+	if got := keyOf(req); got != "10.0.0.2" {
+		t.Errorf("keyOf = %q, want socket peer 10.0.0.2", got)
+	}
+}
+
+func TestSpoofedHeadersDoNotResetBucket(t *testing.T) {
+	// A client rotating forwarded headers from an untrusted peer must keep
+	// hitting the same bucket keyed on the socket peer.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := New(1, time.Minute).Middleware(handler)
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.RemoteAddr = "1.2.3.4:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.1")
+	rr := httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("first request: expected 200, got %d", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/", nil)
+	req.RemoteAddr = "1.2.3.4:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.2")
+	rr = httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("spoofed header must not reset the bucket: expected 429, got %d", rr.Code)
 	}
 }

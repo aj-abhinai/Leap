@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"crm/internal/ctxutil"
 	"crm/internal/respond"
 	"net"
 	"net/http"
@@ -26,12 +27,17 @@ func New(limit int, window time.Duration) *Limiter {
 	return &Limiter{limit: limit, window: window, requests: map[string]*entry{}}
 }
 
-// keyOf derives a per-IP bucket key from the real client IP populated by chi's
-// RealIP middleware.
+// keyOf derives the per-IP bucket key from the client IP resolved by the
+// middleware.ClientIP middleware (trusted proxies only). When no IP was
+// resolved, it falls back to the socket peer so the limiter never becomes a
+// no-op.
 func keyOf(r *http.Request) string {
+	if ip := ctxutil.GetClientIP(r); ip != "" {
+		return ip
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		host = r.RemoteAddr
+		return r.RemoteAddr
 	}
 	return host
 }

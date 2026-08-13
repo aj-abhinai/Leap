@@ -16,6 +16,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-crm}
       DB_NAME: ${DB_NAME:-crm}
       APP_ENV: ${APP_ENV:-development}
+      # Comma-separated CIDRs of trusted reverse proxies. Leave empty when the
+      # app is reached directly (the default) — client-supplied forwarded
+      # headers are then ignored for rate limiting.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       # Secrets default to empty so the mounted config.toml is the source of truth.
       # For production, set APP_ENV=production and provide strong values here or in config.toml.
       JWT_SECRET: ${JWT_SECRET:-}
