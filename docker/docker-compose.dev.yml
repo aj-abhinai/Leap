@@ -1,0 +1,23 @@
+# Development override — run together with the base compose file:
+#
+#   just docker-up
+#   # => docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
+#
+# Boots with the committed config.dev.toml: fixed bootstrap admin
+# (admin@admin.com / admin) and the burned dev JWT secret, with all ports
+# bound to 127.0.0.1. This is the only startup path where the hardcoded dev
+# values are accepted — never use it in production.
+services:
+  app:
+    environment:
+      APP_ENV: development
+    # !override replaces the base compose's 0.0.0.0:9000 publish with a loopback
+    # bind (compose merge would otherwise keep both mappings and conflict).
+    ports: !override
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - ../config.dev.toml:/crm/config.toml:ro
+
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"

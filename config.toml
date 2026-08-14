@@ -1,7 +1,14 @@
+# Replace all placeholder credentials before starting the application.
+# Secrets may also be supplied through environment variables.
+
 [app]
 port = 9000
 name = "CRM"
-environment = "development"
+environment = "production"
+# Comma-separated CIDR prefixes of reverse proxies in front of this server.
+# Only requests arriving through these prefixes may contribute a real client
+# IP via X-Forwarded-For; all other requests are keyed on the socket peer.
+# Leave empty when the server is reached directly (no proxy).
 trusted_proxies = []
 
 [db]
@@ -13,15 +20,18 @@ name = "crm"
 sslmode = "disable"
 
 [auth]
-jwt_secret = "dev-only-jwt-secret-0123456789abcdef"
+jwt_secret = "REPLACE_WITH_A_RANDOM_SECRET_AT_LEAST_32_CHARACTERS"
 jwt_issuer = "crm"
 access_token_ttl = "15m"
 refresh_token_ttl = "168h"
 bcrypt_cost = 12
+# false in development (plain HTTP); forced true outside development so auth
+# cookies are only sent over HTTPS.
+secure_cookies = false
 
 [superadmin]
-email = "admin@admin.com"
-password = "admin"
+email = "replace-admin@example.test"
+password = "REPLACE_WITH_A_LOCAL_ADMIN_PASSWORD"
 
 [log]
 level = "info"

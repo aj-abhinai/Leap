@@ -1,3 +1,15 @@
+# Production deployment. Bare `docker compose up` boots in production mode and
+# FAILS FAST until real secrets are supplied via .env in this directory:
+#
+#   cp docker/.env.example docker/.env   # then fill in JWT_SECRET / SUPERADMIN_*
+#   docker compose up -d
+#
+# The image ships the production config template (placeholders); config
+# validation rejects them before the HTTP listener opens. No dev config is
+# mounted and no demo credentials are accepted.
+#
+# Development uses the override instead (loopback binds, committed dev config):
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
 services:
   app:
     image: crm/crm:latest
@@ -9,25 +21,22 @@ services:
     ports:
       - "9000:9000"
     environment:
-      # DB connection points at the db service (config.toml defaults to localhost).
+      # DB connection points at the db service.
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${DB_USER:-crm}
       DB_PASSWORD: ${DB_PASSWORD:-crm}
       DB_NAME: ${DB_NAME:-crm}
-      APP_ENV: ${APP_ENV:-development}
+      APP_ENV: ${APP_ENV:-production}
       # Comma-separated CIDRs of trusted reverse proxies. Leave empty when the
       # app is reached directly (the default) — client-supplied forwarded
       # headers are then ignored for rate limiting.
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
-      # Secrets default to empty so the mounted config.toml is the source of truth.
-      # For production, set APP_ENV=production and provide strong values here or in config.toml.
+      # Required for a production boot. Empty values fall through to the
+      # shipped template (placeholders), which startup validation rejects.
       JWT_SECRET: ${JWT_SECRET:-}
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-}
-    volumes:
-      # Edit config without rebuilding. Path is relative to docker/ (the compose file dir).
-      - ../config.toml:/crm/config.toml:ro
     command: ["./crm", "--config", "config.toml"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9000/healthz"]
@@ -46,8 +55,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-crm}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm}
       POSTGRES_DB: ${POSTGRES_DB:-crm}
-    ports:
-      - "127.0.0.1:5432:5432"
+    # No host port publish in production — Postgres is reachable only inside
+    # the compose network. The dev override publishes it on 127.0.0.1.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U crm -d crm"]
       interval: 10s

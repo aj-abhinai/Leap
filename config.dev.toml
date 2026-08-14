@@ -1,0 +1,37 @@
+# Development-only configuration. Committed on purpose: it carries the fixed
+# bootstrap credentials (admin@admin.com / admin) and the burned dev JWT
+# secret so every developer gets an identical, zero-setup environment.
+# It is reachable only through dev-only startup paths:
+#   - `just dev-backend`        (local binary)
+#   - `just docker-up`          (docker-compose.dev.yml override)
+# It must never be used in production — `Validate` rejects these values
+# whenever environment is not development.
+
+[app]
+port = 9000
+name = "CRM"
+environment = "development"
+trusted_proxies = []
+
+[db]
+host = "localhost"
+port = 5432
+user = "crm"
+password = "crm"
+name = "crm"
+sslmode = "disable"
+
+[auth]
+jwt_secret = "dev-only-jwt-secret-0123456789abcdef"
+jwt_issuer = "crm"
+access_token_ttl = "15m"
+refresh_token_ttl = "168h"
+bcrypt_cost = 12
+
+[superadmin]
+email = "admin@admin.com"
+password = "admin"
+
+[log]
+level = "info"
+format = "json"

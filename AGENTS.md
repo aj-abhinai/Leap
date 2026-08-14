@@ -1,0 +1,12 @@
+# CRM — Project Structure
+A full-stack, single-tenant pipeline CRM deployed as a single binary.
+
+## Core features:
+- Contacts
+- Leads with configurable stages
+- Role-based access control (RBAC)
+- Audit log
+
+## Context
+
+Before making implementation decisions, inspect `.agents/` and its subdirectories for the relevant documentation. Read only the files needed for the current task.

@@ -4,8 +4,13 @@
 exe := if os_family() == "windows" { ".exe" } else { "" }
 bin := "bin/crm" + exe
 
-# Config file
-config := env_var_or_default('CONFIG', 'config.toml')
+# Config file (development default; production uses config.toml via --new-config)
+config := env_var_or_default('CONFIG', 'config.dev.toml')
+
+# Docker compose base + dev override (loopback binds, committed dev config)
+compose := "docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml"
+# Bare compose = production (fails fast until .env secrets are supplied)
+compose_prod := "docker compose -f docker/docker-compose.yml"
 
 # show available commands
 default:
@@ -18,9 +23,9 @@ dev-backend:
     #!/usr/bin/env sh
     set -e
     CLEANED_UP=""
-    cleanup() { [ -n "$CLEANED_UP" ] && return; CLEANED_UP=1; echo " Stopping Postgres..."; docker compose -f docker/docker-compose.yml rm -sf db; }
+    cleanup() { [ -n "$CLEANED_UP" ] && return; CLEANED_UP=1; echo " Stopping Postgres..."; {{compose}} rm -sf db; }
     trap cleanup EXIT INT TERM
-    docker compose -f docker/docker-compose.yml up -d db
+    {{compose}} up -d db
     echo "Waiting for Postgres..."
     for i in $(seq 1 30); do
       if docker exec crm_db pg_isready -U crm -d crm >/dev/null 2>&1; then
@@ -34,7 +39,7 @@ dev-backend:
       exit 1
     fi
     # Free port :9000 if the docker app container is running (avoids bind collision with `just docker-up`).
-    docker compose -f docker/docker-compose.yml stop app >/dev/null 2>&1 || true
+    {{compose}} stop app >/dev/null 2>&1 || true
     go run ./cmd/server/ -config {{config}}
 
 # Same as dev-backend
@@ -46,9 +51,9 @@ dev-frontend:
     [ -d "node_modules" ] || pnpm install --frozen-lockfile && \
     pnpm dev
 
-# Start only Postgres in Docker, detached
+# Start only Postgres in Docker, detached (with the dev override for loopback publish)
 dev-db:
-    docker compose -f docker/docker-compose.yml up -d db
+    {{compose}} up -d db
 
 # === Build ===
 
@@ -72,22 +77,27 @@ build-ui:
 
 # === Docker ===
 
+# Development stack: loopback binds + committed config.dev.toml (admin/admin).
 docker-up:
-    docker compose -f docker/docker-compose.yml up -d
+    {{compose}} up -d
+
+# Production stack: bare compose, fails fast until docker/.env secrets are set.
+docker-up-prod:
+    {{compose_prod}} up -d
 
 # Build (or rebuild) the app image without starting containers
 docker-build:
-    docker compose -f docker/docker-compose.yml build
+    {{compose}} build
 
-# Rebuild the image and start the stack
+# Rebuild the image and start the dev stack
 docker-rebuild:
-    docker compose -f docker/docker-compose.yml up --build -d
+    {{compose}} up --build -d
 
 docker-down:
-    docker compose -f docker/docker-compose.yml down
+    {{compose}} down
 
 docker-reset:
-    docker compose -f docker/docker-compose.yml down -v
+    {{compose}} down -v
 
 # === Tests / lint ===
 

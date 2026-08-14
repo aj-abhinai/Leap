@@ -44,7 +44,7 @@ var (
 
 func main() {
 	configPath := flag.String("config", "config.toml", "Path to config file")
-	newConfigPath := flag.String("new-config", "", "Write a config template to this path and exit (refuses to overwrite)")
+	newConfigPath := flag.String("new-config", "", "Write a config template to this path and exit (overwrites only a pristine template, never edited files)")
 	flag.Parse()
 
 	if *newConfigPath != "" {

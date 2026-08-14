@@ -32,4 +32,3 @@ docker-compose.override.yml
 Thumbs.db
 server.exe
 skills-lock.json
-scan.md

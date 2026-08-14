@@ -28,19 +28,19 @@
 
 ## Quick start
 
-### Docker
+### Docker (development)
 
 ```shell
-# Copy sample env and edit secrets
-cp .env.example .env
-# Edit .env — set JWT_SECRET, superadmin credentials
-
-# Start the app + Postgres (builds the image once on first run, then reuses it)
+# One command — dev config (config.dev.toml), loopback binds, admin/admin
 just docker-up
-# Or, equivalently: docker compose -f docker/docker-compose.yml up -d
+# Or, equivalently:
+# docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
 ```
 
-Go to `http://localhost:9000` and log in with the superadmin credentials from your `.env`.
+Go to `http://localhost:9000` and log in with `admin@admin.com` / `admin`.
+
+> These are **development-only** bootstrap credentials, reachable only through the dev
+> startup paths above. Production refuses them (see Deployment).
 
 ### Build from source
 
@@ -61,7 +61,7 @@ directories. Unstuffed development builds automatically fall back to the local
 ### Option 1 — downloaded binary + existing PostgreSQL
 
 ```shell
-# 1. Generate a config file (refuses to overwrite an existing file)
+# 1. Generate a config file (overwrites only a pristine template, never edits)
 ./crm --new-config config.toml
 # 2. Edit config.toml — replace every placeholder secret (the server
 #    refuses to start with placeholder/empty secrets)
@@ -81,15 +81,23 @@ supplied via environment variables, which override `config.toml`:
 | `COOKIE_SECURE` | `[auth] secure_cookies` — set `true` when serving over HTTPS |
 | `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | `[superadmin] *` |
 
-### Option 2 — default Docker Compose (bundled PostgreSQL)
+### Option 2 — Docker Compose (production, bundled PostgreSQL)
 
 ```shell
-cp .env.example .env
-# Edit .env — set JWT_SECRET and superadmin credentials (placeholders fail fast)
-just docker-up
+# 1. Copy and edit the production env file (lives in docker/ — compose reads it there)
+cp docker/.env.example docker/.env
+# 2. Edit docker/.env — set JWT_SECRET, SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD
+
+# 3. Start (the app exits immediately if any secret is missing or a placeholder remains)
+docker compose up -d
 ```
 
-Go to `http://localhost:9000` and log in with the superadmin credentials from your `.env`.
+Go to `http://localhost:9000` and log in with your `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD`.
+
+`docker compose` here always runs **production**: the bare `docker-compose.yml` never mounts a
+dev config, and startup validation rejects the committed development credentials, the burned
+JWT secret, and any placeholder. Development uses the `docker-compose.dev.yml` override
+(`just docker-up`) instead.
 
 After changing Go or frontend code, rebuild the image and restart:
 
@@ -102,6 +110,8 @@ just docker-rebuild
 Stop/remove the bundled `db` service, then pass connection variables instead:
 
 ```shell
+APP_ENV=production JWT_SECRET="$(openssl rand -hex 32)" \
+SUPERADMIN_EMAIL=admin@example.com SUPERADMIN_PASSWORD="$(openssl rand -hex 16)" \
 DB_HOST=10.0.0.5 DB_PORT=5432 DB_USER=crm DB_PASSWORD=secret \
 DB_NAME=crm docker compose -f docker/docker-compose.yml up -d app
 ```
@@ -142,7 +152,8 @@ just check           # fmt + vet + lint + test
 just build
 
 # Docker helpers (image is built once and reused)
-just docker-up       # start app + Postgres
+just docker-up       # dev stack: start app + Postgres (loopback binds)
+just docker-up-prod  # production stack: fails fast until docker/.env secrets are set
 just docker-build    # build/rebuild the image without starting
 just docker-rebuild  # rebuild and start
 just docker-down     # stop the stack
@@ -153,11 +164,32 @@ The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `l
 
 Development login: `admin@admin.com` / `admin`.
 
-> **Note:** `just dev-db` starts only the Postgres container. Stop it with `docker compose -f docker/docker-compose.yml down`.
+> **Note:** `just dev-db` starts only the Postgres container (published on `127.0.0.1:5432`).
+> Stop it with `just docker-down`.
 
 ---
 
 ## Configuration
+
+Two config files are committed, each with a single purpose:
+
+| File | Purpose |
+|---|---|
+| `config.toml` | **Production template** (`environment = "production"`). Ships placeholders that startup validation refuses — it is not bootable until real secrets are supplied. Generate a fresh copy with `./crm --new-config config.toml`. |
+| `config.dev.toml` | **Development only** (`environment = "development"`). Carries the fixed bootstrap credentials (`admin@admin.com` / `admin`) and the burned dev JWT secret. Reachable only through dev startup paths (`just dev-backend`, `just docker-up`); validation rejects it outside development. |
+
+Secrets may be supplied via environment variables, which override the config file:
+
+| Environment variable | Overrides |
+|---|---|
+| `APP_PORT` | `[app] port` |
+| `APP_ENV` | `[app] environment` |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSLMODE` | `[db] *` |
+| `JWT_SECRET` / `JWT_ISSUER` | `[auth] jwt_secret` / `jwt_issuer` |
+| `COOKIE_SECURE` | `[auth] secure_cookies` — set `true` when serving over HTTPS |
+| `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | `[superadmin] *` |
+
+Reference table:
 
 | Section | Key | Default | Description |
 |---|---|---|---|
@@ -177,12 +209,12 @@ Development login: `admin@admin.com` / `admin`.
 | `[superadmin]` | `email` | dev placeholder | **Required.** Seeded superadmin email |
 | `[superadmin]` | `password` | dev placeholder | **Required.** At least 12 characters, never a placeholder |
 
-All secrets can be overridden via environment variables — see `.env.example` and the
+All secrets can be overridden via environment variables — see `docker/.env.example` and the
 Deployment section. The application refuses to start with placeholder or empty secrets in
-production, including the committed development JWT secret. In `development`, the local
-`config.toml` dev credentials (the dev secret and `admin`/`admin@admin.com`) are accepted
-for convenience; a production deployment must supply a strong `JWT_SECRET` and
-`SUPERADMIN_*` via environment variables or a non-dev config file.
+production, including the committed development JWT secret and the dev superadmin
+credentials. In `development`, `config.dev.toml` (the dev secret and `admin`/`admin@admin.com`)
+is accepted for convenience; a production deployment must supply a strong `JWT_SECRET` and
+`SUPERADMIN_*` via environment variables or an edited config file.
 
 ---
 

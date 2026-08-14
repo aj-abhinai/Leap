@@ -167,6 +167,7 @@ func TestValidate(t *testing.T) {
 		wantOK   bool
 	}{
 		{name: "legacy default email", email: "admin@crm.local", password: "admin", wantOK: false},
+		{name: "template email", email: "replace-admin@example.test", password: "admin", wantOK: false},
 		{name: "placeholder password", email: "admin@admin.com", password: "change-me", wantOK: false},
 		{name: "short password", email: "admin@admin.com", password: "short", wantOK: false},
 		{name: "development credentials", email: "admin@admin.com", password: "admin", wantOK: true},
@@ -316,8 +317,14 @@ func TestWriteTemplate(t *testing.T) {
 	if !strings.Contains(content, "jwt_secret") || !strings.Contains(content, "REPLACE") {
 		t.Errorf("template missing secrets documentation: %s", content)
 	}
+	if err := WriteTemplate(path); err != nil {
+		t.Fatalf("WriteTemplate must overwrite an unedited template: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content+"# local edit\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteTemplate(path); err == nil {
-		t.Fatal("expected refusal to overwrite existing file")
+		t.Fatal("expected refusal to overwrite an edited config")
 	}
 }
 
@@ -330,6 +337,57 @@ func TestTemplateDoesNotBootUntilEdited(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("template config must not boot until placeholders are replaced")
+	}
+}
+
+func TestCommittedConfigTemplateFailsValidate(t *testing.T) {
+	clearEnv(t)
+	path := filepath.Join("..", "..", "config.toml")
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("committed config.toml not present")
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("committed config.toml (production template) must fail validation")
+	}
+}
+
+func TestCommittedDevConfigBootsInDevelopment(t *testing.T) {
+	clearEnv(t)
+	path := filepath.Join("..", "..", "config.dev.toml")
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("committed config.dev.toml not present")
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("committed config.dev.toml must load in development: %v", err)
+	}
+	if !cfg.App.IsDevelopment() {
+		t.Fatal("committed config.dev.toml must be a development config")
+	}
+}
+
+func TestCommittedConfigTemplateMatchesWriteTemplate(t *testing.T) {
+	committed := filepath.Join("..", "..", "config.toml")
+	if _, err := os.Stat(committed); err != nil {
+		t.Skip("committed config.toml not present")
+	}
+	generated := filepath.Join(t.TempDir(), "config.toml")
+	if err := WriteTemplate(generated); err != nil {
+		t.Fatalf("WriteTemplate: %v", err)
+	}
+	want, err := os.ReadFile(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(committed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalize := func(b []byte) string {
+		return strings.ReplaceAll(string(b), "\r\n", "\n")
+	}
+	if normalize(want) != normalize(got) {
+		t.Errorf("committed config.toml diverged from the --new-config template\n--- want ---\n%s\n--- got ---\n%s", normalize(want), normalize(got))
 	}
 }
 

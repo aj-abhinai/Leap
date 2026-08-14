@@ -22,6 +22,10 @@ RUN apk add --no-cache ca-certificates tzdata \
     && adduser -S -D -H -u 10001 -G crm crm
 WORKDIR /crm
 COPY --from=backend /build/crm .
+# config.toml is the committed production template (placeholders). Startup
+# validation rejects it until real secrets are supplied via environment
+# variables or an operator-edited config; the dev override
+# (docker-compose.dev.yml) mounts config.dev.toml in its place.
 COPY config.toml .
 USER crm
 EXPOSE 9000

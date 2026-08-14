@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -159,43 +160,45 @@ func (a App) IsDevelopment() bool {
 }
 
 func Validate(cfg Config) error {
+	var problems []error
+
 	for _, p := range cfg.App.TrustedProxies {
 		if _, err := netip.ParsePrefix(strings.TrimSpace(p)); err != nil {
-			return fmt.Errorf("app.trusted_proxies: %q is not a valid CIDR prefix", p)
+			problems = append(problems, fmt.Errorf("app.trusted_proxies: %q is not a valid CIDR prefix", p))
 		}
 	}
 
 	development := cfg.App.IsDevelopment()
 
 	secret := strings.TrimSpace(cfg.Auth.JWTSecret)
-	if secret == "" {
-		return fmt.Errorf("auth.jwt_secret must be set")
-	}
-	if isPlaceholder(secret) {
-		return fmt.Errorf("auth.jwt_secret must not be a placeholder")
-	}
-	if len(secret) < 32 {
-		return fmt.Errorf("auth.jwt_secret must be at least 32 characters")
-	}
-	if !development && isDevelopmentSecret(secret) {
-		return fmt.Errorf("auth.jwt_secret: the shipped development secret must not be used outside development")
+	switch {
+	case secret == "":
+		problems = append(problems, fmt.Errorf("auth.jwt_secret is missing (set JWT_SECRET)"))
+	case isPlaceholder(secret):
+		problems = append(problems, fmt.Errorf("auth.jwt_secret is a placeholder (set JWT_SECRET)"))
+	case len(secret) < 32:
+		problems = append(problems, fmt.Errorf("auth.jwt_secret must be at least 32 characters (set JWT_SECRET)"))
+	case !development && isDevelopmentSecret(secret):
+		problems = append(problems, fmt.Errorf("auth.jwt_secret is the shipped development secret and must not be used outside development (set JWT_SECRET)"))
 	}
 
 	email := strings.TrimSpace(cfg.Superadmin.Email)
 	if email == "" || strings.EqualFold(email, "admin@crm.local") ||
+		strings.EqualFold(email, "replace-admin@example.test") ||
 		(!development && strings.EqualFold(email, "admin@admin.com")) || !strings.Contains(email, "@") {
-		return fmt.Errorf("superadmin.email must be an explicit non-placeholder email")
+		problems = append(problems, fmt.Errorf("superadmin.email must be an explicit non-placeholder email (set SUPERADMIN_EMAIL)"))
 	}
 
 	password := strings.TrimSpace(cfg.Superadmin.Password)
 	developmentPassword := development && strings.EqualFold(password, "admin")
 	if password == "" || (isPlaceholder(password) && !developmentPassword) {
-		return fmt.Errorf("superadmin.password must be an explicit non-placeholder value")
+		problems = append(problems, fmt.Errorf("superadmin.password must be an explicit non-placeholder value (set SUPERADMIN_PASSWORD)"))
 	}
 	if len(password) < 12 && !developmentPassword {
-		return fmt.Errorf("superadmin.password must be at least 12 characters")
+		problems = append(problems, fmt.Errorf("superadmin.password must be at least 12 characters (set SUPERADMIN_PASSWORD)"))
 	}
-	return nil
+
+	return errors.Join(problems...)
 }
 
 func isPlaceholder(value string) bool {
@@ -257,7 +260,21 @@ level = "info"
 format = "json"
 `
 
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	existing, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		// Normalize CRLF so a Windows checkout of the pristine template is
+		// still recognized as unedited (the Go literal is LF-only).
+		if strings.ReplaceAll(string(existing), "\r\n", "\n") != template {
+			return fmt.Errorf("config %q already exists with edits; refusing to overwrite (delete it or choose a new path)", path)
+		}
+	case os.IsNotExist(err):
+		// Fall through to the pristine write below.
+	default:
+		return fmt.Errorf("read existing config %q: %w", path, err)
+	}
+
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("create config %q: %w", path, err)
 	}
