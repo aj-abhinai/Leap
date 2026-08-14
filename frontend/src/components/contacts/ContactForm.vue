@@ -111,7 +111,7 @@ async function handleSave() {
     age: formAge.value || undefined,
   })
   if (!result.success) {
-    formError.value = result.error.errors[0]?.message || 'Validation failed'
+    formError.value = result.error.issues[0]?.message || 'Validation failed'
     return
   }
   // ensure exactly one primary per type

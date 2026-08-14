@@ -25,7 +25,7 @@ async function handleSave() {
     phone: formPhone.value || undefined,
   })
   if (!result.success) {
-    error.value = result.error.errors[0]?.message || 'Validation failed'
+    error.value = result.error.issues[0]?.message || 'Validation failed'
     return
   }
   saving.value = true

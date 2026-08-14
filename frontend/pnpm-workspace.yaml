@@ -1,0 +1,17 @@
+# pnpm v11 settings (the "pnpm" field in package.json is no longer read).
+#
+# Force patched versions of transitive build/test-time dependencies so the
+# audit stays clean. All are patch-level fixes within the same major:
+#   - brace-expansion >= 2.1.4  (js-beautify -> minimatch/glob, dev-only)
+#   - nanoid          >= 3.3.18 (postcss)
+#   - postcss         >= 8.5.23 (@vue/compiler-sfc, vite)
+overrides:
+  brace-expansion: ^2.1.4
+  nanoid: ^3.3.18
+  postcss: ^8.5.23
+
+# nanoid 3.3.18 is the patched release we must install, but it is younger
+# than the minimumReleaseAge maturity window. Exempt just that version so the
+# supply-chain policy stays active for everything else.
+minimumReleaseAgeExclude:
+  - nanoid@3.3.18
