@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useRemindersStore } from '@/stores/reminders'
 import { Button } from '@/components/ui/button'
@@ -9,6 +10,16 @@ import { timeAgo } from '@/utils/time'
 
 const emit = defineEmits<{ close: [] }>()
 const store = useRemindersStore()
+
+// Precompute the per-row display strings once so they are not re-derived on
+// every re-render (formatReminderTime was previously called twice per row).
+const openRows = computed(() =>
+  store.openReminders.map((r) => ({
+    ...r,
+    reminderText: formatReminderText(r),
+    reminderTime: formatReminderTime(r),
+  })),
+)
 </script>
 
 <template>
@@ -32,15 +43,15 @@ const store = useRemindersStore()
       </div>
       <div v-else class="divide-y">
         <div
-          v-for="reminder in store.openReminders"
+          v-for="reminder in openRows"
           :key="reminder.id"
           class="group relative px-3 py-2.5 hover:bg-muted/50 cursor-pointer transition-colors"
         >
           <div class="flex gap-2.5">
             <component :is="reminderIcon(reminder.type)" class="flex-shrink-0 h-4 w-4 mt-0.5 text-muted-foreground" />
             <div class="flex-1 min-w-0">
-              <p class="text-xs font-medium">{{ formatReminderText(reminder) }}</p>
-              <p v-if="formatReminderTime(reminder)" class="text-xs text-muted-foreground mt-0.5">{{ formatReminderTime(reminder) }}</p>
+              <p class="text-xs font-medium">{{ reminder.reminderText }}</p>
+              <p v-if="reminder.reminderTime" class="text-xs text-muted-foreground mt-0.5">{{ reminder.reminderTime }}</p>
               <p class="text-xs text-muted-foreground/70 mt-0.5">{{ timeAgo(reminder.created_at) }}</p>
             </div>
             <div class="flex items-start">

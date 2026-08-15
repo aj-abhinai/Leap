@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, shallowRef } from 'vue'
+import { onMounted, ref, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Archive, RotateCcw, BookOpen } from '@lucide/vue'
 import { formatCurrency } from '@/utils/format'
+import { errorMessage } from '@/utils/errors'
 
 interface Program {
   id: string
@@ -24,7 +25,8 @@ const newDesc = shallowRef('')
 const newPrice = shallowRef<number | undefined>(undefined)
 const newError = shallowRef('')
 const creating = shallowRef(false)
-const editing = shallowRef<{ id: string; name: string; desc: string; price: number } | null>(null)
+// Deep-reactive so v-model on nested fields (name/desc/price) updates the UI.
+const editing = ref<{ id: string; name: string; desc: string; price: number } | null>(null)
 
 onMounted(() => loadPrograms())
 
@@ -32,8 +34,8 @@ async function loadPrograms() {
   try {
     const res = await apiClient.get('/api/programs/manage')
     programs.value = res.data
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to load programs')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to load programs'))
   }
 }
 
@@ -59,8 +61,8 @@ async function createProgram() {
     newDesc.value = ''
     newPrice.value = undefined
     loadPrograms()
-  } catch (e: any) {
-    newError.value = e.message || 'Failed to create program'
+  } catch (e) {
+    newError.value = errorMessage(e, 'Failed to create program')
   } finally {
     creating.value = false
   }
@@ -85,8 +87,8 @@ async function saveEdit() {
     toast.success('Program updated')
     editing.value = null
     loadPrograms()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to update program')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to update program'))
   }
 }
 
@@ -95,8 +97,8 @@ async function archiveProgram(id: string) {
     await apiClient.delete(`/api/programs/${id}`)
     toast.success('Program archived')
     loadPrograms()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to archive program')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to archive program'))
   }
 }
 
@@ -105,8 +107,8 @@ async function restoreProgram(id: string) {
     await apiClient.post(`/api/programs/${id}/restore`)
     toast.success('Program restored')
     loadPrograms()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to restore program')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to restore program'))
   }
 }
 </script>

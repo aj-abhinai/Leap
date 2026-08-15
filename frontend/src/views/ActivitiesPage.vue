@@ -2,7 +2,6 @@
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useActivitiesStore, type ActivityListFilters } from '@/stores/activities'
 import { useSettingsStore } from '@/stores/settings'
-import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -29,6 +28,7 @@ import {
 import { reminderIcon, snoozePresets, snoozeRemindAt } from '@/utils/reminders'
 import { toast } from 'vue-sonner'
 import { CheckCircle2, Trash2, MoreHorizontal, AlarmClockPlus, ClipboardList } from '@lucide/vue'
+import { errorMessage } from '@/utils/errors'
 
 const store = useActivitiesStore()
 const settings = useSettingsStore()
@@ -155,8 +155,8 @@ async function doDelete() {
     selected.value = new Set()
     toast.success(ids.length > 1 ? `Deleted ${ids.length} activities` : 'Activity deleted')
     load()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to delete')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to delete'))
   }
 }
 
@@ -165,8 +165,8 @@ async function doMarkDone(item: { id: string; lead_id: string }) {
     await store.markDone(item.lead_id, item.id)
     toast.success('Activity completed')
     load()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to complete')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to complete'))
   }
 }
 
@@ -175,8 +175,8 @@ async function doSnooze(item: { id: string; lead_id: string }, minutes: number) 
     await store.snooze(item.lead_id, item.id, snoozeRemindAt(minutes))
     toast.success('Reminder snoozed')
     load()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to snooze')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to snooze'))
   }
 }
 
@@ -239,212 +239,210 @@ function typeClass(type: string): string {
 </script>
 
 <template>
-  <LayoutShell>
-    <div class="p-6">
-      <div class="mb-4">
-        <h1 class="text-2xl font-semibold tracking-tight">Activities</h1>
-        <p v-if="!store.loading && store.total" class="mt-0.5 text-sm text-muted-foreground">
-          {{ store.total }} total &middot; {{ selected.size }} selected
-        </p>
-      </div>
+  <div class="p-6">
+    <div class="mb-4">
+      <h1 class="text-2xl font-semibold tracking-tight">Activities</h1>
+      <p v-if="!store.loading && store.total" class="mt-0.5 text-sm text-muted-foreground">
+        {{ store.total }} total &middot; {{ selected.size }} selected
+      </p>
+    </div>
 
-      <div class="flex flex-col gap-4 lg:flex-row">
-        <!-- Views rail -->
-        <aside class="lg:w-52 shrink-0">
-          <nav class="flex flex-row flex-wrap gap-1 lg:flex-col">
-            <button
-              v-for="v in views"
-              :key="v.id"
-              type="button"
-              class="rounded-md px-3 py-1.5 text-left text-sm transition-colors"
-              :class="activeView.id === v.id ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-accent'"
-              @click="selectView(v)"
-            >
-              {{ v.label }}
-            </button>
-          </nav>
-        </aside>
-
-        <!-- Main column -->
-        <div class="min-w-0 flex-1 space-y-4">
-          <!-- Filter bar -->
-          <div class="flex flex-wrap items-center gap-2">
-            <select
-              v-model="typeFilter"
-              class="h-8 rounded-md border bg-background px-2 text-sm"
-            >
-              <option value="">All types</option>
-              <option v-for="t in settings.activityTypes" :key="t.id" :value="t.name">
-                {{ t.name }}
-              </option>
-            </select>
-            <Input
-              v-model="search"
-              class="h-8 w-48"
-              placeholder="Search lead, notes…"
-            />
-            <select
-              v-model="sortBy"
-              class="h-8 rounded-md border bg-background px-2 text-sm"
-            >
-              <option value="due_at">Sort: Due date</option>
-              <option value="type">Sort: Type</option>
-              <option value="created_at">Sort: Created</option>
-            </select>
-            <select
-              v-model="sortOrder"
-              class="h-8 rounded-md border bg-background px-2 text-sm"
-            >
-              <option value="desc">Newest first</option>
-              <option value="asc">Oldest first</option>
-            </select>
-          </div>
-
-          <!-- Mass action bar -->
-          <div v-if="selected.size > 0" class="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
-            <span class="text-sm text-muted-foreground">{{ selected.size }} selected</span>
-            <Button size="sm" variant="destructive" @click="confirmDeleteSelected">
-              <Trash2 class="mr-2 size-3.5" /> Delete
-            </Button>
-            <Button size="sm" variant="ghost" @click="selected = new Set()">Clear</Button>
-          </div>
-
-          <!-- Table -->
-          <div v-if="store.loading" class="space-y-3">
-            <Skeleton v-for="i in 6" :key="i" class="h-12 w-full" />
-          </div>
-
-          <div
-            v-else-if="store.items.length === 0"
-            class="flex flex-col items-center justify-center py-16 text-center"
+    <div class="flex flex-col gap-4 lg:flex-row">
+      <!-- Views rail -->
+      <aside class="lg:w-52 shrink-0">
+        <nav class="flex flex-row flex-wrap gap-1 lg:flex-col">
+          <button
+            v-for="v in views"
+            :key="v.id"
+            type="button"
+            class="rounded-md px-3 py-1.5 text-left text-sm transition-colors"
+            :class="activeView.id === v.id ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-accent'"
+            @click="selectView(v)"
           >
-            <ClipboardList class="size-10 text-muted-foreground/40 mb-3" />
-            <p class="text-sm font-medium text-muted-foreground">No activities here</p>
-            <p class="text-xs text-muted-foreground/60 mt-1">Try a different view or clear the filters</p>
-          </div>
+            {{ v.label }}
+          </button>
+        </nav>
+      </aside>
 
-          <Card v-else>
-            <CardContent class="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead class="w-10">
-                      <input
-                        type="checkbox"
-                        class="size-4"
-                        :checked="allSelected()"
-                        @change="toggleAll()"
-                      />
-                    </TableHead>
-                    <TableHead>Lead</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Due</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Quick reply</TableHead>
-                    <TableHead>Owner</TableHead>
-                    <TableHead class="w-10" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="item in store.items" :key="item.id" class="group">
-                    <TableCell>
-                      <input
-                        type="checkbox"
-                        class="size-4"
-                        :checked="isSelected(item.id)"
-                        @change="toggle(item.id)"
-                      />
-                    </TableCell>
-                    <TableCell class="font-medium">{{ item.lead_display_name }}</TableCell>
-                    <TableCell>
-                      <span class="inline-flex items-center gap-1.5 text-sm">
-                        <component :is="reminderIcon(item.type)" class="size-4 text-muted-foreground" />
-                        {{ typeClass(item.type) }}
-                      </span>
-                    </TableCell>
-                    <TableCell class="text-xs" :class="isOverdue(item) ? 'text-destructive' : 'text-muted-foreground'">
-                      {{ dueLabel(item) }}
-                    </TableCell>
-                    <TableCell>
-                      <Badge :variant="statusVariant(statusLabel(item))" class="text-xs">
-                        {{ statusLabel(item) }}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <span v-if="item.quick_reply_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
-                        {{ item.quick_reply_name }}
-                      </span>
-                      <span v-else class="text-xs text-muted-foreground/40">—</span>
-                    </TableCell>
-                    <TableCell class="text-xs text-muted-foreground">{{ item.user_name || 'System' }}</TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger as-child>
-                          <Button variant="ghost" size="icon-sm" class="size-8" aria-label="Activity actions">
-                            <MoreHorizontal class="size-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            v-if="!item.is_done && !item.is_cancelled"
-                            class="cursor-pointer"
-                            @click="doMarkDone(item)"
-                          >
-                            <CheckCircle2 class="size-3.5 mr-2" /> Mark done
-                          </DropdownMenuItem>
-                          <DropdownMenuSub v-if="item.remind_at && !item.is_done && !item.is_cancelled">
-                            <DropdownMenuSubTrigger>
-                              <AlarmClockPlus class="size-3.5 mr-2" /> Snooze
-                            </DropdownMenuSubTrigger>
-                            <DropdownMenuSubContent>
-                              <DropdownMenuItem
-                                v-for="preset in snoozePresets"
-                                :key="preset.minutes"
-                                class="cursor-pointer"
-                                @select="doSnooze(item, preset.minutes)"
-                              >
-                                {{ preset.label }}
-                              </DropdownMenuItem>
-                            </DropdownMenuSubContent>
-                          </DropdownMenuSub>
-                          <DropdownMenuItem class="text-destructive cursor-pointer" @click="confirmDeleteOne(item)">
-                            <Trash2 class="size-3.5 mr-2" /> Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+      <!-- Main column -->
+      <div class="min-w-0 flex-1 space-y-4">
+        <!-- Filter bar -->
+        <div class="flex flex-wrap items-center gap-2">
+          <select
+            v-model="typeFilter"
+            class="h-8 rounded-md border bg-background px-2 text-sm"
+          >
+            <option value="">All types</option>
+            <option v-for="t in settings.activityTypes" :key="t.id" :value="t.name">
+              {{ t.name }}
+            </option>
+          </select>
+          <Input
+            v-model="search"
+            class="h-8 w-48"
+            placeholder="Search lead, notes…"
+          />
+          <select
+            v-model="sortBy"
+            class="h-8 rounded-md border bg-background px-2 text-sm"
+          >
+            <option value="due_at">Sort: Due date</option>
+            <option value="type">Sort: Type</option>
+            <option value="created_at">Sort: Created</option>
+          </select>
+          <select
+            v-model="sortOrder"
+            class="h-8 rounded-md border bg-background px-2 text-sm"
+          >
+            <option value="desc">Newest first</option>
+            <option value="asc">Oldest first</option>
+          </select>
+        </div>
 
-          <!-- Pagination -->
-          <div v-if="store.total > 0" class="flex items-center justify-between">
-            <span class="text-sm text-muted-foreground">
-              Page {{ store.page }} of {{ totalPages }} &middot; {{ store.total }} total
-            </span>
-            <div class="flex items-center gap-1">
-              <Button variant="outline" size="sm" :disabled="store.page <= 1" @click="prevPage()">
-                Previous
-              </Button>
-              <Button variant="outline" size="sm" :disabled="store.page >= totalPages" @click="nextPage()">
-                Next
-              </Button>
-            </div>
+        <!-- Mass action bar -->
+        <div v-if="selected.size > 0" class="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
+          <span class="text-sm text-muted-foreground">{{ selected.size }} selected</span>
+          <Button size="sm" variant="destructive" @click="confirmDeleteSelected">
+            <Trash2 class="mr-2 size-3.5" /> Delete
+          </Button>
+          <Button size="sm" variant="ghost" @click="selected = new Set()">Clear</Button>
+        </div>
+
+        <!-- Table -->
+        <div v-if="store.loading" class="space-y-3">
+          <Skeleton v-for="i in 6" :key="i" class="h-12 w-full" />
+        </div>
+
+        <div
+          v-else-if="store.items.length === 0"
+          class="flex flex-col items-center justify-center py-16 text-center"
+        >
+          <ClipboardList class="size-10 text-muted-foreground/40 mb-3" />
+          <p class="text-sm font-medium text-muted-foreground">No activities here</p>
+          <p class="text-xs text-muted-foreground/60 mt-1">Try a different view or clear the filters</p>
+        </div>
+
+        <Card v-else>
+          <CardContent class="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-10">
+                    <input
+                      type="checkbox"
+                      class="size-4"
+                      :checked="allSelected()"
+                      @change="toggleAll()"
+                    />
+                  </TableHead>
+                  <TableHead>Lead</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Due</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Quick reply</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead class="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="item in store.items" :key="item.id" class="group">
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      class="size-4"
+                      :checked="isSelected(item.id)"
+                      @change="toggle(item.id)"
+                    />
+                  </TableCell>
+                  <TableCell class="font-medium">{{ item.lead_display_name }}</TableCell>
+                  <TableCell>
+                    <span class="inline-flex items-center gap-1.5 text-sm">
+                      <component :is="reminderIcon(item.type)" class="size-4 text-muted-foreground" />
+                      {{ typeClass(item.type) }}
+                    </span>
+                  </TableCell>
+                  <TableCell class="text-xs" :class="isOverdue(item) ? 'text-destructive' : 'text-muted-foreground'">
+                    {{ dueLabel(item) }}
+                  </TableCell>
+                  <TableCell>
+                    <Badge :variant="statusVariant(statusLabel(item))" class="text-xs">
+                      {{ statusLabel(item) }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <span v-if="item.quick_reply_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
+                      {{ item.quick_reply_name }}
+                    </span>
+                    <span v-else class="text-xs text-muted-foreground/40">—</span>
+                  </TableCell>
+                  <TableCell class="text-xs text-muted-foreground">{{ item.user_name || 'System' }}</TableCell>
+                  <TableCell>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger as-child>
+                        <Button variant="ghost" size="icon-sm" class="size-8" aria-label="Activity actions">
+                          <MoreHorizontal class="size-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          v-if="!item.is_done && !item.is_cancelled"
+                          class="cursor-pointer"
+                          @click="doMarkDone(item)"
+                        >
+                          <CheckCircle2 class="size-3.5 mr-2" /> Mark done
+                        </DropdownMenuItem>
+                        <DropdownMenuSub v-if="item.remind_at && !item.is_done && !item.is_cancelled">
+                          <DropdownMenuSubTrigger>
+                            <AlarmClockPlus class="size-3.5 mr-2" /> Snooze
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent>
+                            <DropdownMenuItem
+                              v-for="preset in snoozePresets"
+                              :key="preset.minutes"
+                              class="cursor-pointer"
+                              @select="doSnooze(item, preset.minutes)"
+                            >
+                              {{ preset.label }}
+                            </DropdownMenuItem>
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                        <DropdownMenuItem class="text-destructive cursor-pointer" @click="confirmDeleteOne(item)">
+                          <Trash2 class="size-3.5 mr-2" /> Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        <!-- Pagination -->
+        <div v-if="store.total > 0" class="flex items-center justify-between">
+          <span class="text-sm text-muted-foreground">
+            Page {{ store.page }} of {{ totalPages }} &middot; {{ store.total }} total
+          </span>
+          <div class="flex items-center gap-1">
+            <Button variant="outline" size="sm" :disabled="store.page <= 1" @click="prevPage()">
+              Previous
+            </Button>
+            <Button variant="outline" size="sm" :disabled="store.page >= totalPages" @click="nextPage()">
+              Next
+            </Button>
           </div>
         </div>
       </div>
-
-      <ConfirmDialog
-        :open="deleting"
-        title="Delete activities"
-        :description="`Delete ${deletingIds.length > 1 ? deletingIds.length + ' activities' : 'this activity'}? This cannot be undone.`"
-        confirm-text="Delete"
-        destructive
-        @update:open="(v) => { if (!v) deleting = false }"
-        @confirm="doDelete"
-      />
     </div>
-  </LayoutShell>
+
+    <ConfirmDialog
+      :open="deleting"
+      title="Delete activities"
+      :description="`Delete ${deletingIds.length > 1 ? deletingIds.length + ' activities' : 'this activity'}? This cannot be undone.`"
+      confirm-text="Delete"
+      destructive
+      @update:open="(v) => { if (!v) deleting = false }"
+      @confirm="doDelete"
+    />
+  </div>
 </template>

@@ -3,6 +3,7 @@ import { usePipelineStore } from '@/stores/pipeline'
 import { useLeadsStore } from '@/stores/leads'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
+import { errorMessage } from '@/utils/errors'
 
 export function useLeadPipeline() {
   const pipelineStore = usePipelineStore()
@@ -46,8 +47,8 @@ export function useLeadPipeline() {
         duration: 5000,
       })
       loadLeads()
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to move lead')
+    } catch (e) {
+      toast.error(errorMessage(e, 'Failed to move lead'))
       loadLeads()
     }
   }

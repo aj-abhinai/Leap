@@ -2,7 +2,8 @@ import { ref, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import type { Lead } from '@/stores/leads'
-import type { PrefillContact } from '@/components/leads/LeadForm.vue'
+import type { PrefillContact, LeadSaveBody } from '@/components/leads/LeadForm.vue'
+import { errorMessage } from '@/utils/errors'
 
 export function useLeadDrawer(onSaved: () => void) {
   const drawerOpen = shallowRef(false)
@@ -24,7 +25,7 @@ export function useLeadDrawer(onSaved: () => void) {
     drawerOpen.value = true
   }
 
-  async function handleSave(body: Record<string, any>) {
+  async function handleSave(body: LeadSaveBody) {
     saving.value = true
     try {
       if (editingLead.value) {
@@ -39,8 +40,8 @@ export function useLeadDrawer(onSaved: () => void) {
       }
       drawerOpen.value = false
       onSaved()
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to save lead')
+    } catch (e) {
+      toast.error(errorMessage(e, 'Failed to save lead'))
     } finally {
       saving.value = false
     }
@@ -52,8 +53,8 @@ export function useLeadDrawer(onSaved: () => void) {
       toast.success('Lead deleted')
       drawerOpen.value = false
       onSaved()
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to delete lead')
+    } catch (e) {
+      toast.error(errorMessage(e, 'Failed to delete lead'))
     }
   }
 

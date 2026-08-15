@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Reminder } from '@/stores/reminders'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,7 +12,7 @@ import { AlarmClockPlus, X } from '@lucide/vue'
 import { formatReminderText, reminderIcon, snoozePresets } from '@/utils/reminders'
 import { formatDateTime } from '@/utils/time'
 
-defineProps<{
+const props = defineProps<{
   reminder: Reminder
   overdue?: boolean
 }>()
@@ -20,6 +21,16 @@ const emit = defineEmits<{
   (e: 'snooze', minutes: number): void
   (e: 'dismiss'): void
 }>()
+
+const reminderText = computed(() => formatReminderText(props.reminder))
+const icon = computed(() => reminderIcon(props.reminder.type))
+const scheduledLabel = computed(() =>
+  props.reminder.scheduled_at ? formatDateTime(props.reminder.scheduled_at) : '',
+)
+const remindLabel = computed(() =>
+  props.reminder.remind_at ? formatDateTime(props.reminder.remind_at) : '',
+)
+const createdLabel = computed(() => formatDateTime(props.reminder.created_at))
 </script>
 
 <template>
@@ -28,23 +39,23 @@ const emit = defineEmits<{
       <div class="flex items-start justify-between gap-3">
         <div class="flex items-start gap-3">
           <component
-            :is="reminderIcon(reminder.type)"
+            :is="icon"
             class="size-5 mt-0.5 shrink-0"
             :class="overdue ? 'text-warning' : 'text-muted-foreground'"
           />
           <div>
             <div class="flex items-center gap-2">
-              <p class="font-medium text-sm">{{ formatReminderText(reminder) }}</p>
+              <p class="font-medium text-sm">{{ reminderText }}</p>
               <Badge v-if="overdue" variant="destructive" class="text-xs">Overdue</Badge>
             </div>
             <p v-if="reminder.description" class="text-xs text-muted-foreground mt-0.5">{{ reminder.description }}</p>
             <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-              <span v-if="reminder.scheduled_at">Scheduled: {{ formatDateTime(reminder.scheduled_at) }}</span>
-              <span v-if="reminder.remind_at" :class="overdue ? 'text-warning' : ''">
-                Reminder: {{ formatDateTime(reminder.remind_at) }}
+              <span v-if="scheduledLabel">Scheduled: {{ scheduledLabel }}</span>
+              <span v-if="remindLabel" :class="overdue ? 'text-warning' : ''">
+                Reminder: {{ remindLabel }}
               </span>
             </div>
-            <p class="text-xs text-muted-foreground mt-1">Created {{ formatDateTime(reminder.created_at) }}</p>
+            <p class="text-xs text-muted-foreground mt-1">Created {{ createdLabel }}</p>
           </div>
         </div>
         <div v-if="!reminder.is_done && !reminder.is_cancelled" class="flex items-center gap-1 shrink-0">

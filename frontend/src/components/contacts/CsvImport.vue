@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/table'
 import { Download, Upload } from '@lucide/vue'
 import { parseCSV } from '@/utils/csv'
+import { errorMessage } from '@/utils/errors'
 
 defineProps<{
   open: boolean
@@ -106,8 +107,8 @@ async function doImport() {
     if (res.data.imported > 0) {
       toast.success(`Imported ${res.data.imported} contacts`)
     }
-  } catch (e: any) {
-    error.value = e.message || 'Import failed'
+  } catch (e) {
+    error.value = errorMessage(e, 'Import failed')
   } finally {
     importing.value = false
   }
@@ -126,10 +127,14 @@ function close() {
   emit('close')
   reset()
 }
+
+function onOpenChange(val: boolean) {
+  if (!val) close()
+}
 </script>
 
 <template>
-  <Dialog :open="open" @update:open="(val) => !val && close()">
+  <Dialog :open="open" @update:open="onOpenChange">
     <DialogContent class="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>Import Contacts from CSV</DialogTitle>
@@ -145,8 +150,13 @@ function close() {
           </a>
         </Button>
         <div
-          class="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
+          role="button"
+          tabindex="0"
+          aria-label="Upload CSV file"
+          class="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors focus-visible:outline-2 focus-visible:outline-primary"
           @click="triggerUpload"
+          @keydown.enter.prevent="triggerUpload"
+          @keydown.space.prevent="triggerUpload"
           @dragover.prevent
           @drop.prevent="handleDrop"
         >

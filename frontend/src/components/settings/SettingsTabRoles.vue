@@ -25,6 +25,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Plus, Shield, ShieldCheck, Trash2, Pencil } from '@lucide/vue'
+import { errorMessage } from '@/utils/errors'
 
 interface Permission {
   id: string
@@ -68,8 +69,8 @@ async function loadRoles() {
   try {
     const res = await apiClient.get('/api/roles')
     roles.value = res.data
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to load roles')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to load roles'))
   } finally {
     loading.value = false
   }
@@ -80,8 +81,8 @@ async function loadPermissions() {
   try {
     const res = await apiClient.get('/api/permissions')
     allPermissions.value = res.data
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to load permissions')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to load permissions'))
   } finally {
     permsLoading.value = false
   }
@@ -161,8 +162,8 @@ async function saveRole() {
       toast.success('Role created')
     }
     modalOpen.value = false
-  } catch (e: any) {
-    formError.value = e.message || 'Failed to save role'
+  } catch (e) {
+    formError.value = errorMessage(e, 'Failed to save role')
   } finally {
     saving.value = false
     loadRoles()
@@ -179,8 +180,8 @@ async function deleteRole() {
   try {
     await apiClient.delete(`/api/roles/${role.id}`)
     toast.success('Role deleted')
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to delete role')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to delete role'))
   } finally {
     deletingRole.value = null
   }
@@ -194,8 +195,9 @@ function groupPermissions(perms: Permission[]): { group: string; perms: Permissi
   const groups = new Map<string, Permission[]>()
   for (const p of perms) {
     const group = p.name.includes(':') ? p.name.split(':')[0] : 'system'
-    if (!groups.has(group)) groups.set(group, [])
-    groups.get(group)!.push(p)
+    const bucket = groups.get(group) ?? []
+    bucket.push(p)
+    groups.set(group, bucket)
   }
   return [...groups.entries()].map(([group, perms]) => ({ group, perms }))
 }

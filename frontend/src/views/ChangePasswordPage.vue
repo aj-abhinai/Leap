@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Loader2, KeyRound } from '@lucide/vue'
 import { PASSWORD_POLICY_HINT, isStrongPassword } from '@/lib/validation'
+import { errorMessage } from '@/utils/errors'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -44,8 +45,8 @@ async function handleSubmit() {
     await auth.changePassword(currentPassword.value, newPassword.value)
     toast.success('Password changed')
     router.push({ name: 'Dashboard' })
-  } catch (e: any) {
-    error.value = e.message || 'Failed to change password'
+  } catch (e) {
+    error.value = errorMessage(e, 'Failed to change password')
   } finally {
     loading.value = false
   }

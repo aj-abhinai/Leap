@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, shallowRef } from 'vue'
+import { ref, shallowRef, watch } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from 'vue-sonner'
@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Plus, MoreHorizontal, Trash2 } from '@lucide/vue'
 import { formatDateTime } from '@/utils/time'
+import { errorMessage } from '@/utils/errors'
 
 interface Note {
   id: string
@@ -39,17 +40,23 @@ const saving = shallowRef(false)
 const noteToDelete = shallowRef<string | null>(null)
 const deleteDialogOpen = shallowRef(false)
 
-onMounted(() => fetchNotes())
+// Watch the prop: the component instance is reused when the route param
+// changes, so onMounted-only fetching would leave stale notes behind.
+let fetchSeq = 0
+watch(() => props.contactId, () => fetchNotes(), { immediate: true })
 
 async function fetchNotes() {
+  const seq = ++fetchSeq
   loading.value = true
   try {
     const res = await apiClient.get(`/api/contacts/${props.contactId}/notes`)
+    if (seq !== fetchSeq) return
     notes.value = res.data
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to load notes')
+  } catch (e) {
+    if (seq !== fetchSeq) return
+    toast.error(errorMessage(e, 'Failed to load notes'))
   } finally {
-    loading.value = false
+    if (seq === fetchSeq) loading.value = false
   }
 }
 
@@ -62,8 +69,8 @@ async function handleSave() {
     isAdding.value = false
     await fetchNotes()
     toast.success('Note added')
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to save note')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to save note'))
   } finally {
     saving.value = false
   }
@@ -82,8 +89,8 @@ async function handleDelete() {
     deleteDialogOpen.value = false
     await fetchNotes()
     toast.success('Note deleted')
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to delete note')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to delete note'))
   }
 }
 

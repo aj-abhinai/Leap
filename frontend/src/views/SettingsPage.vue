@@ -2,7 +2,6 @@
 import { shallowRef, computed, onMounted } from 'vue'
 import { useActivityStore } from '@/stores/activity'
 import { useRBACStore } from '@/stores/rbac'
-import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -83,154 +82,152 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
 </script>
 
 <template>
-  <LayoutShell>
-    <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
-      <div class="flex flex-col">
-        <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p class="mt-0.5 text-sm text-muted-foreground">Workspace configuration, access, and activity</p>
-      </div>
-      <Tabs defaultValue="general" class="w-full">
-        <TabsList class="mb-4 w-full justify-start overflow-x-auto rounded-lg border bg-muted/50 p-1">
-          <TabsTrigger value="general" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            <Settings class="size-4" />
-            <span class="hidden sm:inline">General</span>
-          </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('settings:manage')" value="users" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            <User class="size-4" />
-            <span class="hidden sm:inline">Users</span>
-          </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('settings:manage')" value="roles" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            <Shield class="size-4" />
-            <span class="hidden sm:inline">Roles</span>
-          </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('settings:manage')" value="pipelines" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            <Layers class="size-4" />
-            <span class="hidden sm:inline">Pipelines</span>
-          </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('settings:manage')" value="programs" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            <BookOpen class="size-4" />
-            <span class="hidden sm:inline">Programs</span>
-          </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('activity:read')" value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            <Activity class="size-4" />
-            <span class="hidden sm:inline">Activity</span>
-          </TabsTrigger>
-          <TabsTrigger v-show="canOrLoading('data:export')" value="export" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
-            <Download class="size-4" />
-            <span class="hidden sm:inline">Export</span>
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="general" class="mt-0">
-          <SettingsTabGeneral />
-        </TabsContent>
-
-        <TabsContent v-if="canOrLoading('settings:manage')" value="users" class="mt-0">
-          <SettingsTabUsers />
-        </TabsContent>
-
-        <TabsContent v-if="canOrLoading('settings:manage')" value="roles" class="mt-0">
-          <SettingsTabRoles />
-        </TabsContent>
-
-        <TabsContent v-if="canOrLoading('settings:manage')" value="pipelines" class="mt-0">
-          <SettingsTabPipelines />
-        </TabsContent>
-
-        <TabsContent v-if="canOrLoading('settings:manage')" value="programs" class="mt-0">
-          <SettingsTabPrograms />
-        </TabsContent>
-
-        <TabsContent v-if="canOrLoading('activity:read')" value="activity" class="mt-0">
-          <Card>
-            <CardHeader class="flex flex-row items-center justify-between">
-              <CardTitle>Activity Log</CardTitle>
-              <Button variant="outline" size="sm" @click="loadActivity()">
-                <RefreshCw class="mr-2 size-3.5" /> Refresh
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <div class="mb-4 flex flex-wrap gap-2">
-                <select
-                  v-model="activityAction"
-                  class="h-8 rounded-md border bg-background px-2 text-sm"
-                  @change="applyActivityFilters()"
-                >
-                  <option value="">All actions</option>
-                  <option value="create">Create</option>
-                  <option value="update">Update</option>
-                  <option value="delete">Delete</option>
-                  <option value="move_stage">Move stage</option>
-                </select>
-                <select
-                  v-model="activityResourceType"
-                  class="h-8 rounded-md border bg-background px-2 text-sm"
-                  @change="applyActivityFilters()"
-                >
-                  <option value="">All types</option>
-                  <option value="contact">Contact</option>
-                  <option value="lead">Lead</option>
-                  <option value="user">User</option>
-                  <option value="role">Role</option>
-                  <option value="pipeline">Pipeline</option>
-                  <option value="program">Program</option>
-                  <option value="contact_note">Note</option>
-                </select>
-              </div>
-              <div v-if="activity.entries.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
-                <Activity class="size-10 text-muted-foreground/40 mb-3" />
-                <p class="text-sm font-medium text-muted-foreground">No activity logged yet</p>
-                <p class="text-xs text-muted-foreground/60 mt-1">Actions in the CRM will appear here</p>
-              </div>
-              <Table v-else>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Action</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead class="text-right">Date</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="e in activity.entries" :key="e.id" class="group">
-                    <TableCell class="font-medium">{{ e.description }}</TableCell>
-                    <TableCell>{{ e.action }}</TableCell>
-                    <TableCell>
-                      <Badge :variant="resourceBadgeVariant(e.resource_type)" class="text-xs">
-                        {{ e.resource_type }}
-                      </Badge>
-                    </TableCell>
-                    <TableCell class="text-right text-xs text-muted-foreground tabular-nums">
-                      {{ formatDateTime(e.created_at) }}
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-              <div class="mt-4 flex items-center justify-between">
-                <span class="text-sm text-muted-foreground">
-                  Page {{ activityPage }} of {{ activityTotalPages }} &middot; {{ activity.total }} total
-                </span>
-                <div class="flex items-center gap-1">
-                  <Button variant="outline" size="sm" :disabled="activityPage <= 1" @click="activityPrevPage()">
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    :disabled="activityPage >= activityTotalPages"
-                    @click="activityNextPage()"
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent v-if="canOrLoading('data:export')" value="export" class="mt-0">
-          <SettingsTabExport />
-        </TabsContent>
-      </Tabs>
+  <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
+    <div class="flex flex-col">
+      <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
+      <p class="mt-0.5 text-sm text-muted-foreground">Workspace configuration, access, and activity</p>
     </div>
-  </LayoutShell>
+    <Tabs defaultValue="general" class="w-full">
+      <TabsList class="mb-4 w-full justify-start overflow-x-auto rounded-lg border bg-muted/50 p-1">
+        <TabsTrigger value="general" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <Settings class="size-4" />
+          <span class="hidden sm:inline">General</span>
+        </TabsTrigger>
+        <TabsTrigger v-show="canOrLoading('settings:manage')" value="users" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <User class="size-4" />
+          <span class="hidden sm:inline">Users</span>
+        </TabsTrigger>
+        <TabsTrigger v-show="canOrLoading('settings:manage')" value="roles" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <Shield class="size-4" />
+          <span class="hidden sm:inline">Roles</span>
+        </TabsTrigger>
+        <TabsTrigger v-show="canOrLoading('settings:manage')" value="pipelines" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <Layers class="size-4" />
+          <span class="hidden sm:inline">Pipelines</span>
+        </TabsTrigger>
+        <TabsTrigger v-show="canOrLoading('settings:manage')" value="programs" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <BookOpen class="size-4" />
+          <span class="hidden sm:inline">Programs</span>
+        </TabsTrigger>
+        <TabsTrigger v-show="canOrLoading('activity:read')" value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <Activity class="size-4" />
+          <span class="hidden sm:inline">Activity</span>
+        </TabsTrigger>
+        <TabsTrigger v-show="canOrLoading('data:export')" value="export" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+          <Download class="size-4" />
+          <span class="hidden sm:inline">Export</span>
+        </TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="general" class="mt-0">
+        <SettingsTabGeneral />
+      </TabsContent>
+
+      <TabsContent v-if="canOrLoading('settings:manage')" value="users" class="mt-0">
+        <SettingsTabUsers />
+      </TabsContent>
+
+      <TabsContent v-if="canOrLoading('settings:manage')" value="roles" class="mt-0">
+        <SettingsTabRoles />
+      </TabsContent>
+
+      <TabsContent v-if="canOrLoading('settings:manage')" value="pipelines" class="mt-0">
+        <SettingsTabPipelines />
+      </TabsContent>
+
+      <TabsContent v-if="canOrLoading('settings:manage')" value="programs" class="mt-0">
+        <SettingsTabPrograms />
+      </TabsContent>
+
+      <TabsContent v-if="canOrLoading('activity:read')" value="activity" class="mt-0">
+        <Card>
+          <CardHeader class="flex flex-row items-center justify-between">
+            <CardTitle>Activity Log</CardTitle>
+            <Button variant="outline" size="sm" @click="loadActivity()">
+              <RefreshCw class="mr-2 size-3.5" /> Refresh
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div class="mb-4 flex flex-wrap gap-2">
+              <select
+                v-model="activityAction"
+                class="h-8 rounded-md border bg-background px-2 text-sm"
+                @change="applyActivityFilters()"
+              >
+                <option value="">All actions</option>
+                <option value="create">Create</option>
+                <option value="update">Update</option>
+                <option value="delete">Delete</option>
+                <option value="move_stage">Move stage</option>
+              </select>
+              <select
+                v-model="activityResourceType"
+                class="h-8 rounded-md border bg-background px-2 text-sm"
+                @change="applyActivityFilters()"
+              >
+                <option value="">All types</option>
+                <option value="contact">Contact</option>
+                <option value="lead">Lead</option>
+                <option value="user">User</option>
+                <option value="role">Role</option>
+                <option value="pipeline">Pipeline</option>
+                <option value="program">Program</option>
+                <option value="contact_note">Note</option>
+              </select>
+            </div>
+            <div v-if="activity.entries.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
+              <Activity class="size-10 text-muted-foreground/40 mb-3" />
+              <p class="text-sm font-medium text-muted-foreground">No activity logged yet</p>
+              <p class="text-xs text-muted-foreground/60 mt-1">Actions in the CRM will appear here</p>
+            </div>
+            <Table v-else>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Description</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead class="text-right">Date</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="e in activity.entries" :key="e.id" class="group">
+                  <TableCell class="font-medium">{{ e.description }}</TableCell>
+                  <TableCell>{{ e.action }}</TableCell>
+                  <TableCell>
+                    <Badge :variant="resourceBadgeVariant(e.resource_type)" class="text-xs">
+                      {{ e.resource_type }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="text-right text-xs text-muted-foreground tabular-nums">
+                    {{ formatDateTime(e.created_at) }}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+            <div class="mt-4 flex items-center justify-between">
+              <span class="text-sm text-muted-foreground">
+                Page {{ activityPage }} of {{ activityTotalPages }} &middot; {{ activity.total }} total
+              </span>
+              <div class="flex items-center gap-1">
+                <Button variant="outline" size="sm" :disabled="activityPage <= 1" @click="activityPrevPage()">
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  :disabled="activityPage >= activityTotalPages"
+                  @click="activityNextPage()"
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+      <TabsContent v-if="canOrLoading('data:export')" value="export" class="mt-0">
+        <SettingsTabExport />
+      </TabsContent>
+    </Tabs>
+  </div>
 </template>

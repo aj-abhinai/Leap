@@ -3,12 +3,12 @@ import { shallowRef } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from 'vue-sonner'
 import { profileSchema } from '@/lib/validation'
-import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Loader2, User } from '@lucide/vue'
+import { errorMessage } from '@/utils/errors'
 
 const auth = useAuthStore()
 
@@ -32,8 +32,8 @@ async function handleSave() {
   try {
     await auth.updateProfile(result.data.name, result.data.phone || '')
     toast.success('Profile updated')
-  } catch (e: any) {
-    error.value = e.message || 'Failed to save profile'
+  } catch (e) {
+    error.value = errorMessage(e, 'Failed to save profile')
   } finally {
     saving.value = false
   }
@@ -41,41 +41,39 @@ async function handleSave() {
 </script>
 
 <template>
-  <LayoutShell>
-    <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
-      <Card class="mx-auto w-full max-w-lg">
-        <CardHeader>
-          <div class="flex items-center gap-2">
-            <div class="flex size-8 items-center justify-center rounded-md bg-muted">
-              <User class="size-4" />
-            </div>
-            <CardTitle>Profile</CardTitle>
+  <div class="flex flex-1 flex-col gap-4 p-6 pt-2">
+    <Card class="mx-auto w-full max-w-lg">
+      <CardHeader>
+        <div class="flex items-center gap-2">
+          <div class="flex size-8 items-center justify-center rounded-md bg-muted">
+            <User class="size-4" />
           </div>
-        </CardHeader>
-        <CardContent>
-          <form @submit.prevent="handleSave" class="space-y-4">
-            <div class="space-y-2">
-              <Label for="pname">Name</Label>
-              <Input id="pname" v-model="formName" placeholder="Your name" />
-            </div>
-            <div class="space-y-2">
-              <Label for="pemail">Email</Label>
-              <Input id="pemail" :model-value="formEmail" disabled class="opacity-60" />
-            </div>
-            <div class="space-y-2">
-              <Label for="pphone">Phone</Label>
-              <Input id="pphone" v-model="formPhone" placeholder="Phone number" />
-            </div>
-            <div v-if="error" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{{ error }}</div>
-            <div class="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-end">
-              <Button type="submit" :disabled="saving" class="w-full sm:w-auto">
-                <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-                Save
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  </LayoutShell>
+          <CardTitle>Profile</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <form @submit.prevent="handleSave" class="space-y-4">
+          <div class="space-y-2">
+            <Label for="pname">Name</Label>
+            <Input id="pname" v-model="formName" placeholder="Your name" />
+          </div>
+          <div class="space-y-2">
+            <Label for="pemail">Email</Label>
+            <Input id="pemail" :model-value="formEmail" disabled class="opacity-60" />
+          </div>
+          <div class="space-y-2">
+            <Label for="pphone">Phone</Label>
+            <Input id="pphone" v-model="formPhone" placeholder="Phone number" />
+          </div>
+          <div v-if="error" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{{ error }}</div>
+          <div class="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-end">
+            <Button type="submit" :disabled="saving" class="w-full sm:w-auto">
+              <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
+              Save
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  </div>
 </template>

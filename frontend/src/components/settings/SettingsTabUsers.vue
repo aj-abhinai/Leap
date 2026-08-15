@@ -18,6 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Plus, ShieldCheck, Trash2, User } from '@lucide/vue'
 import { PASSWORD_POLICY_HINT, isStrongPassword } from '@/lib/validation'
+import { errorMessage } from '@/utils/errors'
 
 interface Role {
   id: string
@@ -70,8 +71,8 @@ async function loadUsers() {
   try {
     const res = await apiClient.get('/api/users')
     users.value = res.data
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to load users')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to load users'))
   }
 }
 
@@ -79,8 +80,8 @@ async function loadRoles() {
   try {
     const res = await apiClient.get('/api/roles')
     roles.value = res.data
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to load roles')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to load roles'))
   }
 }
 
@@ -106,8 +107,8 @@ async function createUser() {
     newUserEmail.value = ''
     newUserPassword.value = ''
     loadUsers()
-  } catch (e: any) {
-    newUserError.value = e.message || 'Failed to create user'
+  } catch (e) {
+    newUserError.value = errorMessage(e, 'Failed to create user')
   } finally {
     creatingUser.value = false
   }
@@ -118,8 +119,8 @@ async function deleteUser(userId: string) {
     await apiClient.delete(`/api/users/${userId}`)
     toast.success('User deleted')
     loadUsers()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to delete user')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to delete user'))
   }
 }
 
@@ -128,13 +129,21 @@ async function setRole(userId: string, roleId: string) {
     await apiClient.put(`/api/users/${userId}/role`, { role_id: roleId })
     toast.success('Role updated')
     loadUsers()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to update role')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to update role'))
   }
 }
 
 function isProtectedUser(u: User): boolean {
   return !!u.protected || auth.user?.id === u.id
+}
+
+// Precomputed per render so the row template calls the check once instead of
+// twice, and the select handler stays typed.
+const protectedIds = computed(() => new Set(users.value.filter(isProtectedUser).map((u) => u.id)))
+
+function onRoleChange(u: User, event: Event) {
+  setRole(u.id, (event.target as HTMLSelectElement).value)
 }
 </script>
 
@@ -192,8 +201,8 @@ function isProtectedUser(u: User): boolean {
                   <select
                     class="h-8 w-40 rounded-md border bg-background px-2 text-sm"
                     :value="u.role?.id ?? ''"
-                    :disabled="isProtectedUser(u)"
-                    @change="setRole(u.id, ($event.target as HTMLSelectElement).value)"
+                    :disabled="protectedIds.has(u.id)"
+                    @change="onRoleChange(u, $event)"
                   >
                     <option value="">No role</option>
                     <option v-for="r in roleOptionsFor(u)" :key="r.id" :value="r.id">{{ r.name }}</option>
@@ -206,7 +215,7 @@ function isProtectedUser(u: User): boolean {
                 </div>
               </TableCell>
               <TableCell>
-                <div v-if="isProtectedUser(u)" class="flex items-center gap-1.5">
+                <div v-if="protectedIds.has(u.id)" class="flex items-center gap-1.5">
                   <ShieldCheck class="size-3.5 text-muted-foreground" />
                   <span class="text-xs text-muted-foreground">Protected</span>
                 </div>

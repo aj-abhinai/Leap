@@ -3,7 +3,7 @@
 // from a potentially large list (users, sources, service accounts, ...). Built
 // on Popover + a filtered list so it degrades gracefully and stays keyboard
 // navigable. v-model binds the selected item's `value` (string).
-import { ref, computed, watch, nextTick } from "vue"
+import { ref, computed, watch, nextTick, useId } from "vue"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Check, ChevronsUpDown, Search } from "@lucide/vue"
 import { cn } from "@/lib/utils"
@@ -33,6 +33,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{ "update:modelValue": [value: string] }>()
 
+const listboxId = useId()
+
 const open = ref(false)
 const search = ref("")
 const highlighted = ref(0)
@@ -52,6 +54,11 @@ const filtered = computed(() => {
 const selectedLabel = computed(
   () => props.items.find((i) => i.value === props.modelValue)?.label ?? "",
 )
+
+const activeOptionId = computed(() => {
+  const item = filtered.value[highlighted.value]
+  return item ? `${listboxId}-${highlighted.value}` : undefined
+})
 
 watch(open, (isOpen) => {
   if (isOpen) {
@@ -100,7 +107,7 @@ function onKeydown(e: KeyboardEvent) {
     <PopoverTrigger as-child>
       <button
         type="button"
-        role="combobox"
+        :aria-haspopup="'listbox'"
         :aria-expanded="open"
         :disabled="disabled"
         :class="cn(
@@ -121,12 +128,16 @@ function onKeydown(e: KeyboardEvent) {
         <input
           ref="searchInput"
           v-model="search"
+          role="combobox"
+          :aria-expanded="open"
+          :aria-controls="open ? listboxId : undefined"
+          :aria-activedescendant="open ? activeOptionId : undefined"
           :placeholder="searchPlaceholder"
           class="flex h-9 w-full bg-transparent py-2 text-base outline-none placeholder:text-muted-foreground"
           @keydown="onKeydown"
         />
       </div>
-      <div ref="listEl" class="max-h-[300px] overflow-y-auto p-1">
+      <div ref="listEl" role="listbox" :id="listboxId" class="max-h-[300px] overflow-y-auto p-1">
         <div
           v-if="filtered.length === 0"
           class="py-6 text-center text-sm text-muted-foreground"
@@ -138,6 +149,9 @@ function onKeydown(e: KeyboardEvent) {
           :key="item.value"
           data-item
           type="button"
+          role="option"
+          :id="`${listboxId}-${idx}`"
+          :aria-selected="item.value === modelValue"
           :class="cn(
             'flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
             idx === highlighted && 'bg-accent text-accent-foreground',

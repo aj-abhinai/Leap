@@ -21,11 +21,36 @@ const props = defineProps<{
   saving?: boolean
 }>()
 
+export interface ContactSaveBody {
+  name: string
+  nickname: string
+  location: string
+  age: number | null
+  tag_ids: string[]
+  status_id: string
+  phones: { value: string; is_primary: boolean }[]
+  emails: { value: string; is_primary: boolean }[]
+  phone: string
+  email: string
+}
+
 const emit = defineEmits<{
-  save: [body: Record<string, any>]
+  save: [body: ContactSaveBody]
 }>()
 
 const settings = useSettingsStore()
+
+// Stable per-row keys: the phone/email arrays are spliced and reordered, so
+// index keys would reuse the wrong DOM rows (focus jump, stale bindings).
+interface Entry {
+  key: number
+  value: string
+  is_primary: boolean
+}
+let nextKey = 0
+function mkEntry(value: string, is_primary: boolean): Entry {
+  return { key: nextKey++, value, is_primary }
+}
 
 const formName = shallowRef(props.editingContact?.name || '')
 const formNickname = shallowRef(props.editingContact?.nickname || '')
@@ -33,11 +58,11 @@ const formLocation = shallowRef(props.editingContact?.location || '')
 const formAge = shallowRef<number | undefined>(props.editingContact?.age)
 const formStatusId = shallowRef(props.editingContact?.status?.id || '__none__')
 const selectedTags = ref<string[]>(props.editingContact?.tags?.map(t => t.id) || [])
-const phones = ref<{ value: string; is_primary: boolean }[]>(
-  (props.editingContact?.phones?.length ? props.editingContact.phones : props.editingContact?.phone ? [{ value: props.editingContact.phone, is_primary: true }] : [{ value: '', is_primary: true }])
+const phones = ref<Entry[]>(
+  (props.editingContact?.phones?.length ? props.editingContact.phones : props.editingContact?.phone ? [{ value: props.editingContact.phone, is_primary: true }] : [{ value: '', is_primary: true }]).map(p => mkEntry(p.value, p.is_primary)),
 )
-const emails = ref<{ value: string; is_primary: boolean }[]>(
-  (props.editingContact?.emails?.length ? props.editingContact.emails : props.editingContact?.email ? [{ value: props.editingContact.email, is_primary: true }] : [{ value: '', is_primary: true }])
+const emails = ref<Entry[]>(
+  (props.editingContact?.emails?.length ? props.editingContact.emails : props.editingContact?.email ? [{ value: props.editingContact.email, is_primary: true }] : [{ value: '', is_primary: true }]).map(e => mkEntry(e.value, e.is_primary)),
 )
 const formError = shallowRef('')
 
@@ -52,21 +77,21 @@ watch(() => props.editingContact, (c) => {
   formAge.value = c?.age
   formStatusId.value = c?.status?.id || '__none__'
   selectedTags.value = c?.tags?.map(t => t.id) || []
-  phones.value = c?.phones?.length
+  phones.value = (c?.phones?.length
     ? c.phones.map(p => ({ value: p.value, is_primary: p.is_primary }))
     : c?.phone
       ? [{ value: c.phone, is_primary: true }]
-      : [{ value: '', is_primary: true }]
-  emails.value = c?.emails?.length
+      : [{ value: '', is_primary: true }]).map(p => mkEntry(p.value, p.is_primary))
+  emails.value = (c?.emails?.length
     ? c.emails.map(e => ({ value: e.value, is_primary: e.is_primary }))
     : c?.email
       ? [{ value: c.email, is_primary: true }]
-      : [{ value: '', is_primary: true }]
+      : [{ value: '', is_primary: true }]).map(e => mkEntry(e.value, e.is_primary))
   formError.value = ''
 })
 
-function addPhone() { phones.value.push({ value: '', is_primary: false }) }
-function addEmail() { emails.value.push({ value: '', is_primary: false }) }
+function addPhone() { phones.value.push(mkEntry('', false)) }
+function addEmail() { emails.value.push(mkEntry('', false)) }
 
 function removePhone(idx: number) {
   const removed = phones.value.splice(idx, 1)[0]
@@ -149,7 +174,7 @@ async function handleSave() {
     <div class="space-y-2">
       <Label>Phones</Label>
       <div class="space-y-1.5">
-        <div v-for="(p, idx) in phones" :key="idx" class="flex items-center gap-2">
+        <div v-for="(p, idx) in phones" :key="p.key" class="flex items-center gap-2">
           <Input v-model="p.value" type="tel" :placeholder="`Phone ${idx + 1}`" />
           <Button
             variant="ghost"
@@ -173,7 +198,7 @@ async function handleSave() {
     <div class="space-y-2">
       <Label>Emails</Label>
       <div class="space-y-1.5">
-        <div v-for="(e, idx) in emails" :key="idx" class="flex items-center gap-2">
+        <div v-for="(e, idx) in emails" :key="e.key" class="flex items-center gap-2">
           <Input v-model="e.value" type="email" :placeholder="`Email ${idx + 1}`" />
           <Button
             variant="ghost"

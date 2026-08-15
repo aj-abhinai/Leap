@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, shallowRef } from 'vue'
+import { shallowRef, watch } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { ChevronRight, FolderKanban, Trophy, XCircle } from '@lucide/vue'
 import { formatCurrency } from '@/utils/format'
 import { formatDate } from '@/utils/time'
+import { errorMessage } from '@/utils/errors'
 
 interface LeadInfo {
   id: string
@@ -29,19 +30,25 @@ const leads = shallowRef<LeadInfo[]>([])
 const loading = shallowRef(false)
 const loadError = shallowRef('')
 
-onMounted(() => fetchLeads())
+// Watch the prop: the component instance is reused when the route param
+// changes, so onMounted-only fetching would leave stale leads behind.
+let fetchSeq = 0
+watch(() => props.contactId, () => fetchLeads(), { immediate: true })
 
 async function fetchLeads() {
+  const seq = ++fetchSeq
   loading.value = true
   loadError.value = ''
   try {
     const res = await apiClient.get(`/api/leads?contact_id=${props.contactId}`)
+    if (seq !== fetchSeq) return
     leads.value = res.data
-  } catch (e: any) {
+  } catch (e) {
+    if (seq !== fetchSeq) return
     leads.value = []
-    loadError.value = e.message || 'Failed to load leads'
+    loadError.value = errorMessage(e, 'Failed to load leads')
   } finally {
-    loading.value = false
+    if (seq === fetchSeq) loading.value = false
   }
 }
 </script>

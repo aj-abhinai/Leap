@@ -6,6 +6,7 @@ import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Download } from '@lucide/vue'
+import { errorMessage } from '@/utils/errors'
 
 const rbac = useRBACStore()
 
@@ -40,8 +41,8 @@ async function runExport() {
       await download(entity.value)
     }
     toast.success('Export started — check your downloads')
-  } catch (e: any) {
-    toast.error(e.message || 'Export failed')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Export failed'))
   } finally {
     exporting.value = false
   }

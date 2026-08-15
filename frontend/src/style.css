@@ -208,10 +208,20 @@
 /* Motion: dialogs, sheets, and menus animate via tw-animate-css utilities.
    Dead keyframes removed; reduced motion below keeps functional signals alive. */
 
-/* Page arrival: a short cross-fade on route change orients without performing */
-.page-enter-active,
+/* Page cross-fade: only the page content inside LayoutShell animates; the
+   leaving page is pulled out of flow so the two pages overlap instead of
+   stacking (no height jump). Default transition mode — out-in is avoided
+   because it stalls with lazily-loaded route components. */
+.page-enter-active {
+  transition: opacity 0.22s ease;
+}
+
 .page-leave-active {
-  transition: opacity 0.15s ease;
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
 }
 
 .page-enter-from,

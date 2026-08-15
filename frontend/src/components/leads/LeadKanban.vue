@@ -39,6 +39,7 @@ import {
 } from '@lucide/vue'
 import { formatCurrency, formatContactDetail } from '@/utils/format'
 import { timeAgo } from '@/utils/time'
+import { errorMessage } from '@/utils/errors'
 
 const rbac = useRBACStore()
 
@@ -159,8 +160,8 @@ async function addStage() {
     newStageName.value = ''
     addingStage.value = false
     emit('stageAdded')
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to add stage')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to add stage'))
   }
 }
 
@@ -258,9 +259,16 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
     }
   }
 }
-
 function isNextTaskOverdue(lead: Lead): boolean {
   return !!lead.next_task_at && new Date(lead.next_task_at).getTime() < Date.now()
+}
+
+function formatNextTaskAt(lead: Lead): string {
+  return new Date(lead.next_task_at!).toLocaleString([], {
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 function showField(key: string): boolean {
@@ -342,7 +350,7 @@ function showField(key: string): boolean {
             :animation="200"
             :sort="false"
             :disabled="!rbac.can('lead:write')"
-            @change="(evt: any) => handleDragChange(evt, col.id)"
+            @change="(evt: { added?: { element: Lead } }) => handleDragChange(evt, col.id)"
           >
             <template #item="{ element: lead }">
               <div
@@ -382,15 +390,15 @@ function showField(key: string): boolean {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" class="w-40">
-                        <DropdownMenuItem
-                          v-if="rbac.can('lead:write')"
-                          v-for="s in moveTargets[col.id]"
-                          :key="s.id"
-                          @click.stop="emit('moveStage', lead.id!, s.id)"
-                        >
-                          <ChevronRight class="mr-2 size-3.5" />
-                          Move to {{ s.name }}
-                        </DropdownMenuItem>
+                        <template v-for="s in moveTargets[col.id]" :key="s.id">
+                          <DropdownMenuItem
+                            v-if="rbac.can('lead:write')"
+                            @click.stop="emit('moveStage', lead.id!, s.id)"
+                          >
+                            <ChevronRight class="mr-2 size-3.5" />
+                            Move to {{ s.name }}
+                          </DropdownMenuItem>
+                        </template>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -426,7 +434,7 @@ function showField(key: string): boolean {
                     <span class="truncate">
                       Next: {{ lead.next_task_type }}
                       <template v-if="lead.next_task_at">
-                        · {{ new Date(lead.next_task_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) }}
+                        · {{ formatNextTaskAt(lead) }}
                       </template>
                     </span>
                   </div>

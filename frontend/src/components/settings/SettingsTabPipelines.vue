@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ArrowDown, ArrowUp, Check, Layers, Plus, Trash2, Pencil, X } from '@lucide/vue'
+import { errorMessage } from '@/utils/errors'
 
 interface Stage {
   id: string
@@ -36,8 +37,8 @@ async function loadPipelines() {
   try {
     const res = await apiClient.get('/api/pipelines')
     pipelines.value = res.data
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to load pipelines')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to load pipelines'))
   }
 }
 
@@ -54,8 +55,8 @@ async function createPipeline() {
     newPipelineName.value = ''
     newPipelineDesc.value = ''
     loadPipelines()
-  } catch (e: any) {
-    newPipelineError.value = e.message || 'Failed to create pipeline'
+  } catch (e) {
+    newPipelineError.value = errorMessage(e, 'Failed to create pipeline')
   } finally {
     creatingPipeline.value = false
   }
@@ -66,8 +67,8 @@ async function deletePipeline(pipelineId: string) {
     await apiClient.delete(`/api/pipelines/${pipelineId}`)
     toast.success('Pipeline deleted')
     loadPipelines()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to delete pipeline')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to delete pipeline'))
   }
 }
 
@@ -79,8 +80,8 @@ async function createStage(pipelineId: string) {
     toast.success('Stage added')
     newStageNames.value[pipelineId] = ''
     loadPipelines()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to add stage')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to add stage'))
   }
 }
 
@@ -105,8 +106,8 @@ async function renameStage(stageId: string) {
     toast.success('Stage renamed')
     cancelEditStage()
     loadPipelines()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to rename stage')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to rename stage'))
   }
 }
 
@@ -114,8 +115,8 @@ async function reorderStage(stageId: string, order: number) {
   try {
     await apiClient.patch(`/api/stages/${stageId}`, { order })
     loadPipelines()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to reorder stage')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to reorder stage'))
   }
 }
 
@@ -124,8 +125,8 @@ async function deleteStage(stageId: string) {
     await apiClient.delete(`/api/stages/${stageId}`)
     toast.success('Stage deleted')
     loadPipelines()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to delete stage')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to delete stage'))
   }
 }
 </script>

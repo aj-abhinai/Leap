@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Loader2, LogIn } from '@lucide/vue'
+import { errorMessage } from '@/utils/errors'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -33,8 +34,8 @@ async function handleSubmit() {
     } else {
       router.push({ name: 'Dashboard' })
     }
-  } catch (e: any) {
-    error.value = e.message || 'Login failed'
+  } catch (e) {
+    error.value = errorMessage(e, 'Login failed')
   } finally {
     loading.value = false
   }

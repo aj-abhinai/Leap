@@ -57,8 +57,19 @@ const props = defineProps<{
   saving?: boolean
 }>()
 
+export interface LeadSaveBody {
+  nickname: string
+  pipeline_id: string
+  stage_id: string
+  notes: string
+  program_id: string
+  lost_reason?: string
+  contact_id?: string
+  new_contact?: { name: string; phone: string; email: string }
+}
+
 const emit = defineEmits<{
-  save: [body: Record<string, any>]
+  save: [body: LeadSaveBody]
   delete: [leadId: string]
 }>()
 
@@ -175,7 +186,7 @@ onMounted(async () => {
 
 async function handleSave() {
   formError.value = ''
-  const body: Record<string, any> = {
+  const body: LeadSaveBody = {
     nickname: formNickname.value,
     pipeline_id: props.pipelineId,
     stage_id: formStageId.value,

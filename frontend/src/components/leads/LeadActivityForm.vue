@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { errorMessage } from '@/utils/errors'
 
 const props = defineProps<{ leadId: string }>()
 
@@ -49,8 +50,9 @@ const groupedChips = computed(() => {
   const groups = new Map<string, typeof chips.value>()
   for (const chip of chips.value) {
     const key = chip.group_name || 'Quick reply'
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(chip)
+    const bucket = groups.get(key) ?? []
+    bucket.push(chip)
+    groups.set(key, bucket)
   }
   return [...groups.entries()].map(([group, items]) => ({
     group,
@@ -147,8 +149,8 @@ async function handleSave() {
     if (wasCloseLost) {
       emit('closeLost')
     }
-  } catch (e: any) {
-    error.value = e.message || 'Failed to save'
+  } catch (e) {
+    error.value = errorMessage(e, 'Failed to save')
   } finally {
     saving.value = false
   }

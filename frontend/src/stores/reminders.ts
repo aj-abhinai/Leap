@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
+import { errorMessage } from '@/utils/errors'
 
 export interface Reminder {
   id: string
@@ -48,8 +49,8 @@ export const useRemindersStore = defineStore('reminders', () => {
     try {
       await apiClient.patch(`/api/leads/${reminder.lead_id}/reminders/${reminder.id}`)
       toast.success('Reminder dismissed')
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to dismiss reminder')
+    } catch (e) {
+      toast.error(errorMessage(e, 'Failed to dismiss reminder'))
     } finally {
       await fetchReminders()
     }
@@ -61,8 +62,8 @@ export const useRemindersStore = defineStore('reminders', () => {
         remind_at: remindAt,
       })
       toast.success('Reminder snoozed')
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to snooze reminder')
+    } catch (e) {
+      toast.error(errorMessage(e, 'Failed to snooze reminder'))
     } finally {
       await fetchReminders()
     }

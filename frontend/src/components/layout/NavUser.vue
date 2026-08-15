@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { ChevronDown, LogOut, User } from '@lucide/vue'
 import {
   Avatar,
@@ -26,6 +27,8 @@ const auth = useAuthStore()
 const rbac = useRBACStore()
 const router = useRouter()
 
+const avatarInitial = computed(() => auth.user?.name?.charAt(0)?.toUpperCase() || 'U')
+
 async function handleLogout() {
   await auth.logout()
   rbac.clear()
@@ -46,7 +49,7 @@ async function handleLogout() {
               <Avatar class="size-8 rounded-md group-data-[collapsible=icon]:size-5">
                 <AvatarImage :src="auth.user?.avatar_url || ''" />
                 <AvatarFallback class="rounded-md">
-                  {{ auth.user?.name?.charAt(0)?.toUpperCase() || 'U' }}
+                  {{ avatarInitial }}
                 </AvatarFallback>
               </Avatar>
               <span class="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-sidebar bg-success ring-2 ring-sidebar group-data-[collapsible=icon]:hidden" />

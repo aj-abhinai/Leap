@@ -24,6 +24,7 @@ import {
 import { reminderIcon, snoozePresets } from '@/utils/reminders'
 import { formatDateTime, toLocalDateInput, toLocalTimeInput } from '@/utils/time'
 import { Badge } from '@/components/ui/badge'
+import { errorMessage } from '@/utils/errors'
 
 export interface ActivityRowActivity {
   id: string
@@ -116,8 +117,8 @@ async function saveEdit() {
     toast.success('Activity updated')
     cancelEdit()
     emit('changed')
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to update')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to update'))
   } finally {
     savingEdit.value = false
   }
@@ -136,8 +137,9 @@ const groupedQuickReplies = computed(() => {
   const groups = new Map<string, QuickReplyChip[]>()
   for (const s of props.quickReplies) {
     const key = s.group_name || 'Quick reply'
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(s)
+    const bucket = groups.get(key) ?? []
+    bucket.push(s)
+    groups.set(key, bucket)
   }
   return [...groups.entries()].map(([group, items]) => ({
     group,
@@ -190,8 +192,8 @@ async function saveReschedule() {
       cancelReschedule()
       emit('changed')
       return
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to reschedule')
+    } catch (e) {
+      toast.error(errorMessage(e, 'Failed to reschedule'))
       return
     } finally {
       savingReschedule.value = false
@@ -211,8 +213,8 @@ async function saveReschedule() {
     if (behavior === 'close_lost') {
       emit('closeLost')
     }
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to complete')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to complete'))
   } finally {
     savingReschedule.value = false
   }

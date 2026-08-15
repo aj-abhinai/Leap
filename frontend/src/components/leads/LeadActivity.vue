@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { useSettingsStore } from '@/stores/settings'
 import { toast } from 'vue-sonner'
@@ -14,6 +14,7 @@ import { reminderIcon, snoozeRemindAt } from '@/utils/reminders'
 import { formatDateTime } from '@/utils/time'
 import { Badge } from '@/components/ui/badge'
 import TaskRow, { type ActivityRowActivity } from '@/components/leads/TaskRow.vue'
+import { errorMessage } from '@/utils/errors'
 
 interface Activity extends ActivityRowActivity {}
 
@@ -30,21 +31,28 @@ const loadError = shallowRef('')
 const settings = useSettingsStore()
 
 onMounted(() => {
-  fetchActivities()
   if (settings.activityTypes.length === 0) settings.fetchTags()
 })
 
+// Watch the prop: the instance may be reused with a different lead id (the
+// drawer swaps activityLead without closing), so refetch when it changes.
+let fetchSeq = 0
+watch(() => props.leadId, () => fetchActivities(), { immediate: true })
+
 async function fetchActivities() {
+  const seq = ++fetchSeq
   loading.value = true
   loadError.value = ''
   try {
     const res = await apiClient.get(`/api/leads/${props.leadId}/activities`)
+    if (seq !== fetchSeq) return
     activities.value = res.data
-  } catch (e: any) {
+  } catch (e) {
+    if (seq !== fetchSeq) return
     activities.value = []
-    loadError.value = e.message || 'Failed to load activities'
+    loadError.value = errorMessage(e, 'Failed to load activities')
   } finally {
-    loading.value = false
+    if (seq === fetchSeq) loading.value = false
   }
 }
 
@@ -82,8 +90,8 @@ async function deleteActivity(id: string) {
     await apiClient.delete(`/api/leads/${props.leadId}/activities/${id}`)
     toast.success('Activity deleted')
     await fetchActivities()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to delete')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to delete'))
   }
 }
 
@@ -94,8 +102,8 @@ async function markDone(a: Activity) {
     })
     toast.success('Marked as done')
     await fetchActivities()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to mark response')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to mark response'))
   }
 }
 
@@ -106,8 +114,8 @@ async function snooze(a: Activity, minutes: number) {
     })
     toast.success('Reminder snoozed')
     await fetchActivities()
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to snooze')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to snooze'))
   }
 }
 

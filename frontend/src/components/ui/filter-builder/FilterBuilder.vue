@@ -30,7 +30,14 @@ const emit = defineEmits<{
 }>()
 
 const open = ref(false)
-const filters = ref<ActiveFilter[]>([])
+
+// Rows carry a stable client-side id: filters are spliced/removed, so index
+// keys would misalign the field/operator/value selects after removal.
+interface FilterRow extends ActiveFilter {
+  id: number
+}
+let nextId = 0
+const filters = ref<FilterRow[]>([])
 
 function getField(fieldName: string): FilterField | undefined {
   return props.fields.find((f) => f.field === fieldName)
@@ -53,6 +60,7 @@ function addFilter() {
   if (!firstField) return
   const operators = getOperators(firstField.field)
   filters.value.push({
+    id: nextId++,
     field: firstField.field,
     operator: operators[0] ?? '=',
     value: '',
@@ -71,9 +79,9 @@ function onFieldChanged(index: number, fieldName: string) {
 }
 
 function apply() {
-  const active = filters.value.filter((f) =>
-    Array.isArray(f.value) ? f.value.length > 0 : f.value !== ''
-  )
+  const active = filters.value
+    .filter((f) => (Array.isArray(f.value) ? f.value.length > 0 : f.value !== ''))
+    .map(({ id: _id, ...rest }) => rest)
   emit('apply', active)
   open.value = false
 }
@@ -98,7 +106,7 @@ const slotProps = computed(() => ({
     </PopoverTrigger>
     <PopoverContent class="w-[32rem] p-4">
       <div class="flex flex-col gap-3">
-        <div v-for="(f, i) in filters" :key="i" class="flex items-center gap-2">
+        <div v-for="(f, i) in filters" :key="f.id" class="flex items-center gap-2">
           <!-- Field -->
           <Select :model-value="f.field" @update:model-value="v => onFieldChanged(i, String(v ?? ''))">
             <SelectTrigger class="h-8 w-36">

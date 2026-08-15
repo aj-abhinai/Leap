@@ -1,13 +1,36 @@
 package middleware
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 )
+
+// themeScriptHash computes the CSP hash of the inline dark-mode bootstrap
+// script in frontend/index.html over its exact text content — the same way a
+// browser verifies a hash-source. Keeps the header CSP and the script in sync.
+func themeScriptHash(t *testing.T) string {
+	t.Helper()
+	htmlPath := filepath.Join("..", "..", "frontend", "index.html")
+	html, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	m := regexp.MustCompile(`(?s)<script>(.*?)</script>`).FindAllSubmatch(html, -1)
+	if len(m) != 1 {
+		t.Fatalf("expected exactly one inline <script> in frontend/index.html, found %d", len(m))
+	}
+	sum := sha256.Sum256(m[0][1])
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}
 
 func TestSecurityHeaders(t *testing.T) {
 	r := chi.NewRouter()
@@ -35,7 +58,7 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 	csp := rec.Header().Get("Content-Security-Policy")
 	for _, want := range []string{
-		"script-src 'self'",
+		"script-src 'self' " + themeScriptHash(t),
 		"font-src 'self' https://fonts.gstatic.com",
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
 		"object-src 'none'",

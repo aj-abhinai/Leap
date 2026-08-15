@@ -2,7 +2,6 @@
 import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiClient } from '@/composables/useApi'
-import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -115,105 +114,103 @@ onMounted(async () => {
 </script>
 
 <template>
-  <LayoutShell>
-    <div class="flex min-w-0 flex-1 flex-col gap-4 p-6 pt-2">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div class="flex min-w-0 flex-col">
-          <h1 class="text-2xl font-semibold tracking-tight">Leads</h1>
-          <p v-if="selectedPipeline" class="mt-0.5 text-sm text-muted-foreground">
-            {{ selectedPipeline.name }}
-            <span class="tabular-nums text-muted-foreground/70">{{ kanbanColumns.reduce((n, c) => n + c.leads.length, 0) }} leads</span>
-          </p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">
-            <SelectTrigger class="w-48">
-              <SelectValue placeholder="Select pipeline" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="p in pipelineStore.pipelines"
-                :key="p.id"
-                :value="p.id"
-              >
-                {{ p.name }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <Sheet v-if="rbac.can('lead:write')" v-model:open="drawerOpen">
-            <SheetTrigger as-child>
-              <Button @click="openCreate()">
-                <Plus class="mr-2 size-4" /> Add Lead
-              </Button>
-            </SheetTrigger>
-            <SheetContent>
-              <SheetHeader>
-                <SheetTitle>{{ editingLead ? 'Edit Lead' : 'Add Lead' }}</SheetTitle>
-                <SheetDescription>Enter lead details below.</SheetDescription>
-              </SheetHeader>
-              <LeadForm
-                :key="editingLead?.id ?? 'create'"
-                :editing-lead="editingLead"
-                :stages="selectedPipeline?.stages || []"
-                :pipeline-id="selectedPipelineId"
-                :initial-stage-id="initialStageId"
-                :prefill-contact="prefillContact"
-                :saving="saving"
-                @save="handleSave"
-                @delete="deleteLead"
+  <div class="flex min-w-0 flex-1 flex-col gap-4 p-6 pt-2">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex min-w-0 flex-col">
+        <h1 class="text-2xl font-semibold tracking-tight">Leads</h1>
+        <p v-if="selectedPipeline" class="mt-0.5 text-sm text-muted-foreground">
+          {{ selectedPipeline.name }}
+          <span class="tabular-nums text-muted-foreground/70">{{ kanbanColumns.reduce((n, c) => n + c.leads.length, 0) }} leads</span>
+        </p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">
+          <SelectTrigger class="w-48">
+            <SelectValue placeholder="Select pipeline" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="p in pipelineStore.pipelines"
+              :key="p.id"
+              :value="p.id"
+            >
+              {{ p.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <Sheet v-if="rbac.can('lead:write')" v-model:open="drawerOpen">
+          <SheetTrigger as-child>
+            <Button @click="openCreate()">
+              <Plus class="mr-2 size-4" /> Add Lead
+            </Button>
+          </SheetTrigger>
+          <SheetContent>
+            <SheetHeader>
+              <SheetTitle>{{ editingLead ? 'Edit Lead' : 'Add Lead' }}</SheetTitle>
+              <SheetDescription>Enter lead details below.</SheetDescription>
+            </SheetHeader>
+            <LeadForm
+              :key="editingLead?.id ?? 'create'"
+              :editing-lead="editingLead"
+              :stages="selectedPipeline?.stages || []"
+              :pipeline-id="selectedPipelineId"
+              :initial-stage-id="initialStageId"
+              :prefill-contact="prefillContact"
+              :saving="saving"
+              @save="handleSave"
+              @delete="deleteLead"
+            />
+          </SheetContent>
+        </Sheet>
+
+        <Sheet v-model:open="activityDrawerOpen">
+          <SheetContent class="p-0 sm:max-w-lg">
+            <SheetHeader class="px-6 pt-6">
+              <SheetTitle>Activities</SheetTitle>
+              <SheetDescription v-if="activityLead">
+                Activities for <strong>{{ activityLead.display_name }}</strong>
+              </SheetDescription>
+            </SheetHeader>
+            <div v-if="activityLead" class="flex-1 space-y-4 overflow-y-auto px-6 pb-6">
+              <LeadActivityForm
+                v-if="rbac.can('lead:write')"
+                :lead-id="activityLead.id!"
+                @saved="activityRef?.fetchActivities()"
+                @close-lost="handleCloseLost"
               />
-            </SheetContent>
-          </Sheet>
-
-          <Sheet v-model:open="activityDrawerOpen">
-            <SheetContent class="p-0 sm:max-w-lg">
-              <SheetHeader class="px-6 pt-6">
-                <SheetTitle>Activities</SheetTitle>
-                <SheetDescription v-if="activityLead">
-                  Activities for <strong>{{ activityLead.display_name }}</strong>
-                </SheetDescription>
-              </SheetHeader>
-              <div v-if="activityLead" class="flex-1 space-y-4 overflow-y-auto px-6 pb-6">
-                <LeadActivityForm
-                  v-if="rbac.can('lead:write')"
-                  :lead-id="activityLead.id!"
-                  @saved="activityRef?.fetchActivities()"
-                  @close-lost="handleCloseLost"
-                />
-                <LeadActivity ref="activityRef" :lead-id="activityLead.id!" @close-lost="handleCloseLost" />
-              </div>
-            </SheetContent>
-          </Sheet>
-        </div>
+              <LeadActivity ref="activityRef" :lead-id="activityLead.id!" @close-lost="handleCloseLost" />
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
-
-      <div v-if="leadsStore.loading" class="flex gap-4 overflow-x-auto pb-4">
-        <div v-for="i in 4" :key="i" class="min-w-64 flex-1 rounded-lg border bg-muted/30 p-4 space-y-3">
-          <Skeleton class="h-5 w-24" />
-          <Skeleton class="h-4 w-full" />
-          <Skeleton class="h-4 w-3/4" />
-          <Skeleton class="h-4 w-1/2" />
-        </div>
-      </div>
-
-      <div v-else-if="kanbanColumns.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
-        <Layers class="size-12 text-muted-foreground/30 mb-4" />
-        <p class="text-sm font-medium text-muted-foreground">No pipelines configured</p>
-        <p class="text-xs text-muted-foreground/60 mt-1">Create a pipeline in Settings to get started</p>
-      </div>
-
-      <LeadKanban
-        v-else
-        :columns="kanbanColumns"
-        :stages="selectedPipeline?.stages || []"
-        :pipeline-id="selectedPipelineId"
-        @create="openCreate"
-        @edit="openEdit"
-        @view-activities="openActivities"
-        @move-stage="moveStage"
-        @bulk-move="bulkMoveStage"
-        @stage-added="async () => { await pipelineStore.fetchPipelines(); loadLeads() }"
-      />
     </div>
-  </LayoutShell>
+
+    <div v-if="leadsStore.loading" class="flex gap-4 overflow-x-auto pb-4">
+      <div v-for="i in 4" :key="i" class="min-w-64 flex-1 rounded-lg border bg-muted/30 p-4 space-y-3">
+        <Skeleton class="h-5 w-24" />
+        <Skeleton class="h-4 w-full" />
+        <Skeleton class="h-4 w-3/4" />
+        <Skeleton class="h-4 w-1/2" />
+      </div>
+    </div>
+
+    <div v-else-if="kanbanColumns.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
+      <Layers class="size-12 text-muted-foreground/30 mb-4" />
+      <p class="text-sm font-medium text-muted-foreground">No pipelines configured</p>
+      <p class="text-xs text-muted-foreground/60 mt-1">Create a pipeline in Settings to get started</p>
+    </div>
+
+    <LeadKanban
+      v-else
+      :columns="kanbanColumns"
+      :stages="selectedPipeline?.stages || []"
+      :pipeline-id="selectedPipelineId"
+      @create="openCreate"
+      @edit="openEdit"
+      @view-activities="openActivities"
+      @move-stage="moveStage"
+      @bulk-move="bulkMoveStage"
+      @stage-added="async () => { await pipelineStore.fetchPipelines(); loadLeads() }"
+    />
+  </div>
 </template>

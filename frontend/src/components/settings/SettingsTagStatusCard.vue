@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ import {
 import { Label } from '@/components/ui/label'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Plus, Trash2, Pencil } from '@lucide/vue'
+import { errorMessage } from '@/utils/errors'
 
 const behaviorLabels: Record<string, string> = {
   log: 'Log only',
@@ -44,7 +45,9 @@ const store = useSettingsStore()
 const newName = shallowRef('')
 const error = shallowRef('')
 const deletingId = shallowRef<string | null>(null)
-const editing = shallowRef<{ id: string; groupName: string; sortOrder: number; behavior: string } | null>(null)
+// Deep-reactive so v-model on nested fields (groupName/sortOrder/behavior)
+// updates the UI instead of mutating a shallow-ref payload silently.
+const editing = ref<{ id: string; groupName: string; sortOrder: number; behavior: string } | null>(null)
 const editError = shallowRef('')
 const savingEdit = shallowRef(false)
 
@@ -78,8 +81,8 @@ async function add() {
     await store.createTag(newName.value.trim(), props.kind)
     toast.success(`${kindLabel.value} created`)
     newName.value = ''
-  } catch (e: any) {
-    error.value = e.message || `Failed to create ${kindLabel.value.toLowerCase()}`
+  } catch (e) {
+    error.value = errorMessage(e, `Failed to create ${kindLabel.value.toLowerCase()}`)
   }
 }
 
@@ -87,13 +90,17 @@ function confirmDelete(id: string) {
   deletingId.value = id
 }
 
+const deletingName = computed(
+  () => items.value.find((i) => i.id === deletingId.value)?.name ?? '',
+)
+
 async function remove() {
   if (!deletingId.value) return
   try {
     await store.deleteTag(deletingId.value)
     toast.success('Deleted')
-  } catch (e: any) {
-    toast.error(e.message || 'Failed to delete')
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to delete'))
   } finally {
     deletingId.value = null
   }
@@ -123,8 +130,8 @@ async function saveEdit() {
     })
     toast.success('Status updated')
     editing.value = null
-  } catch (e: any) {
-    editError.value = e.message || 'Failed to update'
+  } catch (e) {
+    editError.value = errorMessage(e, 'Failed to update')
   } finally {
     savingEdit.value = false
   }
@@ -191,7 +198,7 @@ async function saveEdit() {
       <ConfirmDialog
         :open="!!deletingId"
         title="Delete"
-        :description="`Delete ${props.title.toLowerCase()} &ldquo;${items.find((i) => i.id === deletingId)?.name ?? ''}&rdquo;? This cannot be undone.`"
+        :description="`Delete ${props.title.toLowerCase()} &ldquo;${deletingName}&rdquo;? This cannot be undone.`"
         confirm-text="Delete"
         destructive
         @update:open="(v) => { if (!v) deletingId = null }"
