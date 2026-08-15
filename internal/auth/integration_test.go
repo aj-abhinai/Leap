@@ -179,13 +179,13 @@ func TestChangePasswordSuccessIntegration(t *testing.T) {
 	id := seedUserWithFlag(t, db, "carol@example.com", "original-pw", true)
 	svc := NewService(db, authTestConfig())
 
-	err := svc.changePassword(id, "original-pw", "new-password")
+	err := svc.changePassword(id, "original-pw", "New-Passw0rd!")
 	if err != nil {
 		t.Fatalf("changePassword: %v", err)
 	}
 
 	// Log in with the new password, flag should now be false.
-	_, _, mustChange, err := svc.login("carol@example.com", "new-password")
+	_, _, mustChange, err := svc.login("carol@example.com", "New-Passw0rd!")
 	if err != nil {
 		t.Fatalf("login with new password: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestChangePasswordWrongCurrentIntegration(t *testing.T) {
 	id := seedUserWithFlag(t, db, "dave@example.com", "real-pw", true)
 	svc := NewService(db, authTestConfig())
 
-	err := svc.changePassword(id, "wrong-current", "new-password")
+	err := svc.changePassword(id, "wrong-current", "New-Passw0rd!")
 	if !errors.Is(err, ErrIncorrectPassword) {
 		t.Errorf("expected ErrIncorrectPassword, got %v", err)
 	}
@@ -231,7 +231,7 @@ func TestChangePasswordRevokesSessionsIntegration(t *testing.T) {
 		t.Fatalf("login 2: %v", err)
 	}
 
-	err = svc.changePassword(id, "frank-pw", "new-frank-pw")
+	err = svc.changePassword(id, "frank-pw", "New-Frank-Pw1!")
 	if err != nil {
 		t.Fatalf("changePassword: %v", err)
 	}

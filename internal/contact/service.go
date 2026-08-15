@@ -1,12 +1,12 @@
 package contact
 
 import (
+	"crm/internal/audit"
 	"crm/internal/util"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 )
 
 var (
@@ -514,13 +514,13 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 	var c Contact
 	err = tx.QueryRow(
 		`UPDATE contacts SET
-			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
-			nickname = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE nickname END,
-			email = CASE WHEN $4 IS NOT NULL THEN NULLIF($4, '') ELSE email END,
-			phone = CASE WHEN $5 IS NOT NULL THEN NULLIF($5, '') ELSE phone END,
-			location = CASE WHEN $6 IS NOT NULL THEN NULLIF($6, '') ELSE location END,
+			name = COALESCE(NULLIF($2, ''), name),
+			nickname = COALESCE($3, nickname),
+			email = COALESCE($4, email),
+			phone = COALESCE($5, phone),
+			location = COALESCE($6, location),
 			age = COALESCE($7, age),
-			status_id = CASE WHEN $8 IS NOT NULL THEN NULLIF($8, '')::uuid ELSE status_id END,
+			status_id = CASE WHEN $8::text IS NOT NULL THEN NULLIF($8::text, '')::uuid ELSE status_id END,
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
@@ -666,19 +666,7 @@ func statusTagExists(q queryer, statusID string) (bool, error) {
 }
 
 func (s *Service) logActivity(resourceID, resourceType, action, changes, userID string) {
-	userName := ""
-	if userID != "" {
-		if err := s.db.QueryRow(`SELECT name FROM users WHERE id = $1`, userID).Scan(&userName); err != nil {
-			slog.Error("resolve audit actor name", "error", err, "user_id", userID)
-		}
-	}
-	if _, err := s.db.Exec(
-		`INSERT INTO audit_logs (description, resource_type, resource_id, action, changes, user_id, user_name)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''))`,
-		action+" "+resourceType+" "+resourceID, resourceType, resourceID, changes, userID, userName,
-	); err != nil {
-		slog.Error("log activity", "error", err, "resource_type", resourceType, "resource_id", resourceID)
-	}
+	audit.Log(s.db, resourceID, resourceType, action, changes, userID)
 }
 
 func diffContact(old, new *Contact) string {

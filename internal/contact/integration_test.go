@@ -171,7 +171,7 @@ func TestUpdateContactStoresActorIntegration(t *testing.T) {
 	svc := NewService(db)
 
 	userID := seedTestUser(t, db, "alice@example.com")
-	created, err := svc.create(CreateRequest{Name: "Alice Example"})
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210"})
 	if err != nil {
 		t.Fatalf("create contact: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestDeleteContactWithoutActorStoresNullActorIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	created, err := svc.create(CreateRequest{Name: "Alice Example"})
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210"})
 	if err != nil {
 		t.Fatalf("create contact: %v", err)
 	}
@@ -229,13 +229,21 @@ func TestAuditFailureDoesNotFailUpdateIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	created, err := svc.create(CreateRequest{Name: "Alice Example"})
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210"})
 	if err != nil {
 		t.Fatalf("create contact: %v", err)
 	}
-	if _, err := db.Exec(`DROP TABLE audit_logs`); err != nil {
-		t.Fatalf("drop audit_logs: %v", err)
+	// Hide the table rather than drop it: the migration bookkeeping would not
+	// recreate it for later tests in the package, so a bare DROP would leak
+	// the missing table into the rest of the suite.
+	if _, err := db.Exec(`ALTER TABLE audit_logs RENAME TO audit_logs_audit_test`); err != nil {
+		t.Fatalf("hide audit_logs: %v", err)
 	}
+	t.Cleanup(func() {
+		if _, err := db.Exec(`ALTER TABLE audit_logs_audit_test RENAME TO audit_logs`); err != nil {
+			t.Errorf("restore audit_logs: %v", err)
+		}
+	})
 
 	newName := "Alice Updated"
 	updated, err := svc.update(created.ID, UpdateRequest{Name: &newName}, "")

@@ -14,9 +14,13 @@ export const useRBACStore = defineStore('rbac', () => {
     }
   }
 
+  function clear() {
+    permissions.value = []
+  }
+
   function can(permission: string): boolean {
     return permissions.value.includes('*') || permissions.value.includes(permission)
   }
 
-  return { permissions, fetchPermissions, can }
+  return { permissions, fetchPermissions, clear, can }
 })

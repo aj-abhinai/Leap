@@ -62,6 +62,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   let refreshPromise: Promise<LoginResponse> | null = null
 
+  // Bumped on every login and logout. A refresh that started in a previous
+  // session must not resurrect it after logout completed: the server rotates
+  // the refresh cookie on every refresh, so a late response can otherwise
+  // re-arm a logged-out session and trap the UI on an authenticated page.
+  let sessionEpoch = 0
+
   async function refresh(): Promise<LoginResponse> {
     if (!refreshPromise) {
       refreshPromise = doRefresh().finally(() => {
@@ -72,6 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function doRefresh(): Promise<LoginResponse> {
+    const epochAtStart = sessionEpoch
     const res = await fetch('/api/auth/refresh', {
       method: 'POST',
       headers: { ...csrfHeaders() },
@@ -81,11 +88,17 @@ export const useAuthStore = defineStore('auth', () => {
       clear()
       throw new Error(json.error?.message ?? 'Session expired')
     }
+    if (epochAtStart !== sessionEpoch) {
+      // The session this refresh belonged to is gone; discard the rotated
+      // tokens instead of overwriting the current state.
+      throw new Error('Session expired')
+    }
     setAccess(json.data)
     return json.data
   }
 
   async function login(email: string, password: string) {
+    sessionEpoch++
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -102,6 +115,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
+    sessionEpoch++
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',

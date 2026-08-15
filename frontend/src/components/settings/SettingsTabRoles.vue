@@ -98,8 +98,8 @@ function openCreate() {
 
 function openEdit(role: Role) {
   editingRole.value = role
-  formName.value = role.name
-  formDesc.value = role.description
+  formName.value = role.name ?? ''
+  formDesc.value = role.description ?? ''
   formPermissions.value = new Set((role.permissions ?? []).map((p) => p.id))
   formError.value = ''
   modalOpen.value = true
@@ -132,7 +132,7 @@ function togglePermission(permId: string) {
 
 async function saveRole() {
   formError.value = ''
-  if (!formName.value.trim()) {
+  if (!(formName.value ?? '').trim()) {
     formError.value = 'Name is required'
     return
   }
@@ -141,30 +141,23 @@ async function saveRole() {
     if (isEditing.value && editingRole.value) {
       const id = editingRole.value.id
       await apiClient.patch(`/api/roles/${id}`, {
-        name: formName.value.trim(),
-        description: formDesc.value.trim(),
+        name: (formName.value ?? '').trim(),
+        description: (formDesc.value ?? '').trim(),
       })
-      // Sync the permission diff concurrently; the reload below reflects
-      // the true (possibly partial) DB state if any request fails.
-      const current = new Set((editingRole.value.permissions ?? []).map((p) => p.id))
-      const removed = [...current].filter((permId) => !formPermissions.value.has(permId))
-      const added = [...formPermissions.value].filter((permId) => !current.has(permId))
-      await Promise.all([
-        ...removed.map((permId) => apiClient.delete(`/api/roles/${id}/permissions/${permId}`)),
-        ...added.map((permId) => apiClient.post(`/api/roles/${id}/permissions`, { permission_id: permId })),
-      ])
+      // Replace the permission set atomically in one request.
+      await apiClient.put(`/api/roles/${id}/permissions`, {
+        permission_ids: [...formPermissions.value],
+      })
       toast.success('Role updated')
     } else {
       const res = await apiClient.post('/api/roles', {
-        name: formName.value.trim(),
-        description: formDesc.value.trim(),
+        name: (formName.value ?? '').trim(),
+        description: (formDesc.value ?? '').trim(),
       })
       const role = res.data as Role
-      await Promise.all(
-        [...formPermissions.value].map((permId) =>
-          apiClient.post(`/api/roles/${role.id}/permissions`, { permission_id: permId }),
-        ),
-      )
+      await apiClient.put(`/api/roles/${role.id}/permissions`, {
+        permission_ids: [...formPermissions.value],
+      })
       toast.success('Role created')
     }
     modalOpen.value = false
@@ -323,14 +316,14 @@ const permissionGroups = computed(() => groupPermissions(visiblePermissions.valu
                       class="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-muted/50"
                     >
                       <Checkbox
-                        :checked="formPermissions.has(perm.id)"
+                        :model-value="formPermissions.has(perm.id)"
                         :disabled="isEditing && !!editingRole && isPermDisabled(editingRole, perm)"
                         :title="
                           isEditing && editingRole && isPermDisabled(editingRole, perm)
                             ? 'The superadmin role is governed by the wildcard permission'
                             : perm.description
                         "
-                        @update:checked="togglePermission(perm.id)"
+                        @update:model-value="togglePermission(perm.id)"
                       />
                       <Label class="cursor-pointer text-sm" :title="perm.description">
                         {{ permissionLabel(perm) }}

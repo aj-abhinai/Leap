@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Plus, ShieldCheck, Trash2, User } from '@lucide/vue'
+import { PASSWORD_POLICY_HINT, isStrongPassword } from '@/lib/validation'
 
 interface Role {
   id: string
@@ -89,6 +90,10 @@ async function createUser() {
     newUserError.value = 'All fields are required'
     return
   }
+  if (!isStrongPassword(newUserPassword.value)) {
+    newUserError.value = PASSWORD_POLICY_HINT
+    return
+  }
   creatingUser.value = true
   try {
     await apiClient.post('/api/users', {
@@ -143,7 +148,7 @@ function isProtectedUser(u: User): boolean {
         <div class="flex flex-wrap gap-2">
           <Input v-model="newUserName" placeholder="Name" class="min-w-32 flex-1" />
           <Input v-model="newUserEmail" placeholder="Email" type="email" class="min-w-32 flex-1" />
-          <Input v-model="newUserPassword" placeholder="Password" type="password" class="min-w-32 flex-1" />
+          <Input v-model="newUserPassword" placeholder="Password (10+ chars, strong)" type="password" class="min-w-32 flex-1" />
           <Button @click="createUser" :disabled="creatingUser">
             <Plus class="mr-2 size-4" /> Add User
           </Button>

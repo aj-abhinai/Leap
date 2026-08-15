@@ -224,8 +224,8 @@ func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*User,
 // session survives (refreshing with a fresh token); all other sessions for
 // the user are revoked.
 func (s *Service) changePassword(userID, currentPassword, newPassword string) error {
-	if len(newPassword) < 8 {
-		return ErrPasswordTooShort
+	if err := ValidatePassword(newPassword); err != nil {
+		return err
 	}
 	var currentHash string
 	err := s.db.QueryRow(

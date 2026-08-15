@@ -2,6 +2,7 @@
 import { shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useRBACStore } from '@/stores/rbac'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,6 +11,7 @@ import { Loader2, LogIn } from '@lucide/vue'
 
 const router = useRouter()
 const auth = useAuthStore()
+const rbac = useRBACStore()
 
 const email = shallowRef('')
 const password = shallowRef('')
@@ -25,6 +27,7 @@ async function handleSubmit() {
   loading.value = true
   try {
     await auth.login(email.value, password.value)
+    await rbac.fetchPermissions()
     if (auth.mustChangePassword) {
       router.push({ name: 'ChangePassword' })
     } else {

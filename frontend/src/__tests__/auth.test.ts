@@ -88,6 +88,27 @@ describe('auth store', () => {
     expect(auth.isAuthenticated).toBe(false)
   })
 
+  it('a refresh that resolves after logout cannot resurrect the session', async () => {
+    let resolveRefresh: (r: Response) => void
+    const fetchMock = vi.fn()
+    fetchMock.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => { resolveRefresh = resolve }),
+    )
+    fetchMock.mockResolvedValueOnce(jsonResponse({ message: 'Logged out' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const auth = useAuthStore()
+    auth.accessToken = accessToken
+
+    const pendingRefresh = auth.refresh()
+    await auth.logout()
+
+    resolveRefresh!(jsonResponse({ data: { access_token: 'rotated-token', expires_at: 999 } }))
+    await expect(pendingRefresh).rejects.toThrow('Session expired')
+    expect(auth.accessToken).toBeNull()
+    expect(auth.isAuthenticated).toBe(false)
+  })
+
   it('bootstrap clears state without fetching when no CSRF cookie exists', async () => {
     document.cookie = 'crm_csrf=; Max-Age=-1'
     const fetchMock = vi.fn()

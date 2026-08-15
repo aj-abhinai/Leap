@@ -38,11 +38,16 @@ type TokenResponse struct {
 }
 
 var (
-	ErrInvalidCredentials = &AuthError{Code: "INVALID_CREDENTIALS", Message: "Invalid email or password"}
-	ErrInvalidToken       = &AuthError{Code: "INVALID_TOKEN", Message: "Invalid or expired token"}
-	ErrTokenRevoked       = &AuthError{Code: "TOKEN_REVOKED", Message: "Token has been revoked"}
-	ErrIncorrectPassword  = &AuthError{Code: "INCORRECT_PASSWORD", Message: "Current password is incorrect"}
-	ErrPasswordTooShort   = &AuthError{Code: "BAD_REQUEST", Message: "Password must be at least 8 characters"}
+	ErrInvalidCredentials   = &AuthError{Code: "INVALID_CREDENTIALS", Message: "Invalid email or password"}
+	ErrInvalidToken         = &AuthError{Code: "INVALID_TOKEN", Message: "Invalid or expired token"}
+	ErrTokenRevoked         = &AuthError{Code: "TOKEN_REVOKED", Message: "Token has been revoked"}
+	ErrIncorrectPassword    = &AuthError{Code: "INCORRECT_PASSWORD", Message: "Current password is incorrect"}
+	ErrPasswordTooShort     = &AuthError{Code: "BAD_REQUEST", Message: "Password must be at least 10 characters"}
+	ErrPasswordTooLong      = &AuthError{Code: "BAD_REQUEST", Message: "Password must be at most 72 characters"}
+	ErrPasswordNeedsUpper   = &AuthError{Code: "BAD_REQUEST", Message: "Password must include an uppercase letter"}
+	ErrPasswordNeedsLower   = &AuthError{Code: "BAD_REQUEST", Message: "Password must include a lowercase letter"}
+	ErrPasswordNeedsDigit   = &AuthError{Code: "BAD_REQUEST", Message: "Password must include a digit"}
+	ErrPasswordNeedsSpecial = &AuthError{Code: "BAD_REQUEST", Message: "Password must include a special character"}
 )
 
 type AuthError struct {

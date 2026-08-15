@@ -390,7 +390,7 @@ func TestHandlerChangePasswordSuccess(t *testing.T) {
 	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
 
 	rec, _ := doJSON(t, h.ChangePassword, http.MethodPatch, "/api/auth/me/password",
-		`{"current_password":"original-pw","new_password":"new-password-1"}`,
+		`{"current_password":"original-pw","new_password":"New-Passw0rd!"}`,
 		func(r *http.Request) *http.Request {
 			return r.WithContext(ctxutil.WithUserID(r.Context(), id))
 		})
@@ -406,7 +406,7 @@ func TestHandlerChangePasswordWrongCurrent(t *testing.T) {
 	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
 
 	rec, env := doJSON(t, h.ChangePassword, http.MethodPatch, "/api/auth/me/password",
-		`{"current_password":"wrong-current","new_password":"new-password-1"}`,
+		`{"current_password":"wrong-current","new_password":"New-Passw0rd!"}`,
 		func(r *http.Request) *http.Request {
 			return r.WithContext(ctxutil.WithUserID(r.Context(), id))
 		})
@@ -496,7 +496,7 @@ func TestHandlerChangePasswordUnknownUser(t *testing.T) {
 	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
 
 	rec, env := doJSON(t, h.ChangePassword, http.MethodPatch, "/api/auth/me/password",
-		`{"current_password":"pw","new_password":"new-password-1"}`,
+		`{"current_password":"pw","new_password":"New-Passw0rd!"}`,
 		func(r *http.Request) *http.Request {
 			return r.WithContext(ctxutil.WithUserID(r.Context(), "00000000-0000-0000-0000-000000000000"))
 		})

@@ -149,7 +149,11 @@ onMounted(async () => {
                 </SheetDescription>
               </SheetHeader>
               <div v-if="activityLead" class="mt-4 space-y-4">
-                <LeadActivityForm :lead-id="activityLead.id!" @saved="activityRef?.fetchActivities()" />
+                <LeadActivityForm
+                  v-if="rbac.can('lead:write')"
+                  :lead-id="activityLead.id!"
+                  @saved="activityRef?.fetchActivities()"
+                />
                 <LeadActivity ref="activityRef" :lead-id="activityLead.id!" />
               </div>
             </SheetContent>

@@ -31,6 +31,32 @@ func TestHashPasswordEmpty(t *testing.T) {
 	}
 }
 
+func TestValidatePassword(t *testing.T) {
+	tests := []struct {
+		name     string
+		password string
+		wantErr  error
+	}{
+		{name: "valid", password: "Sup3r-Secret!"},
+		{name: "too short", password: "Ab1!cdef", wantErr: ErrPasswordTooShort},
+		{name: "exactly min length", password: "Ab1!cdefgh"},
+		{name: "too long (73 bytes)", password: "Ab1!cdefgh" + "x0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234", wantErr: ErrPasswordTooLong},
+		{name: "no uppercase", password: "sup3r-secret!", wantErr: ErrPasswordNeedsUpper},
+		{name: "no lowercase", password: "SUP3R-SECRET!", wantErr: ErrPasswordNeedsLower},
+		{name: "no digit", password: "Super-Secret!", wantErr: ErrPasswordNeedsDigit},
+		{name: "no special", password: "Sup3rSecret", wantErr: ErrPasswordNeedsSpecial},
+		{name: "empty", password: "", wantErr: ErrPasswordTooShort},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePassword(tt.password)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("ValidatePassword(%q) err = %v, want %v", tt.password, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestGenerateRandomToken(t *testing.T) {
 	t1, err := generateRandomToken()
 	if err != nil {
@@ -88,7 +114,16 @@ func TestValidateJWTRejectsTamperedToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createJWT: %v", err)
 	}
-	tampered := token[:len(token)-2] + "xx"
+	// Flip a fully-significant base64url char inside the 43-char HS256
+	// signature region. Tampering the trailing char alone is unreliable: its
+	// final 2 bits are ignored on decode, so the altered token can still
+	// produce the original signature bytes.
+	sigStart := len(token) - 43
+	repl := byte('a')
+	if token[sigStart] == 'a' {
+		repl = 'b'
+	}
+	tampered := token[:sigStart] + string(repl) + token[sigStart+1:]
 	if _, err := svc.ValidateJWT(tampered); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("expected ErrInvalidToken for tampered token, got %v", err)
 	}

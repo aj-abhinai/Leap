@@ -6,6 +6,7 @@ import { useLeadsStore } from '@/stores/leads'
 import { usePipelineStore } from '@/stores/pipeline'
 import { useActivityStore } from '@/stores/activity'
 import { useRemindersStore } from '@/stores/reminders'
+import { useRBACStore } from '@/stores/rbac'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -21,17 +22,21 @@ const leadsStore = useLeadsStore()
 const pipelineStore = usePipelineStore()
 const activity = useActivityStore()
 const remindersStore = useRemindersStore()
+const rbac = useRBACStore()
 const loading = shallowRef(true)
 
 onMounted(async () => {
+  const fetches = [
+    contactsStore.fetchTotal(),
+    leadsStore.fetchTotal(),
+    remindersStore.fetchReminders(),
+    pipelineStore.fetchPipelines(),
+  ]
+  if (rbac.can('activity:read')) {
+    fetches.push(activity.fetchActivity(1, 10))
+  }
   try {
-    await Promise.all([
-      contactsStore.fetchTotal(),
-      leadsStore.fetchTotal(),
-      activity.fetchActivity(1, 10),
-      remindersStore.fetchReminders(),
-      pipelineStore.fetchPipelines(),
-    ])
+    await Promise.all(fetches)
     // Load the first pipeline's leads so the stage distribution has data.
     if (pipelineStore.pipelines.length > 0) {
       await leadsStore.fetchLeads(pipelineStore.pipelines[0].id, '', 1, 200)

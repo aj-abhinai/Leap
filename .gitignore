@@ -1,7 +1,6 @@
 # Agent & decision records (private)
 .agents/
 .commandcode/
-docs/
 
 # IDE
 .idea/

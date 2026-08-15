@@ -98,8 +98,8 @@ func (s *Service) update(id string, req UpdateRequest) (*Program, error) {
 	}
 	p, err := s.scanProgram(s.db.QueryRow(
 		`UPDATE programs SET
-			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
-			description = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE description END,
+			name = COALESCE(NULLIF($2, ''), name),
+			description = COALESCE($3, description),
 			price = COALESCE($4, price),
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL

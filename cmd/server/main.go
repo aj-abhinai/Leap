@@ -225,6 +225,7 @@ func main() {
 		r.Get("/api/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ListPermissions))
 		r.Get("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.GetRolePermissions))
 		r.Post("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.AssignPermission))
+		r.Put("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.SetRolePermissions))
 		r.Delete(
 			"/api/roles/{id}/permissions/{permission_id}",
 			middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.RemovePermission),

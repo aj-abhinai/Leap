@@ -108,6 +108,7 @@ describe('LoginPage', () => {
         },
       }),
     )
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: [] }))
     const router = makeRouter()
     const pushSpy = vi.spyOn(router, 'push')
     const wrapper = mount(LoginPage, {
@@ -118,7 +119,7 @@ describe('LoginPage', () => {
     await flushPromises()
 
     expect(pushSpy).toHaveBeenCalledWith({ name: 'ChangePassword' })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('shows the server error message when login fails', async () => {

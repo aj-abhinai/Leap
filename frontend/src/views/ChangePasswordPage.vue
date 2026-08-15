@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Loader2, KeyRound } from '@lucide/vue'
+import { PASSWORD_POLICY_HINT, isStrongPassword } from '@/lib/validation'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -30,8 +31,8 @@ async function handleSubmit() {
     error.value = 'All fields are required'
     return
   }
-  if (newPassword.value.length < 8) {
-    error.value = 'New password must be at least 8 characters'
+  if (!isStrongPassword(newPassword.value)) {
+    error.value = PASSWORD_POLICY_HINT
     return
   }
   if (newPassword.value !== confirmPassword.value) {
@@ -80,7 +81,7 @@ async function handleSubmit() {
               v-model="newPassword"
               type="password"
               autocomplete="new-password"
-              placeholder="At least 8 characters"
+              placeholder="10+ chars with upper, lower, digit, special"
             />
           </div>
           <div class="space-y-2">

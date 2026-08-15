@@ -1,13 +1,17 @@
 package rbac
 
 import (
+	"crm/internal/audit"
 	"crm/internal/auth"
 	"crm/internal/respond"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 var (
@@ -37,12 +41,20 @@ var (
 	// user able to manage roles and users.
 	ErrLastManagerProtected = errors.New("cannot remove the last user who can manage roles and users")
 
+	// ErrRoleInUse is returned when deleting a role that active users still
+	// hold; deleting it would silently strip those users of their role.
+	ErrRoleInUse = errors.New("role is assigned to one or more users")
+
 	// ErrNotFound marks mutations targeting a role or user that does not
 	// exist.
 	ErrNotFound = errors.New("role or user not found")
 
 	// ErrDuplicate marks name collisions on uniquely named resources.
 	ErrDuplicate = errors.New("name already in use")
+
+	// ErrInvalidPermission is returned when a bulk permission set references
+	// a permission that does not exist in the catalog.
+	ErrInvalidPermission = errors.New("one or more permissions do not exist")
 )
 
 type Service struct {
@@ -51,6 +63,20 @@ type Service struct {
 
 func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
+}
+
+// logActivity records a best-effort audit entry for an RBAC mutation.
+func (s *Service) logActivity(resourceID, resourceType, action, changes, userID string) {
+	audit.Log(s.db, resourceID, resourceType, action, changes, userID)
+}
+
+// nullName maps an empty role name to JSON null so an absent role renders as
+// null rather than "" in the audit changes.
+func nullName(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func (s *Service) listPermissions() ([]Permission, error) {
@@ -129,7 +155,7 @@ func (s *Service) getRolePermissionsBatch(roleIDs []string) (map[string][]Permis
 	return permMap, nil
 }
 
-func (s *Service) createRole(req CreateRoleRequest) (*Role, error) {
+func (s *Service) createRole(req CreateRoleRequest, actorID string) (*Role, error) {
 	var r Role
 	err := s.db.QueryRow(
 		`INSERT INTO roles (name, description) VALUES ($1, $2)
@@ -142,27 +168,33 @@ func (s *Service) createRole(req CreateRoleRequest) (*Role, error) {
 		}
 		return nil, fmt.Errorf("create role: %w", err)
 	}
+	changes, _ := json.Marshal(map[string]string{"name": r.Name, "description": r.Description})
+	s.logActivity(r.ID, "role", "create", string(changes), actorID)
 	return &r, nil
 }
 
-func (s *Service) updateRole(id string, req UpdateRoleRequest) (*Role, error) {
-	if req.Name != "" {
-		var currentName string
-		if err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, id).Scan(&currentName); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, ErrNotFound
-			}
-			return nil, fmt.Errorf("update role: %w", err)
+func (s *Service) updateRole(id string, req UpdateRoleRequest, actorID string) (*Role, error) {
+	if !validUUID(id) {
+		return nil, ErrNotFound
+	}
+	var currentName, currentDesc string
+	if err := s.db.QueryRow(
+		`SELECT name, COALESCE(description, '') FROM roles WHERE id = $1`,
+		id,
+	).Scan(&currentName, &currentDesc); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
 		}
-		if currentName == "superadmin" && req.Name != "superadmin" {
-			return nil, ErrSuperadminRoleProtected
-		}
+		return nil, fmt.Errorf("update role: %w", err)
+	}
+	if req.Name != nil && currentName == "superadmin" && *req.Name != "superadmin" {
+		return nil, ErrSuperadminRoleProtected
 	}
 	var r Role
 	err := s.db.QueryRow(
 		`UPDATE roles SET
-			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
-			description = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE description END,
+			name = COALESCE(NULLIF($2, ''), name),
+			description = COALESCE($3, description),
 			updated_at = now()
 		WHERE id = $1
 		RETURNING id, name, COALESCE(description, ''), created_at, updated_at`,
@@ -171,14 +203,42 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest) (*Role, error) {
 		req.Description,
 	).Scan(&r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("update role: %w", err)
+	}
+	changes := map[string]any{}
+	if currentName != r.Name {
+		changes["name"] = map[string]string{"old": currentName, "new": r.Name}
+	}
+	if currentDesc != r.Description {
+		changes["description"] = map[string]string{"old": currentDesc, "new": r.Description}
+	}
+	if len(changes) > 0 {
+		if b, err := json.Marshal(changes); err == nil {
+			s.logActivity(r.ID, "role", "update", string(b), actorID)
+		}
 	}
 	return &r, nil
 }
 
-func (s *Service) deleteRole(id string) error {
+func (s *Service) deleteRole(id, actorID string) error {
+	if !validUUID(id) {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("delete role: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := lockRBACMutations(tx); err != nil {
+		return fmt.Errorf("delete role: %w", err)
+	}
+
 	var name string
-	err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, id).Scan(&name)
+	err = tx.QueryRow(`SELECT name FROM roles WHERE id = $1`, id).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -188,21 +248,51 @@ func (s *Service) deleteRole(id string) error {
 	if name == "superadmin" {
 		return ErrSuperadminRoleProtected
 	}
-	if _, err := s.db.Exec(`DELETE FROM roles WHERE id = $1`, id); err != nil {
+
+	var assigned int
+	if err := tx.QueryRow(
+		`SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND role_id = $1`,
+		id,
+	).Scan(&assigned); err != nil {
 		return fmt.Errorf("delete role: %w", err)
 	}
+	if assigned > 0 {
+		return ErrRoleInUse
+	}
+
+	if _, err := tx.Exec(`DELETE FROM roles WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("delete role: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete role: %w", err)
+	}
+	changes, _ := json.Marshal(map[string]string{"name": name})
+	s.logActivity(id, "role", "delete", string(changes), actorID)
 	return nil
 }
 
-func (s *Service) assignPermission(roleID, permissionID string) error {
+func (s *Service) assignPermission(roleID, permissionID, actorID string) error {
+	if !validUUID(roleID) || !validUUID(permissionID) {
+		return ErrNotFound
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("assign permission: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := lockRBACMutations(tx); err != nil {
+		return fmt.Errorf("assign permission: %w", err)
+	}
+
 	var roleName, permName string
-	if err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, roleID).Scan(&roleName); err != nil {
+	if err := tx.QueryRow(`SELECT name FROM roles WHERE id = $1`, roleID).Scan(&roleName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("assign permission: lookup role: %w", err)
 	}
-	if err := s.db.QueryRow(`SELECT name FROM permissions WHERE id = $1`, permissionID).Scan(&permName); err != nil {
+	if err := tx.QueryRow(`SELECT name FROM permissions WHERE id = $1`, permissionID).Scan(&permName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -211,7 +301,7 @@ func (s *Service) assignPermission(roleID, permissionID string) error {
 	if roleName != "superadmin" && permName == "*" {
 		return ErrWildcardRestricted
 	}
-	_, err := s.db.Exec(
+	_, err = tx.Exec(
 		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 		roleID, permissionID,
 	)
@@ -221,19 +311,36 @@ func (s *Service) assignPermission(roleID, permissionID string) error {
 		}
 		return fmt.Errorf("assign permission: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("assign permission: %w", err)
+	}
+	changes, _ := json.Marshal(map[string]any{"permissions": map[string]any{"added": []string{permName}}})
+	s.logActivity(roleID, "role", "update", string(changes), actorID)
 	return nil
 }
 
-func (s *Service) removePermission(roleID, permissionID string) error {
-	var roleName string
-	if err := s.db.QueryRow(`SELECT name FROM roles WHERE id = $1`, roleID).Scan(&roleName); err != nil {
+func (s *Service) removePermission(roleID, permissionID, actorID string) error {
+	if !validUUID(roleID) || !validUUID(permissionID) {
+		return ErrNotFound
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("remove permission: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := lockRBACMutations(tx); err != nil {
+		return fmt.Errorf("remove permission: %w", err)
+	}
+
+	var roleName, permName string
+	if err := tx.QueryRow(`SELECT name FROM roles WHERE id = $1`, roleID).Scan(&roleName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("remove permission: lookup role: %w", err)
 	}
-	var permName string
-	if err := s.db.QueryRow(`SELECT name FROM permissions WHERE id = $1`, permissionID).Scan(&permName); err != nil {
+	if err := tx.QueryRow(`SELECT name FROM permissions WHERE id = $1`, permissionID).Scan(&permName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -242,11 +349,228 @@ func (s *Service) removePermission(roleID, permissionID string) error {
 	if roleName == "superadmin" && permName == "*" {
 		return ErrSuperadminRoleProtected
 	}
-	_, err := s.db.Exec(`DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2`, roleID, permissionID)
-	if err != nil {
+	if _, err := tx.Exec(
+		`DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2`,
+		roleID, permissionID,
+	); err != nil {
 		return fmt.Errorf("remove permission: %w", err)
 	}
+
+	// Removing a permission that grants RBAC management must not orphan the
+	// system: the transaction rolls back if no user could manage roles and
+	// users afterwards.
+	if permName == "settings:manage" {
+		managers, err := countRBACManagers(tx)
+		if err != nil {
+			return fmt.Errorf("remove permission: %w", err)
+		}
+		if managers == 0 {
+			return ErrLastManagerProtected
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("remove permission: %w", err)
+	}
+	changes, _ := json.Marshal(map[string]any{"permissions": map[string]any{"removed": []string{permName}}})
+	s.logActivity(roleID, "role", "update", string(changes), actorID)
 	return nil
+}
+
+// setRolePermissions replaces the role's permission set atomically. It diffs
+// the requested set against the current one, rejects unknown permission IDs,
+// and enforces the existing protections (wildcard restrictions and the
+// last-manager guard) under the RBAC mutation lock so concurrent changes
+// cannot race the guards. An empty request clears the role's permissions.
+func (s *Service) setRolePermissions(roleID string, permissionIDs []string, actorID string) (*Role, error) {
+	if !validUUID(roleID) {
+		return nil, ErrNotFound
+	}
+	requested := make([]string, 0, len(permissionIDs))
+	seen := map[string]bool{}
+	for _, pid := range permissionIDs {
+		if !validUUID(pid) {
+			return nil, ErrInvalidPermission
+		}
+		if !seen[pid] {
+			seen[pid] = true
+			requested = append(requested, pid)
+		}
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("set role permissions: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := lockRBACMutations(tx); err != nil {
+		return nil, fmt.Errorf("set role permissions: %w", err)
+	}
+
+	var roleName, description string
+	var createdAt, updatedAt time.Time
+	if err := tx.QueryRow(
+		`SELECT name, COALESCE(description, ''), created_at, updated_at FROM roles WHERE id = $1`,
+		roleID,
+	).Scan(&roleName, &description, &createdAt, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("set role permissions: lookup role: %w", err)
+	}
+
+	// Resolve the requested permission IDs to names, rejecting any that are
+	// not in the catalog.
+	permNameByID := map[string]string{}
+	if len(requested) > 0 {
+		rows, err := tx.Query(`SELECT id, name FROM permissions WHERE id = ANY($1)`, requested)
+		if err != nil {
+			return nil, fmt.Errorf("set role permissions: lookup permissions: %w", err)
+		}
+		for rows.Next() {
+			var id, name string
+			if err := rows.Scan(&id, &name); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("set role permissions: scan permission: %w", err)
+			}
+			permNameByID[id] = name
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("set role permissions: iterate permissions: %w", err)
+		}
+		rows.Close()
+	}
+	for _, pid := range requested {
+		if _, ok := permNameByID[pid]; !ok {
+			return nil, ErrInvalidPermission
+		}
+	}
+
+	// Current permission IDs and names for the role.
+	currentNameByID := map[string]string{}
+	{
+		rows, err := tx.Query(`
+			SELECT p.id, p.name FROM permissions p
+			JOIN role_permissions rp ON p.id = rp.permission_id
+			WHERE rp.role_id = $1`, roleID)
+		if err != nil {
+			return nil, fmt.Errorf("set role permissions: load current: %w", err)
+		}
+		for rows.Next() {
+			var id, name string
+			if err := rows.Scan(&id, &name); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("set role permissions: scan current: %w", err)
+			}
+			currentNameByID[id] = name
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("set role permissions: iterate current: %w", err)
+		}
+		rows.Close()
+	}
+
+	// Diff requested against current.
+	requestedSet := make(map[string]bool, len(requested))
+	for _, pid := range requested {
+		requestedSet[pid] = true
+	}
+	var addedIDs, removedIDs []string
+	added := []string{}
+	removed := []string{}
+	for _, pid := range requested {
+		if _, ok := currentNameByID[pid]; !ok {
+			addedIDs = append(addedIDs, pid)
+			added = append(added, permNameByID[pid])
+		}
+	}
+	for id, name := range currentNameByID {
+		if !requestedSet[id] {
+			removedIDs = append(removedIDs, id)
+			removed = append(removed, name)
+		}
+	}
+
+	// Guards: the wildcard may only belong to the superadmin role, and the
+	// superadmin role may never lose it.
+	if roleName != "superadmin" {
+		for _, n := range added {
+			if n == "*" {
+				return nil, ErrWildcardRestricted
+			}
+		}
+	}
+	if roleName == "superadmin" {
+		for _, n := range removed {
+			if n == "*" {
+				return nil, ErrSuperadminRoleProtected
+			}
+		}
+	}
+
+	if len(removedIDs) > 0 {
+		if _, err := tx.Exec(
+			`DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = ANY($2)`,
+			roleID, removedIDs,
+		); err != nil {
+			return nil, fmt.Errorf("set role permissions: remove: %w", err)
+		}
+	}
+
+	// Dropping settings:manage must not orphan the system; the transaction
+	// rolls back if no user could manage roles and users afterwards.
+	removesManage := false
+	for _, n := range removed {
+		if n == "settings:manage" {
+			removesManage = true
+			break
+		}
+	}
+	if removesManage {
+		managers, err := countRBACManagers(tx)
+		if err != nil {
+			return nil, fmt.Errorf("set role permissions: %w", err)
+		}
+		if managers == 0 {
+			return nil, ErrLastManagerProtected
+		}
+	}
+
+	if len(addedIDs) > 0 {
+		for _, pid := range addedIDs {
+			if _, err := tx.Exec(
+				`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				roleID, pid,
+			); err != nil {
+				return nil, fmt.Errorf("set role permissions: add: %w", err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("set role permissions: %w", err)
+	}
+
+	if len(added) > 0 || len(removed) > 0 {
+		changes, _ := json.Marshal(map[string]any{
+			"permissions": map[string]any{"added": added, "removed": removed},
+		})
+		s.logActivity(roleID, "role", "update", string(changes), actorID)
+	}
+
+	perms, err := s.getRolePermissions(roleID)
+	if err != nil {
+		return nil, fmt.Errorf("set role permissions: reload: %w", err)
+	}
+	return &Role{
+		ID:          roleID,
+		Name:        roleName,
+		Description: description,
+		Permissions: perms,
+		CreatedAt:   createdAt,
+		UpdatedAt:   updatedAt,
+	}, nil
 }
 
 func (s *Service) GetUserPermissions(userID string) ([]string, error) {
@@ -295,10 +619,14 @@ func (s *Service) getRolePermissions(roleID string) ([]Permission, error) {
 }
 
 // setUserRole sets the single role for a user. An empty roleID clears the
-// role. Demoting the last superadmin is blocked.
+// role. Removing the last superadmin — or the last user able to manage roles
+// and users — is blocked, whether the change clears the role or swaps it.
 func (s *Service) setUserRole(userID, roleID, actorID string) error {
 	if actorID != "" && actorID == userID {
 		return ErrSelfRoleChange
+	}
+	if !validUUID(userID) || (roleID != "" && !validUUID(roleID)) {
+		return ErrNotFound
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -332,50 +660,69 @@ func (s *Service) setUserRole(userID, roleID, actorID string) error {
 		return ErrNotFound
 	}
 
-	if roleID != "" {
-		var isSuperadmin, hasWildcard bool
-		if err := tx.QueryRow(
-			`SELECT r.name = 'superadmin', EXISTS(
-				SELECT 1 FROM role_permissions rp
-				JOIN permissions p ON p.id = rp.permission_id
-				WHERE rp.role_id = r.id AND p.name = '*'
-			)
-			FROM roles r WHERE r.id = $1`,
-			roleID,
-		).Scan(&isSuperadmin, &hasWildcard); err != nil {
+	cur, err := userRoleStatus(tx, userID)
+	if err != nil {
+		return fmt.Errorf("set user role: %w", err)
+	}
+	next, err := roleStatusForID(tx, roleID)
+	if err != nil {
+		return fmt.Errorf("set user role: %w", err)
+	}
+
+	// Only an actor who already holds the wildcard may assign a role that
+	// carries it (the superadmin role); settings:manage alone must not mint
+	// new superadmins.
+	if next.hasWildcard {
+		actorIsSuper, err := userHoldsWildcard(tx, actorID)
+		if err != nil {
 			return fmt.Errorf("set user role: %w", err)
 		}
-		if hasWildcard {
-			// Only an actor who already holds the wildcard may assign a role
-			// that carries it (the superadmin role); rbac:manage alone must
-			// not mint new superadmins.
-			actorIsSuper, err := userHoldsWildcard(tx, actorID)
-			if err != nil {
-				return fmt.Errorf("set user role: %w", err)
-			}
-			if !actorIsSuper {
-				return ErrSuperadminAssignmentRestricted
-			}
-		}
-		if !isSuperadmin {
-			// Demotion (or role swap): protect the last superadmin.
-			others, err := countSuperadmins(tx, userID)
-			if err != nil {
-				return fmt.Errorf("set user role: %w", err)
-			}
-			if others == 0 {
-				return ErrLastSuperadminProtected
-			}
+		if !actorIsSuper {
+			return ErrSuperadminAssignmentRestricted
 		}
 	}
 
+	// The last-of-kind protections apply to clears and swaps alike: losing
+	// the final superadmin or the final RBAC manager locks the system out.
+	if cur.isSuperadmin && !next.isSuperadmin {
+		others, err := countSuperadmins(tx, userID)
+		if err != nil {
+			return fmt.Errorf("set user role: %w", err)
+		}
+		if others == 0 {
+			return ErrLastSuperadminProtected
+		}
+	}
+	if cur.canManage && !next.canManage {
+		others, err := countOtherRBACManagers(tx, userID)
+		if err != nil {
+			return fmt.Errorf("set user role: %w", err)
+		}
+		if others == 0 {
+			return ErrLastManagerProtected
+		}
+	}
+
+	// Clearing passes NULL, not an empty string, so the role_id column is
+	// actually cleared instead of raising a 22P02 uuid error.
+	var roleArg any
+	if roleID != "" {
+		roleArg = roleID
+	}
 	if _, err := tx.Exec(
 		`UPDATE users SET role_id = $2, updated_at = now() WHERE id = $1`,
-		userID, roleID,
+		userID, roleArg,
 	); err != nil {
 		return fmt.Errorf("set user role: %w", err)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("set user role: %w", err)
+	}
+	changes, _ := json.Marshal(map[string]any{
+		"role": map[string]any{"old": nullName(cur.name), "new": nullName(next.name)},
+	})
+	s.logActivity(userID, "user", "update", string(changes), actorID)
+	return nil
 }
 
 // UserCan reports whether the user holds the permission, honoring the
@@ -442,7 +789,7 @@ func (s *Service) listUsers() ([]UserInfo, error) {
 	return users, nil
 }
 
-func (s *Service) createUser(name, email, password string) (*UserInfo, error) {
+func (s *Service) createUser(name, email, password string, actorID string) (*UserInfo, error) {
 	hash, err := auth.HashPassword(password, 12)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
@@ -460,10 +807,15 @@ func (s *Service) createUser(name, email, password string) (*UserInfo, error) {
 		}
 		return nil, fmt.Errorf("create user: %w", err)
 	}
+	changes, _ := json.Marshal(map[string]string{"name": name, "email": email})
+	s.logActivity(u.ID, "user", "create", string(changes), actorID)
 	return &u, nil
 }
 
 func (s *Service) deleteUser(id, actorID string) error {
+	if !validUUID(id) {
+		return ErrNotFound
+	}
 	if actorID != "" && actorID == id {
 		return ErrSelfDelete
 	}
@@ -514,7 +866,11 @@ func (s *Service) deleteUser(id, actorID string) error {
 	); err != nil {
 		return fmt.Errorf("revoke sessions: %w", err)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	s.logActivity(id, "user", "delete", `{"action":"deleted"}`, actorID)
+	return nil
 }
 
 // lockRBACMutations serializes mutations that can remove the last RBAC
@@ -541,6 +897,74 @@ func userHasRole(tx *sql.Tx, userID, roleName string) (bool, error) {
 	return exists, err
 }
 
+// validUUID reports whether s parses as a UUID, so malformed identifiers fail
+// with a clean not-found error instead of a database 22P02 error.
+func validUUID(s string) bool {
+	var u pgtype.UUID
+	return u.Scan(s) == nil
+}
+
+// roleStatus describes what a role confers for the purposes of the last-*
+// protections.
+type roleStatus struct {
+	name         string // role name, or "" when none
+	isSuperadmin bool   // the canonical superadmin role
+	hasWildcard  bool   // carries '*', i.e. unconditional access
+	canManage    bool   // could manage roles and users (settings:manage or *)
+}
+
+// roleStatusForID reports the status a role confers; an empty roleID confers
+// none.
+func roleStatusForID(tx *sql.Tx, roleID string) (roleStatus, error) {
+	var st roleStatus
+	if roleID == "" {
+		return st, nil
+	}
+	err := tx.QueryRow(
+		`SELECT r.name,
+			r.name = 'superadmin',
+			EXISTS(
+				SELECT 1 FROM role_permissions rp
+				JOIN permissions p ON p.id = rp.permission_id
+				WHERE rp.role_id = r.id AND p.name = '*'
+			),
+			EXISTS(
+				SELECT 1 FROM role_permissions rp
+				JOIN permissions p ON p.id = rp.permission_id
+				WHERE rp.role_id = r.id AND p.name IN ('settings:manage', '*')
+			)
+		FROM roles r WHERE r.id = $1`,
+		roleID,
+	).Scan(&st.name, &st.isSuperadmin, &st.hasWildcard, &st.canManage)
+	return st, err
+}
+
+// userRoleStatus reports the status of the role the user currently holds.
+func userRoleStatus(tx *sql.Tx, userID string) (roleStatus, error) {
+	var st roleStatus
+	var name sql.NullString
+	err := tx.QueryRow(
+		`SELECT r.name,
+			COALESCE(r.name = 'superadmin', false),
+			EXISTS(
+				SELECT 1 FROM role_permissions rp
+				JOIN permissions p ON p.id = rp.permission_id
+				WHERE rp.role_id = r.id AND p.name = '*'
+			),
+			EXISTS(
+				SELECT 1 FROM role_permissions rp
+				JOIN permissions p ON p.id = rp.permission_id
+				WHERE rp.role_id = r.id AND p.name IN ('settings:manage', '*')
+			)
+		FROM users u
+		LEFT JOIN roles r ON r.id = u.role_id
+		WHERE u.id = $1`,
+		userID,
+	).Scan(&name, &st.isSuperadmin, &st.hasWildcard, &st.canManage)
+	st.name = name.String
+	return st, err
+}
+
 // userHoldsWildcard reports whether the user's role carries the wildcard
 // permission. An empty userID (no authenticated actor) reports false.
 func userHoldsWildcard(tx *sql.Tx, userID string) (bool, error) {
@@ -561,7 +985,7 @@ func userHoldsWildcard(tx *sql.Tx, userID string) (bool, error) {
 }
 
 // userCanManageRBAC reports whether the user could manage roles and users,
-// either through rbac:manage or the wildcard.
+// either through settings:manage or the wildcard.
 func userCanManageRBAC(tx *sql.Tx, userID string) (bool, error) {
 	var can bool
 	err := tx.QueryRow(
@@ -569,7 +993,7 @@ func userCanManageRBAC(tx *sql.Tx, userID string) (bool, error) {
 			SELECT 1 FROM role_permissions rp
 			JOIN permissions p ON p.id = rp.permission_id
 			WHERE rp.role_id = (SELECT role_id FROM users WHERE id = $1)
-			  AND p.name IN ('rbac:manage', '*')
+			  AND p.name IN ('settings:manage', '*')
 		)`,
 		userID,
 	).Scan(&can)
@@ -586,9 +1010,25 @@ func countOtherRBACManagers(tx *sql.Tx, excludeID string) (int, error) {
 		  AND EXISTS(
 			SELECT 1 FROM role_permissions rp
 			JOIN permissions p ON p.id = rp.permission_id
-			WHERE rp.role_id = u.role_id AND p.name IN ('rbac:manage', '*')
+			WHERE rp.role_id = u.role_id AND p.name IN ('settings:manage', '*')
 		  )`,
 		excludeID,
+	).Scan(&count)
+	return count, err
+}
+
+// countRBACManagers counts every non-deleted user who could manage roles and
+// users.
+func countRBACManagers(tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRow(
+		`SELECT COUNT(DISTINCT u.id) FROM users u
+		WHERE u.deleted_at IS NULL
+		  AND EXISTS(
+			SELECT 1 FROM role_permissions rp
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE rp.role_id = u.role_id AND p.name IN ('settings:manage', '*')
+		  )`,
 	).Scan(&count)
 	return count, err
 }

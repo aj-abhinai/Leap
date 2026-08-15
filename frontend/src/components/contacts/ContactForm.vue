@@ -220,7 +220,7 @@ async function handleSave() {
       <Label>Tags</Label>
       <div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto rounded-md border p-3">
         <div v-for="t in settings.tags" :key="t.id" class="flex items-center gap-1.5">
-          <Checkbox :id="'tag-' + t.id" :checked="selectedTags.includes(t.id)" @update:checked="toggleTag(t.id)" />
+          <Checkbox :id="'tag-' + t.id" :model-value="selectedTags.includes(t.id)" @update:model-value="toggleTag(t.id)" />
           <Label :for="'tag-' + t.id" class="text-sm cursor-pointer">{{ t.name }}</Label>
         </div>
         <p v-if="settings.tags.length === 0" class="text-sm text-muted-foreground">No tags available. Create them in Settings.</p>

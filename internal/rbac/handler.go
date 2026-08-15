@@ -1,11 +1,13 @@
 package rbac
 
 import (
+	"crm/internal/auth"
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -33,12 +35,20 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "NOT_FOUND", Message: "Role or user not found"},
 			nil,
 		)
-	case errors.Is(err, ErrDuplicate):
+	case errors.Is(err, ErrDuplicate), errors.Is(err, ErrRoleInUse):
 		respond.JSON(
 			w,
 			http.StatusConflict,
 			nil,
 			&respond.Error{Code: "CONFLICT", Message: err.Error()},
+			nil,
+		)
+	case errors.Is(err, ErrInvalidPermission):
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
 			nil,
 		)
 	default:
@@ -92,6 +102,7 @@ func (h *Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		respond.JSON(
 			w,
@@ -102,7 +113,7 @@ func (h *Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	role, err := h.svc.createRole(req)
+	role, err := h.svc.createRole(req, ctxutil.GetUserID(r))
 	if err != nil {
 		h.respondError(w, err)
 		return
@@ -129,7 +140,20 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	role, err := h.svc.updateRole(id, req)
+	if req.Name != nil {
+		*req.Name = strings.TrimSpace(*req.Name)
+		if *req.Name == "" {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: "Name cannot be blank"},
+				nil,
+			)
+			return
+		}
+	}
+	role, err := h.svc.updateRole(id, req, ctxutil.GetUserID(r))
 	if err != nil {
 		h.respondError(w, err)
 		return
@@ -145,7 +169,7 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.svc.deleteRole(id); err != nil {
+	if err := h.svc.deleteRole(id, ctxutil.GetUserID(r)); err != nil {
 		h.respondError(w, err)
 		return
 	}
@@ -188,7 +212,7 @@ func (h *Handler) AssignPermission(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if err := h.svc.assignPermission(roleID, body.PermissionID); err != nil {
+	if err := h.svc.assignPermission(roleID, body.PermissionID, ctxutil.GetUserID(r)); err != nil {
 		h.respondError(w, err)
 		return
 	}
@@ -204,7 +228,7 @@ func (h *Handler) AssignPermission(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RemovePermission(w http.ResponseWriter, r *http.Request) {
 	roleID := chi.URLParam(r, "id")
 	permID := chi.URLParam(r, "permission_id")
-	if err := h.svc.removePermission(roleID, permID); err != nil {
+	if err := h.svc.removePermission(roleID, permID, ctxutil.GetUserID(r)); err != nil {
 		h.respondError(w, err)
 		return
 	}
@@ -228,6 +252,43 @@ func (h *Handler) GetRolePermissions(w http.ResponseWriter, r *http.Request) {
 		w,
 		http.StatusOK,
 		perms,
+		nil,
+		nil,
+	)
+}
+
+func (h *Handler) SetRolePermissions(w http.ResponseWriter, r *http.Request) {
+	roleID := chi.URLParam(r, "id")
+	var req SetRolePermissionsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	if req.PermissionIDs == nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "permission_ids is required"},
+			nil,
+		)
+		return
+	}
+	role, err := h.svc.setRolePermissions(roleID, req.PermissionIDs, ctxutil.GetUserID(r))
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		role,
 		nil,
 		nil,
 	)
@@ -274,17 +335,17 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if len(req.Password) < 8 {
+	if err := auth.ValidatePassword(req.Password); err != nil {
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
 			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: "Password must be at least 8 characters"},
+			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
 			nil,
 		)
 		return
 	}
-	user, err := h.svc.createUser(req.Name, req.Email, req.Password)
+	user, err := h.svc.createUser(req.Name, req.Email, req.Password, ctxutil.GetUserID(r))
 	if err != nil {
 		h.respondError(w, err)
 		return
