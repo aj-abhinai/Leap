@@ -166,7 +166,7 @@ func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, e
 		`UPDATE lead_stages SET
 			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
 			"order" = COALESCE($3, "order"),
-			color = CASE WHEN $4 IS NOT NULL THEN NULLIF($4, '') ELSE color END,
+			color = CASE WHEN $4::text IS NOT NULL THEN NULLIF($4, '') ELSE color END,
 			is_closing = COALESCE($5, is_closing),
 			updated_at = now()
 		WHERE id = $1

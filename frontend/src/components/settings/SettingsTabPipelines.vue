@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { onMounted, shallowRef } from 'vue'
+import { onMounted, ref, shallowRef } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { ArrowDown, ArrowUp, Layers, Plus, Trash2, Pencil } from '@lucide/vue'
+import { ArrowDown, ArrowUp, Check, Layers, Plus, Trash2, Pencil, X } from '@lucide/vue'
 
 interface Stage {
   id: string
@@ -26,8 +26,9 @@ const newPipelineName = shallowRef('')
 const newPipelineDesc = shallowRef('')
 const newPipelineError = shallowRef('')
 const creatingPipeline = shallowRef(false)
-const newStageNames = shallowRef<Record<string, string>>({})
-const editingStageNames = shallowRef<Record<string, string>>({})
+const newStageNames = ref<Record<string, string>>({})
+const editingStageId = shallowRef('')
+const editingStageName = shallowRef('')
 
 onMounted(() => loadPipelines())
 
@@ -83,13 +84,26 @@ async function createStage(pipelineId: string) {
   }
 }
 
+function startEditStage(stageId: string, name: string) {
+  editingStageId.value = stageId
+  editingStageName.value = name
+}
+
+function cancelEditStage() {
+  editingStageId.value = ''
+  editingStageName.value = ''
+}
+
 async function renameStage(stageId: string) {
-  const name = editingStageNames.value[stageId]?.trim()
-  if (!name) return
+  const name = editingStageName.value.trim()
+  if (!name) {
+    toast.error('Stage name is required')
+    return
+  }
   try {
     await apiClient.patch(`/api/stages/${stageId}`, { name })
     toast.success('Stage renamed')
-    editingStageNames.value[stageId] = ''
+    cancelEditStage()
     loadPipelines()
   } catch (e: any) {
     toast.error(e.message || 'Failed to rename stage')
@@ -169,38 +183,49 @@ async function deleteStage(stageId: string) {
               {{ s.name }}
             </Badge>
             <div class="ml-auto flex items-center gap-1">
-              <Input
-                v-model="editingStageNames[s.id]"
-                :placeholder="`Rename ${s.name}`"
-                class="h-8 w-40"
-                @keyup.enter="renameStage(s.id)"
-              />
-              <Button variant="ghost" size="icon-sm" :title="`Rename ${s.name}`" :aria-label="`Rename ${s.name}`" @click="renameStage(s.id)">
-                <Pencil class="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                :disabled="idx === 0"
-                :title="`Move ${s.name} up`"
-                :aria-label="`Move ${s.name} up`"
-                @click="reorderStage(s.id, s.order - 1)"
-              >
-                <ArrowUp class="size-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                :disabled="idx === (p.stages?.length ?? 0) - 1"
-                :title="`Move ${s.name} down`"
-                :aria-label="`Move ${s.name} down`"
-                @click="reorderStage(s.id, s.order + 1)"
-              >
-                <ArrowDown class="size-3.5" />
-              </Button>
-              <Button variant="ghost" size="icon-sm" :title="`Delete ${s.name}`" :aria-label="`Delete ${s.name}`" @click="deleteStage(s.id)">
-                <Trash2 class="size-3.5" />
-              </Button>
+              <template v-if="editingStageId === s.id">
+                <Input
+                  v-model="editingStageName"
+                  class="h-8 w-40"
+                  autofocus
+                  @keyup.enter="renameStage(s.id)"
+                  @keyup.esc="cancelEditStage"
+                />
+                <Button variant="outline" size="icon-sm" :title="`Save ${s.name}`" :aria-label="`Save ${s.name}`" @click="renameStage(s.id)">
+                  <Check class="size-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon-sm" title="Cancel" aria-label="Cancel" @click="cancelEditStage">
+                  <X class="size-3.5" />
+                </Button>
+              </template>
+              <template v-else>
+                <Button variant="ghost" size="icon-sm" :title="`Rename ${s.name}`" :aria-label="`Rename ${s.name}`" @click="startEditStage(s.id, s.name)">
+                  <Pencil class="size-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :disabled="idx === 0"
+                  :title="`Move ${s.name} up`"
+                  :aria-label="`Move ${s.name} up`"
+                  @click="reorderStage(s.id, s.order - 1)"
+                >
+                  <ArrowUp class="size-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :disabled="idx === (p.stages?.length ?? 0) - 1"
+                  :title="`Move ${s.name} down`"
+                  :aria-label="`Move ${s.name} down`"
+                  @click="reorderStage(s.id, s.order + 1)"
+                >
+                  <ArrowDown class="size-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon-sm" :title="`Delete ${s.name}`" :aria-label="`Delete ${s.name}`" @click="deleteStage(s.id)">
+                  <Trash2 class="size-3.5" />
+                </Button>
+              </template>
             </div>
           </div>
         </div>

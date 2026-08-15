@@ -65,6 +65,41 @@ func TestDeleteStageWithLeadsReturnsInUseIntegration(t *testing.T) {
 	}
 }
 
+func TestUpdateStageRenamesAndReordersIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipeline(t, db)
+	name := "Qualified"
+	order := 3
+	updated, err := svc.updateStage(stageID, UpdateStageRequest{Name: &name, Order: &order})
+	if err != nil {
+		t.Fatalf("update stage: %v", err)
+	}
+	if updated.Name != "Qualified" || updated.Order != 3 {
+		t.Errorf("updated stage = %+v, want name Qualified order 3", updated)
+	}
+
+	stages, err := svc.listAllStages([]string{pipelineID})
+	if err != nil {
+		t.Fatalf("list stages: %v", err)
+	}
+	if got := stages[pipelineID]; len(got) != 1 || got[0].Name != "Qualified" || got[0].Order != 3 {
+		t.Errorf("stages after update = %+v, want [Qualified order 3]", got)
+	}
+}
+
+func TestUpdateStageMissingReturnsNotFoundIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	name := "Renamed"
+	_, err := svc.updateStage("00000000-0000-0000-0000-000000000000", UpdateStageRequest{Name: &name})
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("update missing stage = %v, want ErrNotFound", err)
+	}
+}
+
 func seedPipeline(t *testing.T, db *sql.DB) (string, string) {
 	t.Helper()
 	var pipelineID string

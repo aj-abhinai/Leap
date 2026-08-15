@@ -42,6 +42,7 @@ const {
   kanbanColumns,
   loadLeads,
   moveStage,
+  bulkMoveStage,
 } = useLeadPipeline()
 
 const {
@@ -210,6 +211,8 @@ onMounted(async () => {
         @edit="openEdit"
         @view-activities="openActivities"
         @move-stage="moveStage"
+        @bulk-move="bulkMoveStage"
+        @stage-added="async () => { await pipelineStore.fetchPipelines(); loadLeads() }"
       />
     </div>
   </LayoutShell>

@@ -52,6 +52,28 @@ export function useLeadPipeline() {
     }
   }
 
+  async function bulkMoveStage(leadIds: string[], newStageId: string) {
+    // Bounded concurrency: fire at most BATCH at a time so a full-column
+    // select (up to 200 leads) doesn't hammer the API sequentially while
+    // still completing quickly. Results are counted, not surfaced per lead.
+    const BATCH = 6
+    let moved = 0
+    for (let i = 0; i < leadIds.length; i += BATCH) {
+      const chunk = leadIds.slice(i, i + BATCH)
+      const results = await Promise.allSettled(
+        chunk.map((id) => apiClient.patch(`/api/leads/${id}`, { stage_id: newStageId })),
+      )
+      moved += results.filter((r) => r.status === 'fulfilled').length
+    }
+    const failed = leadIds.length - moved
+    if (failed > 0) {
+      toast.error(`Moved ${moved} of ${leadIds.length} leads (${failed} failed)`)
+    } else if (moved > 0) {
+      toast.success(`Moved ${moved} leads`)
+    }
+    loadLeads()
+  }
+
   return {
     pipelineStore,
     leadsStore,
@@ -60,5 +82,6 @@ export function useLeadPipeline() {
     kanbanColumns,
     loadLeads,
     moveStage,
+    bulkMoveStage,
   }
 }
