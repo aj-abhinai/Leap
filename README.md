@@ -155,5 +155,5 @@ The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `l
 Health endpoints: `GET /healthz` (process alive) and `GET /readyz` (database ping).
 
 ## License
-
-MIT &copy; Abhinai
+CRM is distributed under the terms of the AGPLv3 License.  
+&copy; Abhinai  
