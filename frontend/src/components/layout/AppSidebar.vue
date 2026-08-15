@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { Settings, LayoutDashboard, Users, Folder } from '@lucide/vue'
+import { Settings, LayoutDashboard, Users, Folder, CalendarCheck } from '@lucide/vue'
 import {
   Sidebar,
   SidebarContent,
@@ -30,6 +30,11 @@ const navItems: { title: string; url: string; icon: Component }[] = [
     title: 'Leads',
     url: '/leads',
     icon: Folder,
+  },
+  {
+    title: 'Activities',
+    url: '/activities',
+    icon: CalendarCheck,
   },
 ]
 </script>

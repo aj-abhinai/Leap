@@ -115,11 +115,11 @@ func TestCreateActivityWithOutcomeSetsRespondedAtIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create lead: %v", err)
 	}
-	statusID := seedStatusTag(t, db, "No Reply")
+	statusID := seedQuickReplyTag(t, db, "No Reply")
 
 	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
 		Type:      "Call 1",
-		OutcomeID: &statusID,
+		QuickReplyID: &statusID,
 	})
 	if err != nil {
 		t.Fatalf("create activity with outcome: %v", err)
@@ -127,8 +127,8 @@ func TestCreateActivityWithOutcomeSetsRespondedAtIntegration(t *testing.T) {
 	if act.RespondedAt == nil {
 		t.Error("responded_at should be set when activity is created with an outcome")
 	}
-	if act.OutcomeName != "No Reply" {
-		t.Errorf("outcome_name = %q, want No Reply", act.OutcomeName)
+	if act.QuickReplyName != "No Reply" {
+		t.Errorf("quick_reply_name = %q, want No Reply", act.QuickReplyName)
 	}
 
 	// Activity created without an outcome has no responded_at.
@@ -154,8 +154,8 @@ func TestUpdateActivityMarksResponseOnceIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create lead: %v", err)
 	}
-	statusA := seedStatusTag(t, db, "No Reply")
-	statusB := seedStatusTag(t, db, "Share Details WA")
+	statusA := seedQuickReplyTag(t, db, "No Reply")
+	statusB := seedQuickReplyTag(t, db, "Share Details WA")
 
 	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"})
 	if err != nil {
@@ -163,7 +163,7 @@ func TestUpdateActivityMarksResponseOnceIntegration(t *testing.T) {
 	}
 
 	// First mark: responded_at is set.
-	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{OutcomeID: &statusA})
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &statusA})
 	if err != nil {
 		t.Fatalf("mark first outcome: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestUpdateActivityMarksResponseOnceIntegration(t *testing.T) {
 	first := updated.RespondedAt.Unix()
 
 	// Change outcome again: responded_at must NOT move.
-	changed, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{OutcomeID: &statusB})
+	changed, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &statusB})
 	if err != nil {
 		t.Fatalf("change outcome: %v", err)
 	}
@@ -195,28 +195,28 @@ func TestUpdateActivityRejectsNonStatusOutcomeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create lead: %v", err)
 	}
-	// A tag, not a status.
+	// A tag, not a quick reply.
 	var tagID string
 	if err := db.QueryRow(`INSERT INTO tags (name, type) VALUES ('VIP', 'tag') RETURNING id`).Scan(&tagID); err != nil {
 		t.Fatalf("seed tag: %v", err)
 	}
 
 	_, err = svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
-		Type:      "Call 1",
-		OutcomeID: &tagID,
+		Type:         "Call 1",
+		QuickReplyID: &tagID,
 	})
-	if !errors.Is(err, ErrInvalidOutcome) {
-		t.Errorf("create with non-status outcome = %v, want ErrInvalidOutcome", err)
+	if !errors.Is(err, ErrInvalidQuickReply) {
+		t.Errorf("create with non-quick-reply = %v, want ErrInvalidQuickReply", err)
 	}
 }
 
-func seedStatusTag(t *testing.T, db interface {
+func seedQuickReplyTag(t *testing.T, db interface {
 	QueryRow(query string, args ...any) *sql.Row
 }, name string) string {
 	t.Helper()
 	var id string
-	if err := db.QueryRow(`INSERT INTO tags (name, type) VALUES ($1, 'status') RETURNING id`, name).Scan(&id); err != nil {
-		t.Fatalf("seed status tag: %v", err)
+	if err := db.QueryRow(`INSERT INTO tags (name, type) VALUES ($1, 'quick_reply') RETURNING id`, name).Scan(&id); err != nil {
+		t.Fatalf("seed quick reply tag: %v", err)
 	}
 	return id
 }
@@ -384,12 +384,12 @@ func TestCreateActivityDoneWithOutcomeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create lead: %v", err)
 	}
-	statusID := seedStatusTag(t, db, "Closed Lost")
+	statusID := seedQuickReplyTag(t, db, "Closed Lost")
 
 	done := true
 	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
 		Type:      "Call 1",
-		OutcomeID: &statusID,
+		QuickReplyID: &statusID,
 		IsDone:    &done,
 	})
 	if err != nil {
@@ -460,4 +460,62 @@ func seedClosingStage(t *testing.T, db *sql.DB, pipelineID string) string {
 		t.Fatalf("seed closing stage: %v", err)
 	}
 	return id
+}
+
+func TestListAllActivitiesFiltersIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"}); err != nil {
+		t.Fatalf("create open task: %v", err)
+	}
+	done := true
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 2", IsDone: &done}); err != nil {
+		t.Fatalf("create done task: %v", err)
+	}
+
+	all, total, err := svc.listAllActivities(ActivityListFilters{Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("all total = %d, want 2", total)
+	}
+	if len(all) != 2 || all[0].LeadDisplayName == "" {
+		t.Errorf("expected 2 items with lead display name, got %d", len(all))
+	}
+
+	open, total, err := svc.listAllActivities(ActivityListFilters{Status: "open", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list open: %v", err)
+	}
+	if total != 1 || open[0].IsDone {
+		t.Errorf("open filter: total = %d, first is_done = %v; want 1 open task", total, open[0].IsDone)
+	}
+
+	doneList, total, err := svc.listAllActivities(ActivityListFilters{Status: "done", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list done: %v", err)
+	}
+	if total != 1 || !doneList[0].IsDone {
+		t.Errorf("done filter: total = %d", total)
+	}
+
+	searched, total, err := svc.listAllActivities(ActivityListFilters{Search: "alice", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list search: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("search 'alice' total = %d, want 2", total)
+	}
+	_ = searched
 }

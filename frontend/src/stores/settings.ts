@@ -5,7 +5,7 @@ import { apiClient } from '@/composables/useApi'
 export interface Tag {
   id: string
   name: string
-  type: 'tag' | 'status' | 'activity_type' | 'loss_reason'
+  type: 'tag' | 'status' | 'quick_reply' | 'activity_type' | 'loss_reason'
   color?: string
   group_name?: string
   sort_order: number
@@ -16,6 +16,7 @@ export interface Tag {
 export const useSettingsStore = defineStore('settings', () => {
   const tags = ref<Tag[]>([])
   const statuses = ref<Tag[]>([])
+  const quickReplies = ref<Tag[]>([])
   const activityTypes = ref<Tag[]>([])
   const lossReasons = ref<Tag[]>([])
   const loading = ref(false)
@@ -23,14 +24,16 @@ export const useSettingsStore = defineStore('settings', () => {
   async function fetchTags() {
     loading.value = true
     try {
-      const [tagsRes, statusesRes, activityTypesRes, lossReasonsRes] = await Promise.all([
+      const [tagsRes, statusesRes, quickRepliesRes, activityTypesRes, lossReasonsRes] = await Promise.all([
         apiClient.get('/api/tags?type=tag'),
         apiClient.get('/api/tags?type=status'),
+        apiClient.get('/api/tags?type=quick_reply'),
         apiClient.get('/api/tags?type=activity_type'),
         apiClient.get('/api/tags?type=loss_reason'),
       ])
       tags.value = tagsRes.data
       statuses.value = statusesRes.data
+      quickReplies.value = quickRepliesRes.data
       activityTypes.value = activityTypesRes.data
       lossReasons.value = lossReasonsRes.data
     } finally {
@@ -56,5 +59,5 @@ export const useSettingsStore = defineStore('settings', () => {
     await fetchTags()
   }
 
-  return { tags, statuses, activityTypes, lossReasons, loading, fetchTags, createTag, updateTag, deleteTag }
+  return { tags, statuses, quickReplies, activityTypes, lossReasons, loading, fetchTags, createTag, updateTag, deleteTag }
 })

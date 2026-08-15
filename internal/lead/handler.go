@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
@@ -55,7 +56,7 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive),
 		errors.Is(err, ErrContactRequired), errors.Is(err, ErrNoContactDetail),
-		errors.Is(err, ErrInvalidOutcome), errors.Is(err, ErrEmptyType):
+		errors.Is(err, ErrInvalidQuickReply), errors.Is(err, ErrEmptyType):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -317,6 +318,64 @@ func (h *Handler) PendingReminders(w http.ResponseWriter, r *http.Request) {
 		reminders,
 		nil,
 		nil,
+	)
+}
+
+// ListAllActivities serves the global activities list (GET /api/activities)
+// with filters, sort, and pagination. "mine" scopes to the requesting user.
+func (h *Handler) ListAllActivities(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	var from, to *time.Time
+	if v := q.Get("from"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			from = &t
+		}
+	}
+	if v := q.Get("to"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			to = &t
+		}
+	}
+
+	f := ActivityListFilters{
+		Status:  q.Get("status"),
+		Overdue: q.Get("overdue") == "true",
+		Mine:    q.Get("mine") == "true",
+		UserID:  ctxutil.GetUserID(r),
+		Type:    q.Get("type"),
+		Search:  q.Get("q"),
+		From:    from,
+		To:      to,
+		Sort:    q.Get("sort"),
+		Order:   q.Get("order"),
+	}
+
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	perPage, _ := strconv.Atoi(q.Get("per_page"))
+	if perPage < 1 {
+		perPage = 50
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+	f.Page = page
+	f.PerPage = perPage
+
+	items, total, err := h.svc.listAllActivities(f)
+	if err != nil {
+		respond.ServerError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		items,
+		nil,
+		&respond.Meta{Page: page, PerPage: perPage, Total: total},
 	)
 }
 

@@ -25,6 +25,12 @@ onMounted(() => {
         <SettingsTagStatusCard kind="status" title="Statuses" placeholder="Status name" />
       </AccordionContent>
     </AccordionItem>
+    <AccordionItem value="quick-replies">
+      <AccordionTrigger>Quick Replies</AccordionTrigger>
+      <AccordionContent>
+        <SettingsTagStatusCard kind="quick_reply" title="Quick Replies" placeholder="e.g. No Reply, Busy" />
+      </AccordionContent>
+    </AccordionItem>
     <AccordionItem value="activity-types">
       <AccordionTrigger>Activity Types</AccordionTrigger>
       <AccordionContent>

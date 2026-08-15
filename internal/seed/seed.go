@@ -215,17 +215,18 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		}
 	}
 
-	// Activity outcomes (the "what happened" chips in the activity form).
-	// Each carries a group (ordered palette section) and a behavior that drives
-	// the follow-up when the outcome is picked:
-	//   log        — record the outcome only (e.g. Interested)
+	// Activity quick replies (the "what happened" chips in the activity form).
+	// These are a separate catalog from contact statuses (ADR 020): each carries
+	// a group (ordered palette section) and a behavior that drives the follow-up
+	// when the quick reply is picked:
+	//   log        — record the reply only (e.g. Interested)
 	//   next       — prompt for the next time and auto-create the next task
 	//                of the same type (e.g. Not Connected, Rescheduled — repeat)
-	//   close_lost — record the outcome and move the lead to Closed Lost (ends)
-	activityStatuses := []struct {
-		name    string
-		group   string
-		order   int
+	//   close_lost — record the reply and move the lead to Closed Lost (ends)
+	quickReplies := []struct {
+		name     string
+		group    string
+		order    int
 		behavior string
 	}{
 		{"Share Details", "Connected", 0, "log"},
@@ -236,13 +237,13 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		{"Not Interested", "Heard Details", 0, "log"},
 		{"Closed Lost", "Heard Details", 1, "close_lost"},
 	}
-	for _, st := range activityStatuses {
+	for _, st := range quickReplies {
 		// On conflict, reconcile group/sort/behavior so an existing DB picks up
-		// the outcome-flow config instead of keeping the migration default
+		// the quick-reply config instead of keeping the migration default
 		// (empty group, behavior 'log'). Name/type/color are never touched.
 		_, err := db.Exec(
 			`INSERT INTO tags (name, type, group_name, sort_order, behavior)
-			VALUES ($1, 'status', $2, $3, $4)
+			VALUES ($1, 'quick_reply', $2, $3, $4)
 			ON CONFLICT (name, type) DO UPDATE SET
 				group_name = EXCLUDED.group_name,
 				sort_order = EXCLUDED.sort_order,
@@ -250,7 +251,7 @@ func seedTagsAndStatuses(db *sql.DB) error {
 			st.name, st.group, st.order, st.behavior,
 		)
 		if err != nil {
-			return fmt.Errorf("seed activity status %s: %w", st.name, err)
+			return fmt.Errorf("seed quick reply %s: %w", st.name, err)
 		}
 	}
 

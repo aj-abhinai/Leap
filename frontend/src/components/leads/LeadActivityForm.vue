@@ -26,7 +26,7 @@ const settings = useSettingsStore()
 
 const activityType = ref('')
 const description = ref('')
-const outcomeId = ref('')
+const quickReplyId = ref('')
 const scheduledDate = ref('')
 const scheduledTime = ref('')
 const remindDate = ref('')
@@ -38,16 +38,17 @@ const error = ref('')
 
 const activityTypes = computed(() => settings.activityTypes)
 
-// Quick chips reuse the status tags, grouped into an ordered palette. Each
-// status carries a behavior that decides the follow-up when tapped.
-const chips = computed(() => settings.statuses)
+// Quick-reply chips are a dedicated catalog (settings.quickReplies), separate
+// from contact statuses (ADR 020). Each quick reply carries a behavior that
+// decides the follow-up when tapped.
+const chips = computed(() => settings.quickReplies)
 
-const selectedChip = computed(() => chips.value.find((c) => c.id === outcomeId.value))
+const selectedChip = computed(() => chips.value.find((c) => c.id === quickReplyId.value))
 
 const groupedChips = computed(() => {
   const groups = new Map<string, typeof chips.value>()
   for (const chip of chips.value) {
-    const key = chip.group_name || 'Outcome'
+    const key = chip.group_name || 'Quick reply'
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(chip)
   }
@@ -77,8 +78,8 @@ watch([scheduledDate, scheduledTime], () => {
   }
 })
 
-function setChip(statusId: string) {
-  outcomeId.value = statusId
+function setChip(id: string) {
+  quickReplyId.value = id
   // Switching behaviors resets stale next/schedule state.
   nextDate.value = ''
   nextTime.value = ''
@@ -87,7 +88,7 @@ function setChip(statusId: string) {
 function clearForm() {
   activityType.value = ''
   description.value = ''
-  outcomeId.value = ''
+  quickReplyId.value = ''
   scheduledDate.value = ''
   scheduledTime.value = ''
   remindDate.value = ''
@@ -111,10 +112,10 @@ async function handleSave() {
   let payload: Record<string, unknown> = {
     type: activityType.value,
     description: description.value.trim(),
-    outcome_id: outcomeId.value || null,
+    quick_reply_id: quickReplyId.value || null,
   }
 
-  // Capture the behavior before clearForm() resets outcomeId — showCloseNotice
+  // Capture the behavior before clearForm() resets quickReplyId — showCloseNotice
   // derives from it and would recompute to false otherwise.
   const wasCloseLost = showCloseNotice.value
 
@@ -124,13 +125,13 @@ async function handleSave() {
       error.value = 'Pick the next date and time'
       return
     }
-    // "Log attempt + next": the current activity completes with the outcome and
+    // "Log attempt + next": the current activity completes with the quick reply and
     // the next occurrence of the same type is created for this time.
     payload.reschedule_at = next
   } else {
     payload.scheduled_at = mergeDateTime(scheduledDate.value, scheduledTime.value)
     payload.remind_at = mergeDateTime(remindDate.value, remindTime.value)
-    // A close_lost outcome completes the activity immediately so it is logged
+    // A close_lost quick reply completes the activity immediately so it is logged
     // as the closing touchpoint, not cancelled by the subsequent stage move.
     if (wasCloseLost) {
       payload.is_done = true
@@ -185,7 +186,7 @@ async function handleSave() {
               size="sm"
               variant="outline"
               class="h-7 px-2.5 text-xs"
-              :class="outcomeId === c.id ? 'border-primary text-primary' : ''"
+              :class="quickReplyId === c.id ? 'border-primary text-primary' : ''"
               @click="setChip(c.id)"
             >
               {{ c.name }}
@@ -202,7 +203,7 @@ async function handleSave() {
 
     <template v-if="showCloseNotice">
       <p class="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-        This outcome marks the lead as Closed Lost — open tasks will be cancelled.
+        This quick reply marks the lead as Closed Lost — open tasks will be cancelled.
       </p>
     </template>
 

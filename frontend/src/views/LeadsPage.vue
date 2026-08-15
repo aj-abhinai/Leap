@@ -63,7 +63,7 @@ const {
   openActivities,
 } = useActivityDrawer()
 
-// A close_lost outcome on an activity logs the outcome then moves the lead to
+// A close_lost quick reply on an activity logs the reply then moves the lead to
 // its pipeline's closing stage (prefer a "lost"-named stage, else the first
 // closing stage). Reaching a closing stage resolves the deal and cancels open
 // tasks, so the flow "ends there" for the lead.

@@ -63,6 +63,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/RemindersPage.vue'),
     meta: { title: 'Reminders' },
   },
+  {
+    path: '/activities',
+    name: 'Activities',
+    component: () => import('@/views/ActivitiesPage.vue'),
+    meta: { title: 'Activities' },
+  },
 ]
 
 const router = createRouter({

@@ -11,7 +11,7 @@ var (
 	// ErrDuplicate marks tag names that already exist.
 	ErrDuplicate = errors.New("tag name already exists")
 	// ErrInvalidType marks tag types outside the allowed catalog kinds.
-	ErrInvalidType = errors.New("type must be 'tag', 'status', 'activity_type' or 'loss_reason'")
+	ErrInvalidType = errors.New("type must be 'tag', 'status', 'quick_reply', 'activity_type' or 'loss_reason'")
 	// ErrInvalidBehavior marks behavior values outside the outcome actions.
 	ErrInvalidBehavior = errors.New("behavior must be 'log', 'next' or 'close_lost'")
 )
@@ -19,7 +19,7 @@ var (
 // validType reports whether a tag type is an allowed catalog kind.
 func validType(t string) bool {
 	switch t {
-	case "tag", "status", "activity_type", "loss_reason":
+	case "tag", "status", "quick_reply", "activity_type", "loss_reason":
 		return true
 	}
 	return false

@@ -30,10 +30,14 @@ const behaviorLabels: Record<string, string> = {
 }
 
 const props = defineProps<{
-  kind: 'tag' | 'status' | 'activity_type' | 'loss_reason'
+  kind: 'tag' | 'status' | 'quick_reply' | 'activity_type' | 'loss_reason'
   title: string
   placeholder: string
 }>()
+
+// Quick replies are the only catalog with group/behavior config;
+// plain statuses are general contact identifiers (ADR 020).
+const isQuickReply = computed(() => props.kind === 'quick_reply')
 
 const store = useSettingsStore()
 
@@ -47,6 +51,7 @@ const savingEdit = shallowRef(false)
 const items = computed(() => {
   switch (props.kind) {
     case 'status': return store.statuses
+    case 'quick_reply': return store.quickReplies
     case 'activity_type': return store.activityTypes
     case 'loss_reason': return store.lossReasons
     default: return store.tags
@@ -56,6 +61,7 @@ const items = computed(() => {
 const kindLabel = computed(() => {
   switch (props.kind) {
     case 'status': return 'Status'
+    case 'quick_reply': return 'Quick reply'
     case 'activity_type': return 'Activity type'
     case 'loss_reason': return 'Loss reason'
     default: return 'Tag'
@@ -142,30 +148,30 @@ async function saveEdit() {
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
-            <TableHead v-if="props.kind === 'status'">Group</TableHead>
-            <TableHead v-if="props.kind === 'status'">Behavior</TableHead>
+            <TableHead v-if="isQuickReply">Group</TableHead>
+            <TableHead v-if="isQuickReply">Behavior</TableHead>
             <TableHead class="w-24" />
           </TableRow>
         </TableHeader>
         <TableBody>
           <TableRow v-if="items.length === 0">
-            <TableCell :colspan="props.kind === 'status' ? 4 : 2" class="text-center text-muted-foreground text-sm py-4">
+            <TableCell :colspan="isQuickReply ? 4 : 2" class="text-center text-muted-foreground text-sm py-4">
               No {{ title.toLowerCase() }} yet
             </TableCell>
           </TableRow>
           <TableRow v-for="item in items" :key="item.id">
             <TableCell>{{ item.name }}</TableCell>
-            <TableCell v-if="props.kind === 'status'">
+            <TableCell v-if="isQuickReply">
               <span v-if="item.group_name" class="text-xs text-muted-foreground">{{ item.group_name }}</span>
               <span v-else class="text-xs text-muted-foreground/50">—</span>
             </TableCell>
-            <TableCell v-if="props.kind === 'status'">
+            <TableCell v-if="isQuickReply">
               <span v-if="item.behavior" class="text-xs">{{ behaviorLabels[item.behavior] || item.behavior }}</span>
               <span v-else class="text-xs text-muted-foreground/50">—</span>
             </TableCell>
             <TableCell class="text-right">
               <Button
-                v-if="props.kind === 'status'"
+                v-if="isQuickReply"
                 variant="ghost"
                 size="icon-sm"
                 :title="`Edit ${item.name}`"
@@ -195,8 +201,8 @@ async function saveEdit() {
       <Dialog :open="!!editing" @update:open="(v) => { if (!v) editing = null }">
         <DialogContent class="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Edit status</DialogTitle>
-            <DialogDescription>Configure the outcome group and follow-up behavior.</DialogDescription>
+            <DialogTitle>Edit quick reply</DialogTitle>
+            <DialogDescription>Configure the group and follow-up behavior.</DialogDescription>
           </DialogHeader>
           <div v-if="editing" class="space-y-4 py-2">
             <div class="space-y-2">
@@ -218,7 +224,7 @@ async function saveEdit() {
                   <SelectValue placeholder="Select behavior" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="log">Log only — record the outcome</SelectItem>
+                  <SelectItem value="log">Log only — record the reply</SelectItem>
                   <SelectItem value="next">Schedule next — log + create the next task</SelectItem>
                   <SelectItem value="close_lost">Close lost — log + move lead to Closed Lost</SelectItem>
                 </SelectContent>

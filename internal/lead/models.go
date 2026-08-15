@@ -64,19 +64,19 @@ type UpdateRequest struct {
 }
 
 type Activity struct {
-	ID          string     `json:"id"`
-	LeadID      string     `json:"lead_id"`
-	StageID     string     `json:"stage_id"`
-	StageName   string     `json:"stage_name,omitempty"`
-	UserID      *string    `json:"user_id,omitempty"`
-	UserName    string     `json:"user_name,omitempty"`
-	Type        string     `json:"type"`
-	Description string     `json:"description"`
-	OutcomeID   string     `json:"outcome_id,omitempty"`
-	OutcomeName string     `json:"outcome_name,omitempty"`
-	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
-	RemindAt    *time.Time `json:"remind_at,omitempty"`
-	RespondedAt *time.Time `json:"responded_at,omitempty"`
+	ID             string     `json:"id"`
+	LeadID         string     `json:"lead_id"`
+	StageID        string     `json:"stage_id"`
+	StageName      string     `json:"stage_name,omitempty"`
+	UserID         *string    `json:"user_id,omitempty"`
+	UserName       string     `json:"user_name,omitempty"`
+	Type           string     `json:"type"`
+	Description    string     `json:"description"`
+	QuickReplyID   string     `json:"quick_reply_id,omitempty"`
+	QuickReplyName string     `json:"quick_reply_name,omitempty"`
+	ScheduledAt    *time.Time `json:"scheduled_at,omitempty"`
+	RemindAt       *time.Time `json:"remind_at,omitempty"`
+	RespondedAt    *time.Time `json:"responded_at,omitempty"`
 	// OccurredAt is when the activity actually happened (stamped on completion).
 	OccurredAt  *time.Time `json:"occurred_at,omitempty"`
 	IsDone      bool       `json:"is_done"`
@@ -87,29 +87,30 @@ type Activity struct {
 }
 
 type CreateActivityRequest struct {
-	Type        string     `json:"type"`
-	Description string     `json:"description"`
-	OutcomeID   *string    `json:"outcome_id,omitempty"`
-	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
-	RemindAt    *time.Time `json:"remind_at,omitempty"`
-	// RescheduleAt, when set with an outcome, logs the completed attempt and
+	Type         string     `json:"type"`
+	Description  string     `json:"description"`
+	QuickReplyID *string    `json:"quick_reply_id,omitempty"`
+	ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
+	RemindAt     *time.Time `json:"remind_at,omitempty"`
+	// RescheduleAt, when set with a quick reply, logs the completed attempt and
 	// auto-creates the next occurrence of the same type at this time (the
 	// create-form equivalent of updateActivity's reschedule flow).
 	RescheduleAt *time.Time `json:"reschedule_at,omitempty"`
 	// IsDone, when true, creates the activity already completed (e.g. a
-	// close_lost outcome logged from the create form). occurred_at is stamped.
+	// close_lost quick reply logged from the create form). occurred_at is
+	// stamped.
 	IsDone *bool `json:"is_done,omitempty"`
 }
 
 type UpdateActivityRequest struct {
-	OutcomeID   *string    `json:"outcome_id,omitempty"`
-	IsDone      *bool      `json:"is_done,omitempty"`
-	Type        *string    `json:"type,omitempty"`
-	Description *string    `json:"description,omitempty"`
-	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
-	RemindAt    *time.Time `json:"remind_at,omitempty"`
-	OccurredAt  *time.Time `json:"occurred_at,omitempty"`
-	IsCancelled *bool      `json:"is_cancelled,omitempty"`
+	QuickReplyID *string    `json:"quick_reply_id,omitempty"`
+	IsDone       *bool      `json:"is_done,omitempty"`
+	Type         *string    `json:"type,omitempty"`
+	Description  *string    `json:"description,omitempty"`
+	ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
+	RemindAt     *time.Time `json:"remind_at,omitempty"`
+	OccurredAt   *time.Time `json:"occurred_at,omitempty"`
+	IsCancelled  *bool      `json:"is_cancelled,omitempty"`
 	// RescheduleAt, when set with is_done=true, logs the completed attempt and
 	// auto-creates the next occurrence of the same type at this time.
 	RescheduleAt *time.Time `json:"reschedule_at,omitempty"`
@@ -118,6 +119,30 @@ type UpdateActivityRequest struct {
 type SnoozeRequest struct {
 	// RemindAt is the new reminder time.
 	RemindAt time.Time `json:"remind_at"`
+}
+
+// ActivityListFilters drives the global activities list (GET /api/activities).
+type ActivityListFilters struct {
+	Status   string
+	Overdue  bool
+	Mine     bool
+	UserID   string
+	Type     string
+	Search   string
+	From     *time.Time
+	To       *time.Time
+	Sort     string
+	Order    string
+	Page     int
+	PerPage  int
+}
+
+// ActivityListItem is an Activity plus the lead context needed by the global
+// activities list: the lead display name and the linked contact id.
+type ActivityListItem struct {
+	Activity
+	LeadDisplayName string `json:"lead_display_name"`
+	ContactID       string `json:"contact_id"`
 }
 
 type StageHistory struct {

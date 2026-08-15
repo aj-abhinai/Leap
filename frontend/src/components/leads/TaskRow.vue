@@ -30,7 +30,7 @@ export interface ActivityRowActivity {
   lead_id: string
   type: string
   description: string
-  outcome_name?: string
+  quick_reply_name?: string
   scheduled_at?: string
   remind_at?: string
   occurred_at?: string
@@ -42,7 +42,7 @@ export interface ActivityRowActivity {
   created_at: string
 }
 
-export interface StatusChip {
+export interface QuickReplyChip {
   id: string
   name: string
   group_name?: string
@@ -59,7 +59,7 @@ const props = defineProps<{
   leadId: string
   activity: ActivityRowActivity
   overdue?: boolean
-  statuses: StatusChip[]
+  quickReplies: QuickReplyChip[]
   activityTypes: ActivityTypeOption[]
 }>()
 
@@ -127,15 +127,15 @@ async function saveEdit() {
 const rescheduling = shallowRef(false)
 const rescheduleDate = shallowRef('')
 const rescheduleTime = shallowRef('')
-const rescheduleOutcome = shallowRef('')
+const rescheduleQuickReply = shallowRef('')
 const savingReschedule = shallowRef(false)
 
-// Group the status chips into the ordered palette; a picked chip's behavior
-// decides the follow-up (log only / schedule next / close lost).
-const groupedStatuses = computed(() => {
-  const groups = new Map<string, StatusChip[]>()
-  for (const s of props.statuses) {
-    const key = s.group_name || 'Outcome'
+// Group the quick-reply chips into the ordered palette; a picked chip's
+// behavior decides the follow-up (log only / schedule next / close lost).
+const groupedQuickReplies = computed(() => {
+  const groups = new Map<string, QuickReplyChip[]>()
+  for (const s of props.quickReplies) {
+    const key = s.group_name || 'Quick reply'
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(s)
   }
@@ -146,7 +146,7 @@ const groupedStatuses = computed(() => {
 })
 
 const selectedRescheduleChip = computed(() =>
-  props.statuses.find((s) => s.id === rescheduleOutcome.value),
+  props.quickReplies.find((s) => s.id === rescheduleQuickReply.value),
 )
 
 const rescheduleBehavior = computed(() => selectedRescheduleChip.value?.behavior || 'next')
@@ -158,15 +158,15 @@ function startReschedule() {
   rescheduling.value = true
   rescheduleDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
   rescheduleTime.value = props.activity.scheduled_at ? toLocalTimeInput(props.activity.scheduled_at) : ''
-  rescheduleOutcome.value = ''
+  rescheduleQuickReply.value = ''
 }
 
 function cancelReschedule() {
   rescheduling.value = false
 }
 
-function pickRescheduleOutcome(id: string) {
-  rescheduleOutcome.value = id
+function pickrescheduleQuickReply(id: string) {
+  rescheduleQuickReply.value = id
   rescheduleDate.value = ''
   rescheduleTime.value = ''
 }
@@ -183,7 +183,7 @@ async function saveReschedule() {
     try {
       await apiClient.patch(`/api/leads/${props.leadId}/activities/${props.activity.id}`, {
         is_done: true,
-        outcome_id: rescheduleOutcome.value || null,
+        quick_reply_id: rescheduleQuickReply.value || null,
         reschedule_at: next,
       })
       toast.success('Attempt logged, next task created')
@@ -203,7 +203,7 @@ async function saveReschedule() {
   try {
     await apiClient.patch(`/api/leads/${props.leadId}/activities/${props.activity.id}`, {
       is_done: true,
-      outcome_id: rescheduleOutcome.value || null,
+      quick_reply_id: rescheduleQuickReply.value || null,
     })
     toast.success('Attempt logged')
     cancelReschedule()
@@ -219,7 +219,7 @@ async function saveReschedule() {
 }
 
 function statusChipClass(id: string): string {
-  return rescheduleOutcome.value === id ? 'border-primary text-primary' : ''
+  return rescheduleQuickReply.value === id ? 'border-primary text-primary' : ''
 }
 
 function typeLabel(type: string): string {
@@ -280,10 +280,10 @@ function typeLabel(type: string): string {
       <!-- Inline reschedule form: log attempt + create next task -->
       <div v-else-if="rescheduling" class="space-y-3">
         <p class="text-sm">Log this attempt.</p>
-        <div v-if="groupedStatuses.length" class="space-y-2">
-          <Label class="text-xs">Status</Label>
+        <div v-if="groupedQuickReplies.length" class="space-y-2">
+          <Label class="text-xs">Quick reply</Label>
           <div class="space-y-2">
-            <div v-for="g in groupedStatuses" :key="g.group">
+            <div v-for="g in groupedQuickReplies" :key="g.group">
               <p class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {{ g.group }}
               </p>
@@ -295,7 +295,7 @@ function typeLabel(type: string): string {
                   variant="outline"
                   class="h-7 px-2.5 text-xs"
                   :class="statusChipClass(s.id)"
-                  @click="pickRescheduleOutcome(s.id)"
+                  @click="pickrescheduleQuickReply(s.id)"
                 >
                   {{ s.name }}
                 </Button>
@@ -338,8 +338,8 @@ function typeLabel(type: string): string {
           <div class="min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-xs font-medium">{{ typeLabel(activity.type) }}</span>
-              <span v-if="activity.outcome_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
-                {{ activity.outcome_name }}
+              <span v-if="activity.quick_reply_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
+                {{ activity.quick_reply_name }}
               </span>
               <Badge v-if="overdue" variant="destructive" class="text-xs">Overdue</Badge>
               <Badge v-if="activity.is_reminded && activity.remind_at" variant="secondary" class="text-xs">Reminded</Badge>

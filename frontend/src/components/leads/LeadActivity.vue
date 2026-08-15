@@ -142,7 +142,7 @@ defineExpose({ fetchActivities })
             :lead-id="props.leadId"
             :activity="a"
             overdue
-            :statuses="settings.statuses"
+            :quick-replies="settings.quickReplies"
             :activity-types="settings.activityTypes"
             @changed="fetchActivities"
             @mark-done="markDone(a)"
@@ -161,7 +161,7 @@ defineExpose({ fetchActivities })
             :key="a.id"
             :lead-id="props.leadId"
             :activity="a"
-            :statuses="settings.statuses"
+            :quick-replies="settings.quickReplies"
             :activity-types="settings.activityTypes"
             @changed="fetchActivities"
             @mark-done="markDone(a)"
@@ -188,8 +188,8 @@ defineExpose({ fetchActivities })
                       >
                         {{ typeLabel(a.type) }}
                       </span>
-                      <span v-if="a.outcome_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
-                        {{ a.outcome_name }}
+                      <span v-if="a.quick_reply_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
+                        {{ a.quick_reply_name }}
                       </span>
                       <Badge v-if="a.is_cancelled" variant="secondary" class="text-xs">Cancelled</Badge>
                       <Badge v-else-if="a.is_done" variant="secondary" class="text-xs">Done</Badge>

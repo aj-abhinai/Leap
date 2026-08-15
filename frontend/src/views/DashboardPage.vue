@@ -4,14 +4,14 @@ import { useRouter } from 'vue-router'
 import { useContactsStore } from '@/stores/contacts'
 import { useLeadsStore } from '@/stores/leads'
 import { usePipelineStore } from '@/stores/pipeline'
-import { useActivityStore } from '@/stores/activity'
+import { useActivitiesStore } from '@/stores/activities'
 import { useRemindersStore } from '@/stores/reminders'
 import { useRBACStore } from '@/stores/rbac'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
-import { Users, FolderOpen, Bell, BellOff, TrendingUp, Calendar, Phone, Mail, UserPlus, ArrowRight } from '@lucide/vue'
+import { Users, FolderOpen, Bell, BellOff, TrendingUp, Calendar, ArrowRight } from '@lucide/vue'
 import { timeAgo } from '@/utils/time'
 import { formatCurrency } from '@/utils/format'
 import { formatReminderText, reminderIcon } from '@/utils/reminders'
@@ -20,7 +20,7 @@ const router = useRouter()
 const contactsStore = useContactsStore()
 const leadsStore = useLeadsStore()
 const pipelineStore = usePipelineStore()
-const activity = useActivityStore()
+const activitiesStore = useActivitiesStore()
 const remindersStore = useRemindersStore()
 const rbac = useRBACStore()
 const loading = shallowRef(true)
@@ -32,8 +32,8 @@ onMounted(async () => {
     remindersStore.fetchReminders(),
     pipelineStore.fetchPipelines(),
   ]
-  if (rbac.can('activity:read')) {
-    fetches.push(activity.fetchActivity(1, 10))
+  if (rbac.can('lead:read')) {
+    fetches.push(activitiesStore.fetchRecent(10))
   }
   try {
     await Promise.all(fetches)
@@ -45,14 +45,6 @@ onMounted(async () => {
     loading.value = false
   }
 })
-
-function activityIcon(action: string) {
-  const a = action.toLowerCase()
-  if (a.includes('create') || a.includes('added')) return UserPlus
-  if (a.includes('update') || a.includes('edit')) return Mail
-  if (a.includes('call') || a.includes('phone')) return Phone
-  return Calendar
-}
 
 const pipeline = computed(() => pipelineStore.pipelines[0] ?? null)
 const pipelineLeads = computed(() => leadsStore.leads)
@@ -85,6 +77,10 @@ function goToLeads() {
 
 function goToReminders() {
   router.push({ name: 'Reminders' })
+}
+
+function goToActivities() {
+  router.push({ name: 'Activities' })
 }
 </script>
 
@@ -303,6 +299,9 @@ function goToReminders() {
               <TrendingUp class="size-4 text-muted-foreground" />
               <CardTitle>Recent Activity</CardTitle>
             </div>
+            <Button variant="ghost" size="sm" class="text-muted-foreground" @click="goToActivities">
+              View all <ArrowRight class="ml-1 size-3.5" />
+            </Button>
           </CardHeader>
           <CardContent>
             <div v-if="loading" class="space-y-3">
@@ -315,24 +314,28 @@ function goToReminders() {
                 <Skeleton class="h-3 w-16" />
               </div>
             </div>
-            <div v-else-if="activity.entries.length === 0" class="flex flex-col items-center justify-center py-10 text-center">
+            <div v-else-if="activitiesStore.recent.length === 0" class="flex flex-col items-center justify-center py-10 text-center">
               <Calendar class="size-10 text-muted-foreground/40 mb-3" />
               <p class="text-sm font-medium text-muted-foreground">No recent activity</p>
-              <p class="text-xs text-muted-foreground/60 mt-1">Activity will appear here as you use the CRM</p>
+              <p class="text-xs text-muted-foreground/60 mt-1">Activity will appear here as you work leads</p>
             </div>
             <div v-else class="space-y-1">
               <div
-                v-for="entry in activity.entries"
+                v-for="entry in activitiesStore.recent"
                 :key="entry.id"
                 class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted/50"
               >
                 <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
-                  <component :is="activityIcon(entry.action)" class="size-3.5 text-muted-foreground" />
+                  <component :is="reminderIcon(entry.type)" class="size-3.5 text-muted-foreground" />
                 </div>
                 <div class="min-w-0 flex-1">
                   <p class="truncate text-sm">
-                    <span class="font-medium">{{ entry.action }}</span>
-                    <span class="text-muted-foreground"> · {{ entry.description }}</span>
+                    <span class="font-medium">{{ entry.type }}</span>
+                    <span class="text-muted-foreground"> · {{ entry.lead_display_name }}</span>
+                    <span v-if="entry.quick_reply_name" class="text-muted-foreground"> · {{ entry.quick_reply_name }}</span>
+                  </p>
+                  <p v-if="entry.description" class="mt-0.5 truncate text-xs text-muted-foreground">
+                    {{ entry.description }}
                   </p>
                 </div>
                 <span class="shrink-0 text-xs text-muted-foreground">
