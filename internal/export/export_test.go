@@ -120,10 +120,10 @@ func TestExportContactsCSVIntegration(t *testing.T) {
 	if evilRow == nil {
 		t.Fatal("evil contact row not found in export")
 	}
-	if row[3] != "+91 98765 43210" {
-		t.Errorf("primary_phone = %q, want primary", row[3])
+	if row[3] != "'+91 98765 43210" {
+		t.Errorf("primary_phone = %q, want sanitized primary (leading + neutralized)", row[3])
 	}
-	if row[4] != "+91 98765 43210; +91 11111 22222" {
+	if row[4] != "'+91 98765 43210; +91 11111 22222" {
 		t.Errorf("all_phones = %q, want primary-first joined", row[4])
 	}
 	if row[5] != "alice@example.com" {

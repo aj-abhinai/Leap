@@ -26,9 +26,16 @@ func NullPtr(p *string) *string {
 var nonDigit = regexp.MustCompile(`\D`)
 
 // NormalizePhone keeps only ASCII digits so identical numbers with different
-// formatting collapse to one lookup key.
+// formatting collapse to one lookup key. A leading Indian country code (+91 or
+// 91) is dropped from numbers longer than 10 digits, so "+91 98765 43210" and
+// "98765 43210" dedupe to the same key without touching 10-digit numbers that
+// happen to start with 91.
 func NormalizePhone(phone string) string {
-	return nonDigit.ReplaceAllString(phone, "")
+	digits := nonDigit.ReplaceAllString(phone, "")
+	if len(digits) > 10 && strings.HasPrefix(digits, "91") {
+		digits = digits[2:]
+	}
+	return digits
 }
 
 // NormalizeEmail trims and lowercases so case/whitespace differences collapse

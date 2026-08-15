@@ -232,7 +232,7 @@ func (s *Service) insertContactsBulk(pending []pendingContact) error {
 	if len(tagContactIDs) > 0 {
 		if _, err := tx.Exec(
 			`INSERT INTO contact_tags (contact_id, tag_id)
-			SELECT cid, tid FROM unnest($1::text[], $2::text[]) AS x(cid, tid)
+			SELECT cid::uuid, tid::uuid FROM unnest($1::text[], $2::text[]) AS x(cid, tid)
 			ON CONFLICT DO NOTHING`,
 			tagContactIDs, tagIDsForInsert,
 		); err != nil {
@@ -242,7 +242,7 @@ func (s *Service) insertContactsBulk(pending []pendingContact) error {
 	if len(phoneContactIDs) > 0 {
 		if _, err := tx.Exec(
 			`INSERT INTO contact_phones (contact_id, value, is_primary)
-			SELECT cid, val, true FROM unnest($1::text[], $2::text[]) AS x(cid, val)`,
+			SELECT cid::uuid, val, true FROM unnest($1::text[], $2::text[]) AS x(cid, val)`,
 			phoneContactIDs, phoneValues,
 		); err != nil {
 			return fmt.Errorf("bulk insert contact phones: %w", err)
@@ -251,7 +251,7 @@ func (s *Service) insertContactsBulk(pending []pendingContact) error {
 	if len(emailContactIDs) > 0 {
 		if _, err := tx.Exec(
 			`INSERT INTO contact_emails (contact_id, value, is_primary)
-			SELECT cid, val, true FROM unnest($1::text[], $2::text[]) AS x(cid, val)`,
+			SELECT cid::uuid, val, true FROM unnest($1::text[], $2::text[]) AS x(cid, val)`,
 			emailContactIDs, emailValues,
 		); err != nil {
 			return fmt.Errorf("bulk insert contact emails: %w", err)

@@ -111,8 +111,8 @@ func (s *Service) updatePipeline(id string, req UpdatePipelineRequest) (*Pipelin
 	var p Pipeline
 	err := s.db.QueryRow(
 		`UPDATE pipelines SET
-			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
-			description = CASE WHEN $3 IS NOT NULL THEN NULLIF($3, '') ELSE description END,
+			name = CASE WHEN NULLIF($2::text, '') IS NOT NULL THEN $2 ELSE name END,
+			description = CASE WHEN $3::text IS NOT NULL THEN NULLIF($3, '') ELSE description END,
 			updated_at = now()
 		WHERE id = $1
 		RETURNING id, name, COALESCE(description, ''), created_at, updated_at`,
@@ -164,10 +164,10 @@ func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, e
 	var st Stage
 	err := s.db.QueryRow(
 		`UPDATE lead_stages SET
-			name = CASE WHEN NULLIF($2, '') IS NOT NULL THEN $2 ELSE name END,
-			"order" = COALESCE($3, "order"),
+			name = CASE WHEN NULLIF($2::text, '') IS NOT NULL THEN $2 ELSE name END,
+			"order" = COALESCE($3::integer, "order"),
 			color = CASE WHEN $4::text IS NOT NULL THEN NULLIF($4, '') ELSE color END,
-			is_closing = COALESCE($5, is_closing),
+			is_closing = COALESCE($5::boolean, is_closing),
 			updated_at = now()
 		WHERE id = $1
 		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, created_at, updated_at`,

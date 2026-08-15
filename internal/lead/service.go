@@ -283,7 +283,7 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	if phone := util.NormalizePhone(nc.Phone); phone != "" {
 		var found string
 		err := tx.QueryRow(
-			`SELECT contact_id FROM contact_phones WHERE regexp_replace(value, '\D', '', 'g') = $1 LIMIT 1`,
+			`SELECT contact_id FROM contact_phones WHERE regexp_replace(value, '\D', '', 'g') IN ($1, '91' || $1) LIMIT 1`,
 			phone,
 		).Scan(&found)
 		if err == nil {

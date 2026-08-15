@@ -33,10 +33,16 @@ func TestDeletePipelineWithLeadsReturnsInUseIntegration(t *testing.T) {
 	svc := NewService(db)
 
 	pipelineID, stageID := seedPipeline(t, db)
+	var contactID string
+	if err := db.QueryRow(
+		`INSERT INTO contacts (name, phone) VALUES ('Alice', '9876543210') RETURNING id`,
+	).Scan(&contactID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
 	var leadID string
 	if err := db.QueryRow(
-		`INSERT INTO leads (name, pipeline_id, stage_id) VALUES ('Alice', $1, $2) RETURNING id`,
-		pipelineID, stageID,
+		`INSERT INTO leads (contact_id, pipeline_id, stage_id) VALUES ($1, $2, $3) RETURNING id`,
+		contactID, pipelineID, stageID,
 	).Scan(&leadID); err != nil {
 		t.Fatalf("seed lead: %v", err)
 	}
@@ -52,9 +58,15 @@ func TestDeleteStageWithLeadsReturnsInUseIntegration(t *testing.T) {
 	svc := NewService(db)
 
 	pipelineID, stageID := seedPipeline(t, db)
+	var contactID string
+	if err := db.QueryRow(
+		`INSERT INTO contacts (name, phone) VALUES ('Alice', '9876543210') RETURNING id`,
+	).Scan(&contactID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
 	if _, err := db.Exec(
-		`INSERT INTO leads (name, pipeline_id, stage_id) VALUES ('Alice', $1, $2)`,
-		pipelineID, stageID,
+		`INSERT INTO leads (contact_id, pipeline_id, stage_id) VALUES ($1, $2, $3)`,
+		contactID, pipelineID, stageID,
 	); err != nil {
 		t.Fatalf("seed lead: %v", err)
 	}

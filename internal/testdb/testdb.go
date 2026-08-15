@@ -41,6 +41,7 @@ func New(t *testing.T) *sql.DB {
 		t.Fatalf("testdb: open admin connection: %v", err)
 	}
 	defer admin.Close()
+	admin.SetMaxOpenConns(4)
 	ensureDatabase(t, admin, dbName)
 
 	testDSN := setPath(t, dsn, "/"+dbName)
@@ -49,6 +50,9 @@ func New(t *testing.T) *sql.DB {
 		t.Fatalf("testdb: open test database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	// Cap the pool: pgx defaults to one connection per CPU, and the full suite
+	// runs many packages in parallel, which can exhaust the database server.
+	db.SetMaxOpenConns(8)
 	if err := db.Ping(); err != nil {
 		t.Fatalf("testdb: ping test database: %v", err)
 	}
@@ -111,6 +115,7 @@ func migrateDB(t *testing.T, pkgDir, dsn string) {
 	if err != nil {
 		t.Fatalf("testdb: migrate init: %v", err)
 	}
+	defer m.Close()
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		t.Fatalf("testdb: migrate up: %v", err)
 	}

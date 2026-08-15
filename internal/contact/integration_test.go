@@ -62,7 +62,7 @@ func TestCreateContactWithStatusIntegration(t *testing.T) {
 		t.Fatalf("seed status tag: %v", err)
 	}
 
-	created, err := svc.create(CreateRequest{Name: "Alice Example", StatusID: &statusID})
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210", StatusID: &statusID})
 	if err != nil {
 		t.Fatalf("create contact with status: %v", err)
 	}
@@ -75,9 +75,16 @@ func TestListContactsIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	for _, name := range []string{"Alice Example", "Bob Example", "Carol Example"} {
-		if _, err := svc.create(CreateRequest{Name: name}); err != nil {
-			t.Fatalf("create %q: %v", name, err)
+	for _, tc := range []struct {
+		name  string
+		phone string
+	}{
+		{"Alice Example", "9876543210"},
+		{"Bob Example", "9876543211"},
+		{"Carol Example", "9876543212"},
+	} {
+		if _, err := svc.create(CreateRequest{Name: tc.name, Phone: tc.phone}); err != nil {
+			t.Fatalf("create %q: %v", tc.name, err)
 		}
 	}
 
@@ -140,11 +147,11 @@ func TestSoftDeleteContactIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	created, err := svc.create(CreateRequest{Name: "Alice Example"})
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210"})
 	if err != nil {
 		t.Fatalf("create contact: %v", err)
 	}
-	if _, err := svc.create(CreateRequest{Name: "Bob Example"}); err != nil {
+	if _, err := svc.create(CreateRequest{Name: "Bob Example", Phone: "9876543211"}); err != nil {
 		t.Fatalf("create second contact: %v", err)
 	}
 
@@ -372,11 +379,43 @@ func TestBulkCreateImportsFreshRowsIntegration(t *testing.T) {
 	if total != 2 || len(contacts) != 2 {
 		t.Errorf("total = %d, want 2", total)
 	}
+
+	// Child rows must actually land: the batch inserts cast text arrays to
+	// uuid, so asserting values here catches a silently dropped column or a
+	// wrong-type coercion before it reaches production.
+	var aliceID string
+	if err := db.QueryRow(`SELECT id FROM contacts WHERE name = 'Alice'`).Scan(&aliceID); err != nil {
+		t.Fatalf("find alice: %v", err)
+	}
+	var phone string
+	if err := db.QueryRow(
+		`SELECT value FROM contact_phones WHERE contact_id = $1 AND is_primary`,
+		aliceID,
+	).Scan(&phone); err != nil {
+		t.Fatalf("find alice phone: %v", err)
+	}
+	if phone != "9876543210" {
+		t.Errorf("alice phone = %q, want 9876543210", phone)
+	}
+	var email string
+	if err := db.QueryRow(
+		`SELECT value FROM contact_emails WHERE contact_id = $1 AND is_primary`,
+		aliceID,
+	).Scan(&email); err != nil {
+		t.Fatalf("find alice email: %v", err)
+	}
+	if email != "alice@example.com" {
+		t.Errorf("alice email = %q, want alice@example.com", email)
+	}
 }
 
 func TestBulkCreateReportsUnknownTagsIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
+
+	if _, err := db.Exec(`INSERT INTO tags (name, type) VALUES ('Hot', 'tag')`); err != nil {
+		t.Fatalf("seed tag: %v", err)
+	}
 
 	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
 		{Name: "Alice", Tags: []string{"Hot", "NotATag"}},
@@ -461,7 +500,7 @@ func TestUpdateContactClearsStatusIntegration(t *testing.T) {
 	).Scan(&statusID); err != nil {
 		t.Fatalf("seed status tag: %v", err)
 	}
-	created, err := svc.create(CreateRequest{Name: "Alice", StatusID: &statusID})
+	created, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210", StatusID: &statusID})
 	if err != nil {
 		t.Fatalf("create contact with status: %v", err)
 	}
@@ -515,7 +554,7 @@ func TestCreateContactReportsUnknownTagWarningIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	created, err := svc.create(CreateRequest{Name: "Alice", TagIDs: []string{"00000000-0000-0000-0000-000000000000"}})
+	created, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210", TagIDs: []string{"00000000-0000-0000-0000-000000000000"}})
 	if err != nil {
 		t.Fatalf("create contact: %v", err)
 	}
@@ -711,6 +750,26 @@ func TestResolveByPhoneMatchesFormattedDifferentlyIntegration(t *testing.T) {
 	}
 	if matches[0].Phone != "9876543210" {
 		t.Errorf("phone = %q, want 9876543210", matches[0].Phone)
+	}
+}
+
+func TestResolveByPhoneMatchesCountryCodeIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{
+		Name:  "Alice Example",
+		Phone: "+91 98765 43210",
+	}); err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	matches, err := svc.resolveByPhone("9876543210")
+	if err != nil {
+		t.Fatalf("resolve by phone: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Name != "Alice Example" {
+		t.Fatalf("matches = %+v, want Alice Example resolved by bare number", matches)
 	}
 }
 

@@ -286,7 +286,7 @@ func (s *Service) resolveByPhone(phone string) ([]ResolveMatch, error) {
 			SELECT value FROM contact_phones WHERE contact_id = c.id AND is_primary LIMIT 1
 		) pcp ON true
 		WHERE c.deleted_at IS NULL
-		  AND regexp_replace(cp.value, '\D', '', 'g') = $1
+		  AND regexp_replace(cp.value, '\D', '', 'g') IN ($1, '91' || $1)
 		ORDER BY c.id, c.updated_at DESC`,
 		key,
 	)
@@ -555,6 +555,29 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		}
 		if err := syncPhonesEmailsTx(tx, id, phones, emails, "", ""); err != nil {
 			return nil, fmt.Errorf("update contact: sync phones and emails: %w", err)
+		}
+	} else if req.Phone != nil || req.Email != nil {
+		// Scalar-only update: the child tables are the source of truth for
+		// reads, so the scalar is mirrored into that type's child rows — the
+		// whole list for the sent type is replaced (scalar semantics; list
+		// clients send phones/emails and take the branch above). An empty
+		// scalar clears the type; a type the client did not send is untouched.
+		var phones []PhoneValue
+		var emails []EmailValue
+		if req.Phone != nil {
+			phones = []PhoneValue{}
+			if *req.Phone != "" {
+				phones = append(phones, PhoneValue{Value: *req.Phone, IsPrimary: true})
+			}
+		}
+		if req.Email != nil {
+			emails = []EmailValue{}
+			if *req.Email != "" {
+				emails = append(emails, EmailValue{Value: *req.Email, IsPrimary: true})
+			}
+		}
+		if err := syncPhonesEmailsTx(tx, id, phones, emails, "", ""); err != nil {
+			return nil, fmt.Errorf("update contact: sync scalar phone and email: %w", err)
 		}
 	}
 
