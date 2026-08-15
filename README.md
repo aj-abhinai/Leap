@@ -1,20 +1,35 @@
 # Prayaan CRM
 
-> A simple, single-tenant pipeline CRM for internal teams — contacts, leads with configurable stages, and role-based access control, all in a single binary.
-
----
+<br> Self-hosted pipeline CRM for internal teams. Contacts, kanban leads with configurable stages, role-based access control, and a full audit log — in a single binary.
 
 ## Features
 
-- **Contact management** — Track name, email, phone, location, and age for every contact.
-- **Pipeline-based leads** — Configurable pipelines with custom stages. Drag leads between stages on a kanban board.
-- **Program catalog** — Fixed-price programs with a settings tab; lead values are price snapshots at creation time and never rewrite when catalog prices change.
-- **Dynamic RBAC** — Create custom roles with granular permissions. Superadmin bootstraps on first run.
-- **Activity logs** — Every mutation is tracked with who did what and when.
-- **Secure sessions** — Short-lived access tokens in memory; the refresh token lives in an HttpOnly cookie, with CSRF protection on cookie-authenticated requests.
-- **Single binary** — Go backend embeds the Vue frontend via stuffbin. Deploy with one `docker compose` command.
+- **Contacts**  
+  The single source of truth for every client. Multiple phones and emails per contact with a primary, tags, custom statuses, notes, and CSV bulk import and export.
 
----
+- **Pipeline kanban**  
+  Configurable pipelines with custom stages. Drag leads between stages on a kanban board. Cards preview the next task and last touch, with overdue tasks flagged red.
+
+- **Lead activities & reminders**  
+  A timeline of tasks per lead — calls, follow-ups, notes. Quick replies capture outcomes and drive the flow: log only, auto-create the next task, or close the lead as lost. Reminders are snoozable and surface overdue work.
+
+- **Program catalog**  
+  Fixed-price programs managed in Settings. Lead values are price snapshots at creation time — catalog price changes never rewrite existing leads.
+
+- **Dynamic RBAC**  
+  Create custom roles with per-action permissions on contacts, leads, pipelines, users, and settings. Superadmin bootstraps on first run.
+
+- **Audit log**  
+  Every mutation is recorded with who did what and when, including a JSON diff of the changes. Read-only views and an activity feed for the whole team.
+
+- **Secure sessions**  
+  Short-lived JWT access tokens in memory; the refresh token lives in an HttpOnly cookie with CSRF protection on cookie-authenticated requests. Login and refresh are rate-limited.
+
+- **Modern UI**  
+  Vue 3, TypeScript, Tailwind CSS v4, and shadcn-vue. Light, dark, and system themes with no flash on first paint.
+
+- **Single binary**  
+  The Go backend embeds the Vue frontend and database migrations via stuffbin. Deploy with one `docker compose` command — no separate asset directories.
 
 ## Tech stack
 
@@ -24,41 +39,38 @@
 | Frontend | Vue 3, TypeScript, Tailwind CSS v4, shadcn-vue, Pinia, TanStack Query |
 | Database | PostgreSQL 17 |
 
----
-
-## Quick start
+## Installation
 
 ### Docker (development)
 
 ```shell
-# One command — dev config (config.dev.toml), loopback binds, admin/admin
+# One command — dev config, loopback binds, admin/admin bootstrap
 just docker-up
-# Or, equivalently:
-# docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
 ```
 
 Go to `http://localhost:9000` and log in with `admin@admin.com` / `admin`.
 
-> These are **development-only** bootstrap credentials, reachable only through the dev
-> startup paths above. Production refuses them (see Deployment).
+> Development-only bootstrap credentials, reachable only through the dev startup paths.
+> Production refuses them.
 
-### Build from source
+### Docker (production)
 
 ```shell
-# Requires Go 1.25+, Node 22+, pnpm, and a running Postgres
-just build
+# 1. Copy and edit the production env file (compose reads it from docker/)
+cp docker/.env.example docker/.env
+# 2. Edit docker/.env — set JWT_SECRET, SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD
+
+# 3. Start (the app exits immediately if a secret is missing or a placeholder remains)
+docker compose -f docker/docker-compose.yml up -d
 ```
 
-The binary is at `bin/crm` — it contains the frontend and migrations packed via
-[stuffbin](https://github.com/knadh/stuffbin), so it runs anywhere without extra asset
-directories. Unstuffed development builds automatically fall back to the local
-`frontend/dist` and `migrations` directories.
+Go to `http://localhost:9000` and log in with your `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD`.
 
----
+Bare `docker compose` always runs **production**: no dev config is mounted, and startup
+validation rejects the committed development credentials, the burned JWT secret, and any
+placeholder. Development uses the compose override (`just docker-up`) instead.
 
-## Deployment
-
-### Option 1 — downloaded binary + existing PostgreSQL
+### Binary
 
 ```shell
 # 1. Generate a config file (overwrites only a pristine template, never edits)
@@ -69,63 +81,42 @@ directories. Unstuffed development builds automatically fall back to the local
 ./crm
 ```
 
-Migrations run automatically and idempotently at startup. Secrets can alternatively be
-supplied via environment variables, which override `config.toml`:
+Migrations run automatically and idempotently at startup. The binary contains the frontend
+and migrations packed via stuffbin, so it runs anywhere without extra asset directories.
+
+### Build from source
+
+```shell
+# Requires Go 1.25+, Node 22+, pnpm, and a running Postgres
+just build
+```
+
+The binary is at `bin/crm`. Unstuffed development builds automatically fall back to the
+local `frontend/dist` and `migrations` directories.
+
+## Configuration
+
+Two config files are committed, each with a single purpose:
+
+| File | Purpose |
+|---|---|
+| `config.toml` | **Production template** (`environment = "production"`). Ships placeholders that startup validation refuses — not bootable until real secrets are supplied. |
+| `config.dev.toml` | **Development only** (`environment = "development"`). Carries the fixed bootstrap credentials and the burned dev JWT secret. Reachable only through dev startup paths; validation rejects it outside development. |
+
+Secrets can be supplied via environment variables, which override the config file:
 
 | Environment variable | Overrides |
 |---|---|
-| `APP_PORT` | `[app] port` |
-| `APP_ENV` | `[app] environment` |
+| `APP_PORT` / `APP_ENV` | `[app] port` / `environment` |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSLMODE` | `[db] *` |
 | `JWT_SECRET` / `JWT_ISSUER` | `[auth] jwt_secret` / `jwt_issuer` |
 | `COOKIE_SECURE` | `[auth] secure_cookies` — set `true` when serving over HTTPS |
 | `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | `[superadmin] *` |
 
-### Option 2 — Docker Compose (production, bundled PostgreSQL)
-
-```shell
-# 1. Copy and edit the production env file (lives in docker/ — compose reads it there)
-cp docker/.env.example docker/.env
-# 2. Edit docker/.env — set JWT_SECRET, SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD
-
-# 3. Start (the app exits immediately if any secret is missing or a placeholder remains)
-docker compose up -d
-```
-
-Go to `http://localhost:9000` and log in with your `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD`.
-
-`docker compose` here always runs **production**: the bare `docker-compose.yml` never mounts a
-dev config, and startup validation rejects the committed development credentials, the burned
-JWT secret, and any placeholder. Development uses the `docker-compose.dev.yml` override
-(`just docker-up`) instead.
-
-After changing Go or frontend code, rebuild the image and restart:
-
-```shell
-just docker-rebuild
-```
-
-### Using an existing PostgreSQL VM with Docker
-
-Stop/remove the bundled `db` service, then pass connection variables instead:
-
-```shell
-APP_ENV=production JWT_SECRET="$(openssl rand -hex 32)" \
-SUPERADMIN_EMAIL=admin@example.com SUPERADMIN_PASSWORD="$(openssl rand -hex 16)" \
-DB_HOST=10.0.0.5 DB_PORT=5432 DB_USER=crm DB_PASSWORD=secret \
-DB_NAME=crm docker compose -f docker/docker-compose.yml up -d app
-```
-
-The same stuffed binary is used for Docker and standalone downloads — the container needs
-no separate `frontend/dist` or `migrations` directories. PostgreSQL itself is never
-bundled into the application.
-
-### Health endpoints
-
-- `GET /healthz` — 200 when the process is alive
-- `GET /readyz` — 200 when the database ping succeeds, 503 otherwise
-
----
+Required secrets: `JWT_SECRET` (at least 32 characters) and a superadmin email with a
+password of at least 12 characters. The application refuses to start with placeholder,
+empty, or known development secrets in production. Point `DB_*` at any existing PostgreSQL
+instance to run the app without the bundled `db` service.
 
 ## Development
 
@@ -141,7 +132,7 @@ just dev-frontend
 
 # Run tests
 just test            # with coverage, no race detector (CGO-free)
-just test-race       # with the race detector (requires a C compiler: gcc/mingw on Windows)
+just test-race       # with the race detector (requires a C compiler)
 just test-frontend   # Vue component tests via Vitest
 
 # Lint and format
@@ -151,73 +142,18 @@ just check           # fmt + vet + lint + test
 # Build the binary
 just build
 
-# Docker helpers (image is built once and reused)
+# Docker helpers
 just docker-up       # dev stack: start app + Postgres (loopback binds)
 just docker-up-prod  # production stack: fails fast until docker/.env secrets are set
-just docker-build    # build/rebuild the image without starting
-just docker-rebuild  # rebuild and start
+just docker-rebuild  # rebuild image and start
 just docker-down     # stop the stack
 just docker-reset    # stop and remove volumes (destructive)
 ```
 
 The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `localhost:9000`.
 
-Development login: `admin@admin.com` / `admin`.
-
-> **Note:** `just dev-db` starts only the Postgres container (published on `127.0.0.1:5432`).
-> Stop it with `just docker-down`.
-
----
-
-## Configuration
-
-Two config files are committed, each with a single purpose:
-
-| File | Purpose |
-|---|---|
-| `config.toml` | **Production template** (`environment = "production"`). Ships placeholders that startup validation refuses — it is not bootable until real secrets are supplied. Generate a fresh copy with `./crm --new-config config.toml`. |
-| `config.dev.toml` | **Development only** (`environment = "development"`). Carries the fixed bootstrap credentials (`admin@admin.com` / `admin`) and the burned dev JWT secret. Reachable only through dev startup paths (`just dev-backend`, `just docker-up`); validation rejects it outside development. |
-
-Secrets may be supplied via environment variables, which override the config file:
-
-| Environment variable | Overrides |
-|---|---|
-| `APP_PORT` | `[app] port` |
-| `APP_ENV` | `[app] environment` |
-| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSLMODE` | `[db] *` |
-| `JWT_SECRET` / `JWT_ISSUER` | `[auth] jwt_secret` / `jwt_issuer` |
-| `COOKIE_SECURE` | `[auth] secure_cookies` — set `true` when serving over HTTPS |
-| `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | `[superadmin] *` |
-
-Reference table:
-
-| Section | Key | Default | Description |
-|---|---|---|---|
-| `[app]` | `port` | `9000` | HTTP listen port |
-| `[app]` | `name` | `CRM` | Application name |
-| `[db]` | `host` | `localhost` | PostgreSQL host |
-| `[db]` | `port` | `5432` | PostgreSQL port |
-| `[db]` | `user` | `crm` | Database user |
-| `[db]` | `password` | `crm` | Database password |
-| `[db]` | `name` | `crm` | Database name |
-| `[db]` | `sslmode` | `disable` | SSL mode |
-| `[auth]` | `jwt_secret` | dev placeholder | **Required.** At least 32 characters, never a placeholder. The committed development secret is rejected outside `development`. |
-| `[auth]` | `access_token_ttl` | `15m` | Access token lifetime |
-| `[auth]` | `refresh_token_ttl` | `168h` | Refresh token lifetime |
-| `[auth]` | `bcrypt_cost` | `12` | Password hash cost |
-| `[auth]` | `secure_cookies` | `false` | Add the `Secure` flag to auth cookies. Honored as configured in `development`; forced `true` outside development. |
-| `[superadmin]` | `email` | dev placeholder | **Required.** Seeded superadmin email |
-| `[superadmin]` | `password` | dev placeholder | **Required.** At least 12 characters, never a placeholder |
-
-All secrets can be overridden via environment variables — see `docker/.env.example` and the
-Deployment section. The application refuses to start with placeholder or empty secrets in
-production, including the committed development JWT secret and the dev superadmin
-credentials. In `development`, `config.dev.toml` (the dev secret and `admin`/`admin@admin.com`)
-is accepted for convenience; a production deployment must supply a strong `JWT_SECRET` and
-`SUPERADMIN_*` via environment variables or an edited config file.
-
----
+Health endpoints: `GET /healthz` (process alive) and `GET /readyz` (database ping).
 
 ## License
 
-MIT &copy; Prayaan OS
+MIT &copy; Abhinai
