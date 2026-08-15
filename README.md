@@ -1,4 +1,4 @@
-# Prayaan CRM
+# CRM
 
 <br> Self-hosted pipeline CRM for internal teams. Contacts, kanban leads with configurable stages, role-based access control, and a full audit log — in a single binary.
 
@@ -156,4 +156,6 @@ Health endpoints: `GET /healthz` (process alive) and `GET /readyz` (database pin
 
 ## License
 CRM is distributed under the terms of the AGPLv3 License.  
-&copy; Abhinai  
+&copy; [Abhinai](https://abhinai.pages.dev/)  
+## Support  
+<a href="https://buymeacoffee.com/aj_abhinai" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
