@@ -1,4 +1,4 @@
-import { Phone, MessageCircle, NotepadText } from '@lucide/vue'
+import { Phone, MessageCircle, Mail, NotepadText, CalendarClock, CheckCheck } from '@lucide/vue'
 
 export interface ReminderLike {
   type: string
@@ -7,25 +7,22 @@ export interface ReminderLike {
   remind_at?: string | null
 }
 
+// Icons are keyed on the activity's free-text type (a configured activity_type
+// tag), matching how the kanban and timeline label tasks.
 export function reminderIcon(type: string) {
-  switch (type) {
-    case 'call_scheduled':
-    case 'call_rescheduled':
-      return Phone
-    case 'wa_message':
-      return MessageCircle
-    default:
-      return NotepadText
-  }
+  const t = (type || '').toLowerCase()
+  if (t.includes('call')) return Phone
+  if (t.includes('whatsapp') || t.includes('wa ') || t.includes('message')) return MessageCircle
+  if (t.includes('mail') || t.includes('email')) return Mail
+  if (t.includes('meeting') || t.includes('visit')) return CalendarClock
+  if (t.includes('follow')) return CheckCheck
+  return NotepadText
 }
 
 export function formatReminderText(r: ReminderLike): string {
-  switch (r.type) {
-    case 'call_scheduled': return `Call scheduled: ${r.description || 'Follow-up call'}`
-    case 'call_rescheduled': return `Call rescheduled: ${r.description || 'Follow-up call'}`
-    case 'wa_message': return `WhatsApp: ${r.description || 'Send message'}`
-    default: return r.description || 'Reminder'
-  }
+  const label = r.type || 'Task'
+  if (r.description) return `${label}: ${r.description}`
+  return label
 }
 
 export function formatReminderTime(r: ReminderLike): string {

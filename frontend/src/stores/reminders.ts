@@ -15,6 +15,7 @@ export interface Reminder {
   scheduled_at?: string
   remind_at?: string
   is_done: boolean
+  is_cancelled: boolean
   is_reminded: boolean
   created_at: string
 }
@@ -23,13 +24,15 @@ export const useRemindersStore = defineStore('reminders', () => {
   const reminders = ref<Reminder[]>([])
   const loading = ref(false)
 
-  const pendingCount = computed(
-    () => reminders.value.filter((r) => !r.is_done && !r.is_reminded).length,
+  // Open tasks = not done, not cancelled, not yet reminded. Reminders surface
+  // open tasks that have a remind time or a scheduled time.
+  const openReminders = computed(() =>
+    reminders.value.filter(
+      (r) => !r.is_done && !r.is_cancelled && (!!r.remind_at || !!r.scheduled_at),
+    ),
   )
 
-  const openReminders = computed(() =>
-    reminders.value.filter((r) => !r.is_done && !r.is_reminded),
-  )
+  const pendingCount = computed(() => openReminders.value.filter((r) => !r.is_reminded).length)
 
   async function fetchReminders() {
     loading.value = true
@@ -41,9 +44,10 @@ export const useRemindersStore = defineStore('reminders', () => {
     }
   }
 
-  async function dismissReminder(id: string) {
+  async function dismissReminder(reminder: Reminder) {
     try {
-      await apiClient.patch(`/api/reminders/${id}`)
+      await apiClient.patch(`/api/leads/${reminder.lead_id}/reminders/${reminder.id}`)
+      toast.success('Reminder dismissed')
     } catch (e: any) {
       toast.error(e.message || 'Failed to dismiss reminder')
     } finally {
@@ -51,9 +55,11 @@ export const useRemindersStore = defineStore('reminders', () => {
     }
   }
 
-  async function snoozeReminder(id: string, remindAt: string) {
+  async function snoozeReminder(reminder: Reminder, remindAt: string) {
     try {
-      await apiClient.post(`/api/reminders/${id}/snooze`, { remind_at: remindAt })
+      await apiClient.post(`/api/leads/${reminder.lead_id}/reminders/${reminder.id}/snooze`, {
+        remind_at: remindAt,
+      })
       toast.success('Reminder snoozed')
     } catch (e: any) {
       toast.error(e.message || 'Failed to snooze reminder')

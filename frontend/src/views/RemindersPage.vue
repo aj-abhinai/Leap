@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef } from 'vue'
-import { useRemindersStore } from '@/stores/reminders'
+import { useRemindersStore, type Reminder } from '@/stores/reminders'
 import { useAuthStore } from '@/stores/auth'
 import LayoutShell from '@/components/layout/LayoutShell.vue'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -23,22 +23,27 @@ const now = () => Date.now()
 
 const overdue = computed(() =>
   visible.value.filter(
-    (r) => !!r.remind_at && new Date(r.remind_at).getTime() < now() && !r.is_reminded && !r.is_done,
+    (r) =>
+      !r.is_done && !r.is_cancelled &&
+      !!r.remind_at && new Date(r.remind_at).getTime() < now() && !r.is_reminded,
   ),
 )
 const upcoming = computed(() =>
   visible.value.filter(
     (r) =>
-      (!!r.remind_at && new Date(r.remind_at).getTime() >= now() && !r.is_reminded && !r.is_done) ||
-      (!r.remind_at && !r.is_done),
+      !r.is_done && !r.is_cancelled &&
+      ((!!r.remind_at && new Date(r.remind_at).getTime() >= now() && !r.is_reminded) ||
+        (!!r.scheduled_at && !r.remind_at && !r.is_reminded)),
   ),
 )
-const dismissed = computed(() => visible.value.filter((r) => r.is_reminded && !r.is_done))
-const done = computed(() => visible.value.filter((r) => r.is_done))
+const dismissed = computed(() =>
+  visible.value.filter((r) => !r.is_done && !r.is_cancelled && r.is_reminded),
+)
+const done = computed(() => visible.value.filter((r) => r.is_done || r.is_cancelled))
 
-async function snooze(reminderId: string, minutes: number) {
+async function snooze(reminder: Reminder, minutes: number) {
   try {
-    await store.snoozeReminder(reminderId, snoozeRemindAt(minutes))
+    await store.snoozeReminder(reminder, snoozeRemindAt(minutes))
   } catch {}
 }
 
@@ -75,7 +80,7 @@ function hasAny(list: unknown[]): boolean {
       >
         <BellOff class="size-10 text-muted-foreground/40 mb-3" />
         <p class="text-sm font-medium text-muted-foreground">No pending reminders</p>
-        <p class="text-xs text-muted-foreground/60 mt-1">Create activities with reminders from the leads kanban</p>
+        <p class="text-xs text-muted-foreground/60 mt-1">Create tasks with reminders from the leads kanban</p>
       </div>
 
       <div v-else class="space-y-6 max-w-2xl">
@@ -87,8 +92,8 @@ function hasAny(list: unknown[]): boolean {
               :key="reminder.id"
               :reminder="reminder"
               overdue
-              @snooze="snooze(reminder.id, $event)"
-              @dismiss="store.dismissReminder(reminder.id)"
+              @snooze="snooze(reminder, $event)"
+              @dismiss="store.dismissReminder(reminder)"
             />
           </div>
         </section>
@@ -100,8 +105,8 @@ function hasAny(list: unknown[]): boolean {
               v-for="reminder in upcoming"
               :key="reminder.id"
               :reminder="reminder"
-              @snooze="snooze(reminder.id, $event)"
-              @dismiss="store.dismissReminder(reminder.id)"
+              @snooze="snooze(reminder, $event)"
+              @dismiss="store.dismissReminder(reminder)"
             />
           </div>
         </section>
@@ -113,8 +118,8 @@ function hasAny(list: unknown[]): boolean {
               v-for="reminder in dismissed"
               :key="reminder.id"
               :reminder="reminder"
-              @snooze="snooze(reminder.id, $event)"
-              @dismiss="store.dismissReminder(reminder.id)"
+              @snooze="snooze(reminder, $event)"
+              @dismiss="store.dismissReminder(reminder)"
             />
           </div>
         </section>

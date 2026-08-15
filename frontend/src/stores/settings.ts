@@ -7,6 +7,9 @@ export interface Tag {
   name: string
   type: 'tag' | 'status' | 'activity_type' | 'loss_reason'
   color?: string
+  group_name?: string
+  sort_order: number
+  behavior: 'log' | 'next' | 'close_lost'
   created_at: string
 }
 
@@ -40,10 +43,18 @@ export const useSettingsStore = defineStore('settings', () => {
     await fetchTags()
   }
 
+  async function updateTag(
+    id: string,
+    data: { name?: string; color?: string; group_name?: string; sort_order?: number; behavior?: string },
+  ) {
+    await apiClient.patch(`/api/tags/${id}`, data)
+    await fetchTags()
+  }
+
   async function deleteTag(id: string) {
     await apiClient.delete(`/api/tags/${id}`)
     await fetchTags()
   }
 
-  return { tags, statuses, activityTypes, lossReasons, loading, fetchTags, createTag, deleteTag }
+  return { tags, statuses, activityTypes, lossReasons, loading, fetchTags, createTag, updateTag, deleteTag }
 })

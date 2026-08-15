@@ -13,8 +13,21 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import { Plus, Trash2 } from '@lucide/vue'
+import { Plus, Trash2, Pencil } from '@lucide/vue'
+
+const behaviorLabels: Record<string, string> = {
+  log: 'Log only',
+  next: 'Schedule next',
+  close_lost: 'Close lost',
+}
 
 const props = defineProps<{
   kind: 'tag' | 'status' | 'activity_type' | 'loss_reason'
@@ -27,6 +40,9 @@ const store = useSettingsStore()
 const newName = shallowRef('')
 const error = shallowRef('')
 const deletingId = shallowRef<string | null>(null)
+const editing = shallowRef<{ id: string; groupName: string; sortOrder: number; behavior: string } | null>(null)
+const editError = shallowRef('')
+const savingEdit = shallowRef(false)
 
 const items = computed(() => {
   switch (props.kind) {
@@ -76,6 +92,37 @@ async function remove() {
     deletingId.value = null
   }
 }
+
+function openEdit(id: string) {
+  const item = items.value.find((i) => i.id === id)
+  if (!item) return
+  editing.value = {
+    id,
+    groupName: item.group_name || '',
+    sortOrder: item.sort_order,
+    behavior: item.behavior,
+  }
+  editError.value = ''
+}
+
+async function saveEdit() {
+  if (!editing.value) return
+  savingEdit.value = true
+  editError.value = ''
+  try {
+    await store.updateTag(editing.value.id, {
+      group_name: editing.value.groupName.trim(),
+      sort_order: editing.value.sortOrder,
+      behavior: editing.value.behavior,
+    })
+    toast.success('Status updated')
+    editing.value = null
+  } catch (e: any) {
+    editError.value = e.message || 'Failed to update'
+  } finally {
+    savingEdit.value = false
+  }
+}
 </script>
 
 <template>
@@ -95,18 +142,38 @@ async function remove() {
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
-            <TableHead class="w-16" />
+            <TableHead v-if="props.kind === 'status'">Group</TableHead>
+            <TableHead v-if="props.kind === 'status'">Behavior</TableHead>
+            <TableHead class="w-24" />
           </TableRow>
         </TableHeader>
         <TableBody>
           <TableRow v-if="items.length === 0">
-            <TableCell colspan="2" class="text-center text-muted-foreground text-sm py-4">
+            <TableCell :colspan="props.kind === 'status' ? 4 : 2" class="text-center text-muted-foreground text-sm py-4">
               No {{ title.toLowerCase() }} yet
             </TableCell>
           </TableRow>
           <TableRow v-for="item in items" :key="item.id">
             <TableCell>{{ item.name }}</TableCell>
-            <TableCell>
+            <TableCell v-if="props.kind === 'status'">
+              <span v-if="item.group_name" class="text-xs text-muted-foreground">{{ item.group_name }}</span>
+              <span v-else class="text-xs text-muted-foreground/50">—</span>
+            </TableCell>
+            <TableCell v-if="props.kind === 'status'">
+              <span v-if="item.behavior" class="text-xs">{{ behaviorLabels[item.behavior] || item.behavior }}</span>
+              <span v-else class="text-xs text-muted-foreground/50">—</span>
+            </TableCell>
+            <TableCell class="text-right">
+              <Button
+                v-if="props.kind === 'status'"
+                variant="ghost"
+                size="icon-sm"
+                :title="`Edit ${item.name}`"
+                :aria-label="`Edit ${item.name}`"
+                @click="openEdit(item.id)"
+              >
+                <Pencil class="size-3.5" />
+              </Button>
               <Button variant="ghost" size="icon-sm" :title="`Delete ${item.name}`" :aria-label="`Delete ${item.name}`" @click="confirmDelete(item.id)">
                 <Trash2 class="size-3.5" />
               </Button>
@@ -124,6 +191,49 @@ async function remove() {
         @update:open="(v) => { if (!v) deletingId = null }"
         @confirm="remove"
       />
+
+      <Dialog :open="!!editing" @update:open="(v) => { if (!v) editing = null }">
+        <DialogContent class="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit status</DialogTitle>
+            <DialogDescription>Configure the outcome group and follow-up behavior.</DialogDescription>
+          </DialogHeader>
+          <div v-if="editing" class="space-y-4 py-2">
+            <div class="space-y-2">
+              <Label class="text-xs">Group</Label>
+              <Input v-model="editing.groupName" placeholder="e.g. Connected, Not Connected, Heard Details" />
+              <p class="text-xs text-muted-foreground">
+                Chips are shown grouped under this label in the activity form.
+              </p>
+            </div>
+            <div class="space-y-2">
+              <Label class="text-xs">Sort order</Label>
+              <Input v-model.number="editing.sortOrder" type="number" />
+              <p class="text-xs text-muted-foreground">Lower numbers appear first within the palette.</p>
+            </div>
+            <div class="space-y-2">
+              <Label class="text-xs">Behavior</Label>
+              <Select v-model="editing.behavior">
+                <SelectTrigger>
+                  <SelectValue placeholder="Select behavior" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="log">Log only — record the outcome</SelectItem>
+                  <SelectItem value="next">Schedule next — log + create the next task</SelectItem>
+                  <SelectItem value="close_lost">Close lost — log + move lead to Closed Lost</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p v-if="editError" class="text-sm text-destructive">{{ editError }}</p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" @click="editing = null">Cancel</Button>
+            <Button :disabled="savingEdit" @click="saveEdit">
+              {{ savingEdit ? 'Saving…' : 'Save' }}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </CardContent>
   </Card>
 </template>

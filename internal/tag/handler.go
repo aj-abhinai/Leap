@@ -2,6 +2,7 @@ package tag
 
 import (
 	"crm/internal/respond"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -111,6 +112,60 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		w,
 		http.StatusOK,
 		map[string]string{"message": "deleted"},
+		nil,
+		nil,
+	)
+}
+
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req UpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	t, err := h.svc.update(id, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidBehavior):
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+				nil,
+			)
+		case errors.Is(err, ErrDuplicate):
+			respond.JSON(
+				w,
+				http.StatusConflict,
+				nil,
+				&respond.Error{Code: "CONFLICT", Message: err.Error()},
+				nil,
+			)
+		case errors.Is(err, sql.ErrNoRows):
+			respond.JSON(
+				w,
+				http.StatusNotFound,
+				nil,
+				&respond.Error{Code: "NOT_FOUND", Message: "Tag not found"},
+				nil,
+			)
+		default:
+			respond.ServerError(w, err)
+		}
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		t,
 		nil,
 		nil,
 	)

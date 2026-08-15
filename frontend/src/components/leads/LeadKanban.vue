@@ -12,8 +12,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, MoreHorizontal, ChevronRight, ListChecks, BookOpen } from '@lucide/vue'
+import { Plus, MoreHorizontal, ChevronRight, ListChecks, BookOpen, Pencil, CheckCircle2 } from '@lucide/vue'
 import { formatCurrency, formatContactDetail } from '@/utils/format'
+import { timeAgo } from '@/utils/time'
 
 const rbac = useRBACStore()
 
@@ -45,6 +46,10 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
       emit('moveStage', evt.added.element.id!, newStageId, previousStageId)
     }
   }
+}
+
+function isNextTaskOverdue(lead: Lead): boolean {
+  return !!lead.next_task_at && new Date(lead.next_task_at).getTime() < Date.now()
 }
 </script>
 
@@ -79,19 +84,28 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
         drag-class="lead-kanban-dragging"
         :animation="200"
         :sort="false"
+        :disabled="!rbac.can('lead:move_stage')"
         @change="(evt: any) => handleDragChange(evt, col.id)"
       >
         <template #item="{ element: lead }">
           <div
             :key="lead.id"
-            class="group rounded-lg border bg-card p-3 text-sm shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md hover:border-primary/20 transition-all"
-            @click="emit('edit', lead)"
+            class="group rounded-lg border bg-card p-3 text-sm shadow-sm cursor-pointer hover:shadow-md hover:border-primary/20 transition-all"
+            @click="emit('viewActivities', lead)"
           >
             <div class="flex items-start justify-between gap-2">
               <div class="font-medium truncate">{{ lead.display_name }}</div>
               <div class="flex items-center gap-0.5 text-muted-foreground">
-                <Button variant="ghost" size="icon-sm" class="size-8" @click.stop="emit('viewActivities', lead)" title="Activities" aria-label="View activities">
-                  <ListChecks class="size-3.5" />
+                <Button
+                  v-if="rbac.can('lead:write')"
+                  variant="ghost"
+                  size="icon-sm"
+                  class="size-8"
+                  @click.stop="emit('edit', lead)"
+                  title="Edit lead"
+                  aria-label="Edit lead"
+                >
+                  <Pencil class="size-3.5" />
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child @click.stop>
@@ -101,6 +115,7 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" class="w-40">
                     <DropdownMenuItem
+                      v-if="rbac.can('lead:move_stage')"
                       v-for="s in moveTargets[col.id]"
                       :key="s.id"
                       @click.stop="emit('moveStage', lead.id!, s.id)"
@@ -132,6 +147,27 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
             </div>
             <div v-if="lead.value" class="mt-1.5 text-sm font-semibold text-primary tabular-nums">
               {{ formatCurrency(lead.value) }}
+            </div>
+            <div v-if="lead.next_task_type || lead.last_touch_at" class="mt-1.5 space-y-0.5">
+              <div
+                v-if="lead.next_task_type"
+                class="flex items-center gap-1 text-xs"
+                :class="isNextTaskOverdue(lead) ? 'text-destructive' : 'text-muted-foreground'"
+              >
+                <ListChecks class="size-3 shrink-0" />
+                <span class="truncate">
+                  Next: {{ lead.next_task_type }}
+                  <template v-if="lead.next_task_at">
+                    · {{ new Date(lead.next_task_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) }}
+                  </template>
+                </span>
+              </div>
+              <div v-if="lead.last_touch_type && lead.last_touch_at" class="flex items-center gap-1 text-xs text-muted-foreground">
+                <CheckCircle2 class="size-3 shrink-0" />
+                <span class="truncate">
+                  Last: {{ lead.last_touch_type }} · {{ timeAgo(lead.last_touch_at) }}
+                </span>
+              </div>
             </div>
           </div>
         </template>

@@ -22,6 +22,10 @@ export interface Lead {
   assigned_to?: string
   created_at: string
   updated_at: string
+  next_task_type?: string
+  next_task_at?: string
+  last_touch_type?: string
+  last_touch_at?: string
 }
 
 export const useLeadsStore = defineStore('leads', () => {

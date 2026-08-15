@@ -44,7 +44,7 @@ const store = useRemindersStore()
               <p class="text-xs text-muted-foreground/70 mt-0.5">{{ timeAgo(reminder.created_at) }}</p>
             </div>
             <div class="flex items-start">
-              <Button variant="ghost" size="sm" class="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" @click.stop="store.dismissReminder(reminder.id)" aria-label="Dismiss reminder">
+              <Button variant="ghost" size="sm" class="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" @click.stop="store.dismissReminder(reminder)" aria-label="Dismiss reminder">
                 <X class="h-2.5 w-2.5" />
               </Button>
             </div>

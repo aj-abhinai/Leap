@@ -23,6 +23,12 @@ type Lead struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+	// NextTaskType/NextTaskAt preview the soonest open scheduled activity.
+	NextTaskType string     `json:"next_task_type,omitempty"`
+	NextTaskAt   *time.Time `json:"next_task_at,omitempty"`
+	// LastTouchType/LastTouchAt describe the most recent completed touchpoint.
+	LastTouchType string     `json:"last_touch_type,omitempty"`
+	LastTouchAt   *time.Time `json:"last_touch_at,omitempty"`
 }
 
 // NewContact holds the contact details to resolve-or-create when a lead is
@@ -71,7 +77,10 @@ type Activity struct {
 	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 	RemindAt    *time.Time `json:"remind_at,omitempty"`
 	RespondedAt *time.Time `json:"responded_at,omitempty"`
+	// OccurredAt is when the activity actually happened (stamped on completion).
+	OccurredAt  *time.Time `json:"occurred_at,omitempty"`
 	IsDone      bool       `json:"is_done"`
+	IsCancelled bool       `json:"is_cancelled"`
 	IsReminded  bool       `json:"is_reminded"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -83,6 +92,13 @@ type CreateActivityRequest struct {
 	OutcomeID   *string    `json:"outcome_id,omitempty"`
 	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 	RemindAt    *time.Time `json:"remind_at,omitempty"`
+	// RescheduleAt, when set with an outcome, logs the completed attempt and
+	// auto-creates the next occurrence of the same type at this time (the
+	// create-form equivalent of updateActivity's reschedule flow).
+	RescheduleAt *time.Time `json:"reschedule_at,omitempty"`
+	// IsDone, when true, creates the activity already completed (e.g. a
+	// close_lost outcome logged from the create form). occurred_at is stamped.
+	IsDone *bool `json:"is_done,omitempty"`
 }
 
 type UpdateActivityRequest struct {
@@ -90,7 +106,13 @@ type UpdateActivityRequest struct {
 	IsDone      *bool      `json:"is_done,omitempty"`
 	Type        *string    `json:"type,omitempty"`
 	Description *string    `json:"description,omitempty"`
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 	RemindAt    *time.Time `json:"remind_at,omitempty"`
+	OccurredAt  *time.Time `json:"occurred_at,omitempty"`
+	IsCancelled *bool      `json:"is_cancelled,omitempty"`
+	// RescheduleAt, when set with is_done=true, logs the completed attempt and
+	// auto-creates the next occurrence of the same type at this time.
+	RescheduleAt *time.Time `json:"reschedule_at,omitempty"`
 }
 
 type SnoozeRequest struct {

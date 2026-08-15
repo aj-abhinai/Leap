@@ -198,8 +198,8 @@ func main() {
 		r.Get("/api/leads/{id}/history", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListHistory))
 
 		r.Get("/api/reminders", middleware.RequirePermission(rbacSvc, "lead:read", leadH.PendingReminders))
-		r.Patch("/api/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
-		r.Post("/api/reminders/{id}/snooze", middleware.RequirePermission(rbacSvc, "lead:write", leadH.SnoozeReminder))
+		r.Patch("/api/leads/{lead_id}/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
+		r.Post("/api/leads/{lead_id}/reminders/{id}/snooze", middleware.RequirePermission(rbacSvc, "lead:write", leadH.SnoozeReminder))
 
 		r.Get("/api/pipelines", middleware.RequirePermission(rbacSvc, "lead:read", pipelineH.List))
 		r.Post("/api/pipelines", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.Create))
@@ -240,6 +240,7 @@ func main() {
 
 		r.Get("/api/tags", middleware.RequireAny(rbacSvc, []string{"contact:read", "lead:read", "settings:manage"}, tagH.List))
 		r.Post("/api/tags", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Create))
+		r.Patch("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Update))
 		r.Delete("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Delete))
 
 		r.Get("/api/export/csv", middleware.RequirePermission(rbacSvc, "data:export", exportH.CSV))

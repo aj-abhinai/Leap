@@ -47,7 +47,7 @@ const emit = defineEmits<{
             <p class="text-xs text-muted-foreground mt-1">Created {{ formatDateTime(reminder.created_at) }}</p>
           </div>
         </div>
-        <div v-if="!reminder.is_done" class="flex items-center gap-1 shrink-0">
+        <div v-if="!reminder.is_done && !reminder.is_cancelled" class="flex items-center gap-1 shrink-0">
           <DropdownMenu v-if="reminder.remind_at">
             <DropdownMenuTrigger as-child>
               <Button variant="ghost" size="icon-sm" aria-label="Snooze reminder">

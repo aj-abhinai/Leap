@@ -1,6 +1,7 @@
 package lead
 
 import (
+	"context"
 	"crm/internal/testdb"
 	"database/sql"
 	"encoding/json"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func TestCreateLeadStoresActorIntegration(t *testing.T) {
@@ -286,7 +289,7 @@ func TestListCapsPerPageHandlerIntegration(t *testing.T) {
 	}
 }
 
-func TestCreateActivityDescriptionRequiredHandlerIntegration(t *testing.T) {
+func TestCreateActivityDescriptionOptionalHandlerIntegration(t *testing.T) {
 	db := testdb.New(t)
 	h := NewHandler(NewService(db))
 
@@ -306,10 +309,13 @@ func TestCreateActivityDescriptionRequiredHandlerIntegration(t *testing.T) {
 		"/api/leads/"+lead.ID+"/activities",
 		strings.NewReader(`{"type":"note"}`),
 	)
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", lead.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
 	rr := httptest.NewRecorder()
 	h.CreateActivity(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 when description missing", rr.Code)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 when description missing; body = %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -556,8 +562,8 @@ func TestActivityEditFieldsIntegration(t *testing.T) {
 
 	newType := "Call 2"
 	newDesc := "Follow up again"
-	newRemind := time.Now().Add(3 * time.Hour)
-	updated, err := svc.updateActivity(lead.ID, activity.ID, UpdateActivityRequest{
+	newRemind := time.Now().Add(3 * time.Hour).Truncate(time.Microsecond)
+	updated, err := svc.updateActivity(lead.ID, activity.ID, "", UpdateActivityRequest{
 		Type:        &newType,
 		Description: &newDesc,
 		RemindAt:    &newRemind,
@@ -596,13 +602,13 @@ func TestActivityEditEmptyTypeRejectedIntegration(t *testing.T) {
 	}
 
 	emptyType := ""
-	_, err = svc.updateActivity(lead.ID, activity.ID, UpdateActivityRequest{Type: &emptyType})
+	_, err = svc.updateActivity(lead.ID, activity.ID, "", UpdateActivityRequest{Type: &emptyType})
 	if err == nil {
 		t.Fatal("expected error for empty type, got nil")
 	}
 }
 
-func TestActivityEditEmptyDescriptionRejectedIntegration(t *testing.T) {
+func TestActivityEditBlankDescriptionAllowedIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
@@ -621,9 +627,12 @@ func TestActivityEditEmptyDescriptionRejectedIntegration(t *testing.T) {
 	}
 
 	blankDesc := "   "
-	_, err = svc.updateActivity(lead.ID, activity.ID, UpdateActivityRequest{Description: &blankDesc})
-	if err == nil {
-		t.Fatal("expected error for blank description, got nil")
+	updated, err := svc.updateActivity(lead.ID, activity.ID, "", UpdateActivityRequest{Description: &blankDesc})
+	if err != nil {
+		t.Fatalf("blank description should be allowed: %v", err)
+	}
+	if updated.Description != "" {
+		t.Errorf("description = %q, want trimmed empty", updated.Description)
 	}
 }
 
@@ -651,12 +660,12 @@ func TestSnoozeReminderReopensIntegration(t *testing.T) {
 		t.Fatalf("create activity: %v", err)
 	}
 	// Mark reminded so it drops out of pending; snoozing should re-open it.
-	if _, err := svc.dismissReminder(activity.ID); err != nil {
+	if _, err := svc.dismissReminder(lead.ID, activity.ID); err != nil {
 		t.Fatalf("dismiss: %v", err)
 	}
 
-	future := time.Now().Add(24 * time.Hour)
-	changed, err := svc.snoozeReminder(activity.ID, future)
+	future := time.Now().Add(24 * time.Hour).Truncate(time.Microsecond)
+	changed, err := svc.snoozeReminder(lead.ID, activity.ID, future)
 	if err != nil {
 		t.Fatalf("snooze: %v", err)
 	}
@@ -685,7 +694,7 @@ func TestSnoozeMissingReminderIsCleanNoopIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	changed, err := svc.snoozeReminder("00000000-0000-0000-0000-000000000000", time.Now())
+	changed, err := svc.snoozeReminder("00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000", time.Now())
 	if err != nil {
 		t.Fatalf("snooze missing: %v", err)
 	}

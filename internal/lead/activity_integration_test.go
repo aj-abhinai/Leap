@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestDismissReminderMissingIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	dismissed, err := svc.dismissReminder("00000000-0000-0000-0000-000000000000")
+	dismissed, err := svc.dismissReminder("00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000")
 	if err != nil {
 		t.Fatalf("dismissReminder missing: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestDismissReminderFoundIntegration(t *testing.T) {
 		t.Fatalf("seed activity: %v", err)
 	}
 
-	dismissed, err := svc.dismissReminder(activityID)
+	dismissed, err := svc.dismissReminder(leadID, activityID)
 	if err != nil {
 		t.Fatalf("dismissReminder: %v", err)
 	}
@@ -52,12 +53,52 @@ func TestDismissReminderFoundIntegration(t *testing.T) {
 		t.Error("expected (true, nil) for an existing reminder")
 	}
 
-	dismissed, err = svc.dismissReminder(activityID)
+	dismissed, err = svc.dismissReminder(leadID, activityID)
 	if err != nil {
 		t.Fatalf("second dismiss: %v", err)
 	}
 	if dismissed {
 		t.Error("second dismiss should report false; is_reminded is idempotent")
+	}
+}
+
+func TestDismissReminderWrongLeadScopedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	_, stageID := seedPipelineAndStage(t, db)
+	_, otherStageID := seedPipelineAndStage(t, db)
+	var contactID string
+	if err := db.QueryRow(`INSERT INTO contacts (name) VALUES ('Alice') RETURNING id`).Scan(&contactID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
+	var leadA, leadB string
+	if err := db.QueryRow(
+		`INSERT INTO leads (contact_id, pipeline_id, stage_id) VALUES ($1, (SELECT pipeline_id FROM lead_stages WHERE id = $2), $2) RETURNING id`,
+		contactID, stageID,
+	).Scan(&leadA); err != nil {
+		t.Fatalf("seed lead A: %v", err)
+	}
+	if err := db.QueryRow(
+		`INSERT INTO leads (contact_id, pipeline_id, stage_id) VALUES ($1, (SELECT pipeline_id FROM lead_stages WHERE id = $2), $2) RETURNING id`,
+		contactID, otherStageID,
+	).Scan(&leadB); err != nil {
+		t.Fatalf("seed lead B: %v", err)
+	}
+	var activityID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type, description) VALUES ($1, $2, 'call', 'Follow up') RETURNING id`,
+		leadA, stageID,
+	).Scan(&activityID); err != nil {
+		t.Fatalf("seed activity: %v", err)
+	}
+
+	dismissed, err := svc.dismissReminder(leadB, activityID)
+	if err != nil {
+		t.Fatalf("dismissReminder wrong lead: %v", err)
+	}
+	if dismissed {
+		t.Error("dismiss on another lead should be scoped out (false, nil)")
 	}
 }
 
@@ -122,7 +163,7 @@ func TestUpdateActivityMarksResponseOnceIntegration(t *testing.T) {
 	}
 
 	// First mark: responded_at is set.
-	updated, err := svc.updateActivity(created.ID, act.ID, UpdateActivityRequest{OutcomeID: &statusA})
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{OutcomeID: &statusA})
 	if err != nil {
 		t.Fatalf("mark first outcome: %v", err)
 	}
@@ -132,7 +173,7 @@ func TestUpdateActivityMarksResponseOnceIntegration(t *testing.T) {
 	first := updated.RespondedAt.Unix()
 
 	// Change outcome again: responded_at must NOT move.
-	changed, err := svc.updateActivity(created.ID, act.ID, UpdateActivityRequest{OutcomeID: &statusB})
+	changed, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{OutcomeID: &statusB})
 	if err != nil {
 		t.Fatalf("change outcome: %v", err)
 	}
@@ -176,6 +217,247 @@ func seedStatusTag(t *testing.T, db interface {
 	var id string
 	if err := db.QueryRow(`INSERT INTO tags (name, type) VALUES ($1, 'status') RETURNING id`, name).Scan(&id); err != nil {
 		t.Fatalf("seed status tag: %v", err)
+	}
+	return id
+}
+
+func TestCreateActivityDescriptionOptionalIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"})
+	if err != nil {
+		t.Fatalf("create activity without description: %v", err)
+	}
+	if act.Type != "Call 1" {
+		t.Errorf("type = %q, want Call 1", act.Type)
+	}
+}
+
+func TestUpdateActivityScheduledAtEditableIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	if act.ScheduledAt != nil {
+		t.Fatal("fresh activity should have no scheduled_at")
+	}
+
+	newTime := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{ScheduledAt: &newTime})
+	if err != nil {
+		t.Fatalf("update scheduled_at: %v", err)
+	}
+	if updated.ScheduledAt == nil || !updated.ScheduledAt.Equal(newTime) {
+		t.Errorf("scheduled_at = %v, want %v", updated.ScheduledAt, newTime)
+	}
+}
+
+func TestUpdateActivityRescheduleSpawnsNextIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	done := true
+	next := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
+		IsDone:       &done,
+		RescheduleAt: &next,
+	})
+	if err != nil {
+		t.Fatalf("reschedule update: %v", err)
+	}
+	if !updated.IsDone {
+		t.Error("original activity should be marked done")
+	}
+	if updated.OccurredAt == nil {
+		t.Error("occurred_at should be stamped when completing")
+	}
+
+	// The next occurrence must exist with the new time, same type, open.
+	var nextID, nextType string
+	var nextScheduled *time.Time
+	if err := db.QueryRow(
+		`SELECT id, type, scheduled_at FROM lead_activities WHERE lead_id = $1 AND type = 'Call 1' AND is_done = false ORDER BY created_at DESC LIMIT 1`,
+		created.ID,
+	).Scan(&nextID, &nextType, &nextScheduled); err != nil {
+		t.Fatalf("load next activity: %v", err)
+	}
+	if nextID == act.ID {
+		t.Error("next activity should be a distinct row")
+	}
+	if nextScheduled == nil || !nextScheduled.Equal(next) {
+		t.Errorf("next scheduled_at = %v, want %v", nextScheduled, next)
+	}
+}
+
+func TestCreateActivityRescheduleSpawnsNextIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	next := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:         "Call 1",
+		RescheduleAt: &next,
+	})
+	if err != nil {
+		t.Fatalf("create activity with reschedule: %v", err)
+	}
+	if !act.IsDone {
+		t.Error("completed attempt should be marked done")
+	}
+	if act.RespondedAt == nil {
+		t.Error("responded_at should be stamped on a rescheduled attempt")
+	}
+
+	var nextID string
+	var nextScheduled *time.Time
+	if err := db.QueryRow(
+		`SELECT id, scheduled_at FROM lead_activities WHERE lead_id = $1 AND type = 'Call 1' AND is_done = false ORDER BY created_at DESC LIMIT 1`,
+		created.ID,
+	).Scan(&nextID, &nextScheduled); err != nil {
+		t.Fatalf("load next activity: %v", err)
+	}
+	if nextID == act.ID {
+		t.Error("next activity should be a distinct row")
+	}
+	if nextScheduled == nil || !nextScheduled.Equal(next) {
+		t.Errorf("next scheduled_at = %v, want %v", nextScheduled, next)
+	}
+}
+
+func TestCreateActivityDoneWithOutcomeIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	statusID := seedStatusTag(t, db, "Closed Lost")
+
+	done := true
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:      "Call 1",
+		OutcomeID: &statusID,
+		IsDone:    &done,
+	})
+	if err != nil {
+		t.Fatalf("create done activity: %v", err)
+	}
+	if !act.IsDone {
+		t.Error("activity created with is_done should be marked done")
+	}
+	if act.RespondedAt == nil {
+		t.Error("responded_at should be stamped when created done with an outcome")
+	}
+	if act.OccurredAt == nil {
+		t.Error("occurred_at should be stamped when created done")
+	}
+
+	// No spawn: is_done without reschedule_at is a plain completion.
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM lead_activities WHERE lead_id = $1`, created.ID).Scan(&count); err != nil {
+		t.Fatalf("count activities: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected exactly one activity, got %d", count)
+	}
+}
+
+func TestCloseLeadCancelsOpenTasksIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	closingStageID := seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"}); err != nil {
+		t.Fatalf("create open task: %v", err)
+	}
+
+	closing := closingStageID
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &closing}, ""); err != nil {
+		t.Fatalf("move lead to closing stage: %v", err)
+	}
+
+	var cancelled, total int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FILTER (WHERE is_cancelled), COUNT(*) FROM lead_activities WHERE lead_id = $1`,
+		created.ID,
+	).Scan(&cancelled, &total); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if total != 1 || cancelled != 1 {
+		t.Errorf("expected 1 of 1 tasks cancelled, got %d of %d", cancelled, total)
+	}
+}
+
+func seedClosingStage(t *testing.T, db *sql.DB, pipelineID string) string {
+	t.Helper()
+	var id string
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Closed', 99, true) RETURNING id`,
+		pipelineID,
+	).Scan(&id); err != nil {
+		t.Fatalf("seed closing stage: %v", err)
 	}
 	return id
 }

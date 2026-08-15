@@ -55,8 +55,7 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive),
 		errors.Is(err, ErrContactRequired), errors.Is(err, ErrNoContactDetail),
-		errors.Is(err, ErrInvalidOutcome), errors.Is(err, ErrEmptyType),
-		errors.Is(err, ErrEmptyDescription):
+		errors.Is(err, ErrInvalidOutcome), errors.Is(err, ErrEmptyType):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -280,6 +279,7 @@ func (h *Handler) DeleteActivity(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateActivity(w http.ResponseWriter, r *http.Request) {
 	leadID := chi.URLParam(r, "id")
 	activityID := chi.URLParam(r, "activity_id")
+	userID := ctxutil.GetUserID(r)
 	var req UpdateActivityRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.JSON(
@@ -291,7 +291,7 @@ func (h *Handler) UpdateActivity(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	activity, err := h.svc.updateActivity(leadID, activityID, req)
+	activity, err := h.svc.updateActivity(leadID, activityID, userID, req)
 	if err != nil {
 		respondLeadMutationError(w, err)
 		return
@@ -321,8 +321,9 @@ func (h *Handler) PendingReminders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DismissReminder(w http.ResponseWriter, r *http.Request) {
+	leadID := chi.URLParam(r, "lead_id")
 	id := chi.URLParam(r, "id")
-	dismissed, err := h.svc.dismissReminder(id)
+	dismissed, err := h.svc.dismissReminder(leadID, id)
 	if err != nil {
 		respond.ServerError(w, err)
 		return
@@ -347,6 +348,7 @@ func (h *Handler) DismissReminder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SnoozeReminder(w http.ResponseWriter, r *http.Request) {
+	leadID := chi.URLParam(r, "lead_id")
 	id := chi.URLParam(r, "id")
 	var req SnoozeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -369,7 +371,7 @@ func (h *Handler) SnoozeReminder(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	snoozed, err := h.svc.snoozeReminder(id, req.RemindAt)
+	snoozed, err := h.svc.snoozeReminder(leadID, id, req.RemindAt)
 	if err != nil {
 		respond.ServerError(w, err)
 		return

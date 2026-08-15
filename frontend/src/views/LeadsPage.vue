@@ -25,6 +25,7 @@ import LeadForm from '@/components/leads/LeadForm.vue'
 import LeadActivity from '@/components/leads/LeadActivity.vue'
 import LeadActivityForm from '@/components/leads/LeadActivityForm.vue'
 import { useRBACStore } from '@/stores/rbac'
+import { toast } from 'vue-sonner'
 import { Plus, Layers } from '@lucide/vue'
 import { useLeadPipeline } from '@/composables/useLeadPipeline'
 import { useLeadDrawer } from '@/composables/useLeadDrawer'
@@ -61,6 +62,29 @@ const {
   activityRef,
   openActivities,
 } = useActivityDrawer()
+
+// A close_lost outcome on an activity logs the outcome then moves the lead to
+// its pipeline's closing stage (prefer a "lost"-named stage, else the first
+// closing stage). Reaching a closing stage resolves the deal and cancels open
+// tasks, so the flow "ends there" for the lead.
+async function handleCloseLost() {
+  if (!activityLead.value?.id) return
+  const lead = activityLead.value
+  const pipeline = pipelineStore.pipelines.find((p) => p.id === lead.pipeline_id)
+  const stages = pipeline?.stages || []
+  const closing = stages.filter((s) => s.is_closing)
+  const target =
+    closing.find((s) => /lost/i.test(s.name)) ||
+    closing.find((s) => /closed/i.test(s.name)) ||
+    closing[0]
+  if (!target) {
+    toast.error('No closing stage available in this pipeline')
+    return
+  }
+  if (lead.stage_id === target.id) return
+  await moveStage(lead.id, target.id, lead.stage_id)
+  activityDrawerOpen.value = false
+}
 
 onMounted(async () => {
   await pipelineStore.fetchPipelines()
@@ -141,20 +165,21 @@ onMounted(async () => {
           </Sheet>
 
           <Sheet v-model:open="activityDrawerOpen">
-            <SheetContent>
-              <SheetHeader>
+            <SheetContent class="p-0 sm:max-w-lg">
+              <SheetHeader class="px-6 pt-6">
                 <SheetTitle>Activities</SheetTitle>
                 <SheetDescription v-if="activityLead">
                   Activities for <strong>{{ activityLead.display_name }}</strong>
                 </SheetDescription>
               </SheetHeader>
-              <div v-if="activityLead" class="mt-4 space-y-4">
+              <div v-if="activityLead" class="flex-1 space-y-4 overflow-y-auto px-6 pb-6">
                 <LeadActivityForm
                   v-if="rbac.can('lead:write')"
                   :lead-id="activityLead.id!"
                   @saved="activityRef?.fetchActivities()"
+                  @close-lost="handleCloseLost"
                 />
-                <LeadActivity ref="activityRef" :lead-id="activityLead.id!" />
+                <LeadActivity ref="activityRef" :lead-id="activityLead.id!" @close-lost="handleCloseLost" />
               </div>
             </SheetContent>
           </Sheet>

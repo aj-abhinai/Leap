@@ -77,7 +77,8 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
 			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(l.outcome, ''),
 			COALESCE(l.lost_reason, ''), l.value,
-			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
+			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at,
+			COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
 		FROM leads l
 		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
 		LEFT JOIN contacts c ON l.contact_id = c.id
@@ -88,6 +89,16 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 		LEFT JOIN LATERAL (
 			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
 		) pce ON true
+		LEFT JOIN LATERAL (
+			SELECT type, scheduled_at FROM lead_activities
+			WHERE lead_id = l.id AND NOT is_done AND NOT is_cancelled AND scheduled_at IS NOT NULL
+			ORDER BY scheduled_at ASC LIMIT 1
+		) nt ON true
+		LEFT JOIN LATERAL (
+			SELECT type, COALESCE(occurred_at, responded_at) AS touched_at FROM lead_activities
+			WHERE lead_id = l.id AND COALESCE(occurred_at, responded_at) IS NOT NULL
+			ORDER BY COALESCE(occurred_at, responded_at) DESC LIMIT 1
+		) lt ON true
 		%s
 		ORDER BY l.created_at DESC
 		LIMIT $%d OFFSET $%d`,
@@ -108,6 +119,7 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 			&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
 			&l.PipelineID, &l.StageID, &l.StageName, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
 			&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+			&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -124,7 +136,8 @@ func (s *Service) get(id string) (*Lead, error) {
 			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
 			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(l.outcome, ''),
 			COALESCE(l.lost_reason, ''), l.value,
-			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at
+			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at,
+			COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
 		FROM leads l
 		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
 		LEFT JOIN contacts c ON l.contact_id = c.id
@@ -135,11 +148,22 @@ func (s *Service) get(id string) (*Lead, error) {
 		LEFT JOIN LATERAL (
 			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
 		) pce ON true
+		LEFT JOIN LATERAL (
+			SELECT type, scheduled_at FROM lead_activities
+			WHERE lead_id = l.id AND NOT is_done AND NOT is_cancelled AND scheduled_at IS NOT NULL
+			ORDER BY scheduled_at ASC LIMIT 1
+		) nt ON true
+		LEFT JOIN LATERAL (
+			SELECT type, COALESCE(occurred_at, responded_at) AS touched_at FROM lead_activities
+			WHERE lead_id = l.id AND COALESCE(occurred_at, responded_at) IS NOT NULL
+			ORDER BY COALESCE(occurred_at, responded_at) DESC LIMIT 1
+		) lt ON true
 		WHERE l.id = $1 AND l.deleted_at IS NULL`, id,
 	).Scan(
 		&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
 		&l.PipelineID, &l.StageID, &l.StageName, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
 		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+		&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -447,6 +471,17 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 			id, old.StageID, l.StageID, old.StageName, targetStage.Name, userID,
 		); err != nil {
 			return nil, fmt.Errorf("record stage history: %w", err)
+		}
+		// Reaching a closing stage resolves the deal: cancel every open task so
+		// reminders stop nagging on won/lost leads (ADR 018).
+		if targetStage.IsClosing {
+			if _, err := tx.Exec(
+				`UPDATE lead_activities SET is_cancelled = true
+				WHERE lead_id = $1 AND NOT is_done AND NOT is_cancelled`,
+				id,
+			); err != nil {
+				return nil, fmt.Errorf("cancel open tasks: %w", err)
+			}
 		}
 	}
 
