@@ -406,7 +406,7 @@ function createNewPersonInstead() {
       <div class="flex gap-2">
         <Button @click="handleSave" :disabled="saving" class="flex-1">
           <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-          {{ isEditing ? 'Update' : 'Create' }}
+          {{ saving ? 'Saving...' : (isEditing ? 'Update' : 'Create') }}
         </Button>
         <Button
           v-if="isEditing"

@@ -231,7 +231,7 @@ async function handleSave() {
     <div class="border-t p-4">
       <Button @click="handleSave" :disabled="saving" class="w-full">
         <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-        {{ editingContact ? 'Update' : 'Create' }}
+        {{ saving ? 'Saving...' : (editingContact ? 'Update' : 'Create') }}
       </Button>
     </div>
   </div>

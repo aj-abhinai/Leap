@@ -29,6 +29,7 @@ const contact = ref<Contact | null>(null)
 const loading = shallowRef(true)
 const loadError = shallowRef('')
 const drawerOpen = shallowRef(false)
+const saving = shallowRef(false)
 
 onMounted(async () => {
   const id = route.params.id as string
@@ -55,6 +56,7 @@ function goBack() {
 
 async function handleSave(body: Record<string, any>) {
   if (!contact.value) return
+  saving.value = true
   try {
     await apiClient.patch(`/api/contacts/${contact.value.id}`, body)
     toast.success('Contact updated')
@@ -62,6 +64,8 @@ async function handleSave(body: Record<string, any>) {
   } catch (e: any) {
     toast.error(e.message || 'Failed to update contact')
     return
+  } finally {
+    saving.value = false
   }
   try {
     contact.value = await store.fetchContact(contact.value.id)
@@ -168,6 +172,7 @@ async function handleSave(body: Record<string, any>) {
               <ContactForm
                 :key="contact.id"
                 :editing-contact="contact"
+                :saving="saving"
                 @save="handleSave"
               />
             </SheetContent>
