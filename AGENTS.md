@@ -9,4 +9,5 @@ A full-stack, single-tenant pipeline CRM deployed as a single binary.
 
 ## Context
 
-Before making implementation decisions, inspect `.agents/` and its subdirectories for the relevant documentation. Read only the files needed for the current task.
+- Before making implementation decisions, inspect `.agents/` and its subdirectories for the relevant documentation. Read only the files needed for the current task.
+- docs/ - folder is just the documentation of the project skip reading that 
