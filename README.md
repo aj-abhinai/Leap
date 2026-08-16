@@ -2,6 +2,10 @@
 
 <br> Self-hosted pipeline CRM for internal teams. Contacts, kanban leads with configurable stages, role-based access control, and a full audit log — in a single binary.
 
+## Documentation
+
+For detailed documentation, read the [docs](https://aj-crm.pages.dev/).
+
 ## Features
 
 - **Contacts**  

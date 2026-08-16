@@ -1,40 +1,70 @@
 ---
-title: Welcome to Starlight
-description: Get started building your docs site with Starlight.
-template: splash # Remove or comment out this line to display the site sidebar on this page.
-hero:
-  tagline: Congrats on setting up a new Starlight project!
-  image:
-    file: ../../assets/houston.webp
-  actions:
-    - text: Example Guide
-      link: /guides/example/
-      icon: right-arrow
-    - text: Read the Starlight docs
-      link: https://starlight.astro.build
-      icon: external
-      variant: minimal
+title: Introduction
+description: Welcome to CRM - A self-hosted pipeline CRM for internal teams
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Next steps
+## What is CRM?
 
-<CardGrid stagger>
-	<Card title="Update content" icon="pencil">
-		Edit `src/content/docs/index.mdx` to see this page change.
-	</Card>
-	<Card title="Change page layout" icon="document">
-		Delete `template: splash` in `src/content/docs/index.mdx` to display a
-		sidebar on this page.
-	</Card>
-	<Card title="Add new content" icon="add-document">
-		Add Markdown or MDX files to `src/content/docs` to create new pages.
-	</Card>
-	<Card title="Configure your site" icon="setting">
-		Edit your `sidebar` and other config in `astro.config.mjs`.
-	</Card>
-	<Card title="Read the docs" icon="open-book">
-		Learn more in [the Starlight Docs](https://starlight.astro.build/).
-	</Card>
+CRM is a self-hosted pipeline CRM for internal teams. It tracks contacts and leads, and it records every change in an audit log. The whole system runs as a single binary, with no separate asset directories.
+
+## Key Features
+
+<CardGrid>
+  <Card title="Contacts" icon="building">
+    One record per client, with multiple phones, emails, tags, statuses, and notes. CSV import and export are included.
+  </Card>
+  <Card title="Pipeline Kanban" icon="list-format">
+    Pipelines have custom stages. Leads move between stages on a kanban board. Each card shows the next task and the last touch.
+  </Card>
+  <Card title="Activities and Reminders" icon="comment">
+    Each lead has a timeline of tasks: calls, follow-ups, and notes. Quick replies log outcomes and can auto-create the next task. Reminders surface overdue work.
+  </Card>
+  <Card title="Program Catalog" icon="document">
+    Fixed-price programs are managed in Settings. Lead values are price snapshots at creation time, so later price changes do not affect existing leads.
+  </Card>
+  <Card title="Role-Based Access Control" icon="setting">
+    Custom roles carry per-action permissions on contacts, leads, pipelines, users, and settings. A superadmin account is created on first run.
+  </Card>
+  <Card title="Audit Log" icon="open-book">
+    Every change is recorded with the user, the time, and a JSON diff. The activity feed shows the whole team what happened.
+  </Card>
+  <Card title="Secure Sessions" icon="lock">
+    Short-lived access tokens, a refresh cookie, and CSRF protection keep sessions safe. Login and refresh are rate-limited.
+  </Card>
+  <Card title="Single Binary" icon="rocket">
+    The Go backend contains the Vue frontend and the database migrations. Deploy with one `docker compose` command.
+  </Card>
+</CardGrid>
+
+## Tech Stack
+
+### Backend
+
+- **Go 1.25+** with the chi router and pgx. Raw SQL, no ORM.
+- **PostgreSQL 17** for data storage. golang-migrate runs the migrations at startup.
+- **JWT** for authentication, with refresh cookies and CSRF protection.
+
+### Frontend
+
+- **Vue 3** with the Composition API and TypeScript.
+- **Vite** for build tooling.
+- **Tailwind CSS v4** and **shadcn-vue** for styling and UI components.
+- **Pinia** and **TanStack Query** for state management.
+
+### Deployment
+
+- **Docker Compose** for one-command deployment.
+- **stuffbin** packs the frontend and migrations into the binary.
+
+## Next Steps
+
+<CardGrid>
+  <Card title="Quickstart" icon="rocket">
+    Install and run CRM in minutes. [Get started →](/getting-started/quickstart/)
+  </Card>
+  <Card title="API Reference" icon="open-book">
+    Explore the REST API. [View API →](/api-reference/overview/)
+  </Card>
 </CardGrid>
