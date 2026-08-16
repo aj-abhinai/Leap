@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
 import { apiClient } from '@/composables/useApi'
+import { usePagination } from '@/composables/usePagination'
 
 export interface ActivityEntry {
   id: string
@@ -15,24 +15,17 @@ export interface ActivityEntry {
 }
 
 export const useActivityStore = defineStore('activity', () => {
-  const entries = ref<ActivityEntry[]>([])
-  const total = ref(0)
-  const loading = ref(false)
+  const { items: entries, total, loading, fetch: fetchPage } = usePagination<ActivityEntry>()
 
   async function fetchActivity(page = 1, perPage = 20, filters: { action?: string; resourceType?: string } = {}) {
-    loading.value = true
-    try {
+    await fetchPage(async (p, pp) => {
       const params = new URLSearchParams()
-      params.set('page', String(page))
-      params.set('per_page', String(perPage))
+      params.set('page', String(p))
+      params.set('per_page', String(pp))
       if (filters.action) params.set('action', filters.action)
       if (filters.resourceType) params.set('resource_type', filters.resourceType)
-      const res = await apiClient.get(`/api/activity?${params}`)
-      entries.value = res.data
-      total.value = res.meta?.total || 0
-    } finally {
-      loading.value = false
-    }
+      return apiClient.get(`/api/activity?${params}`)
+    }, page, perPage)
   }
 
   return { entries, total, loading, fetchActivity }

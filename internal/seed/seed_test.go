@@ -138,6 +138,35 @@ func TestSeedSuperadminSkipsAndRollsBackOnExistingUsers(t *testing.T) {
 	}
 }
 
+func TestSeedSeedsTagCatalog(t *testing.T) {
+	db := testdb.New(t)
+	superadmin := config.Superadmin{Email: "admin@admin.com", Password: "admin"}
+
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+
+	// The four simple catalogs (name+type only) must appear exactly once each,
+	// and the quick-reply catalog (with its group/sort/behavior reconciliation)
+	// must be present with its seven entries.
+	want := map[string]int{
+		"tag":           4,
+		"status":        4,
+		"activity_type": 4,
+		"loss_reason":   2,
+		"quick_reply":   7,
+	}
+	for typ, count := range want {
+		var got int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM tags WHERE type = $1`, typ).Scan(&got); err != nil {
+			t.Fatalf("count tags type %q: %v", typ, err)
+		}
+		if got != count {
+			t.Errorf("tags of type %q = %d, want %d", typ, got, count)
+		}
+	}
+}
+
 func assertBootstrapAdmin(t *testing.T, db *sql.DB, email string, wantChangePassword bool) {
 	t.Helper()
 

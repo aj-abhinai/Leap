@@ -199,19 +199,37 @@ func seedDefaultPipeline(db *sql.DB) error {
 }
 
 func seedTagsAndStatuses(db *sql.DB) error {
-	tags := []string{"Hot Lead", "VIP", "Student", "Influencer"}
-	for _, name := range tags {
-		_, err := db.Exec(`INSERT INTO tags (name, type) VALUES ($1, 'tag') ON CONFLICT (name, type) DO NOTHING`, name)
-		if err != nil {
-			return fmt.Errorf("seed tag %s: %w", name, err)
-		}
+	catalog := []struct {
+		name  string
+		typ   string
+		label string
+	}{
+		// Tags shown on the contact/lead forms.
+		{"Hot Lead", "tag", "tag"},
+		{"VIP", "tag", "tag"},
+		{"Student", "tag", "tag"},
+		{"Influencer", "tag", "tag"},
+		// Contact statuses (a separate tag type, ADR 020).
+		{"New", "status", "status"},
+		{"Active", "status", "status"},
+		{"Cold", "status", "status"},
+		{"Archived", "status", "status"},
+		// Activity types (the "Stage Activity" labels; presets, not enforced).
+		{"Call", "activity_type", "activity type"},
+		{"WhatsApp", "activity_type", "activity type"},
+		{"Email", "activity_type", "activity type"},
+		{"Meeting", "activity_type", "activity type"},
+		// Loss-reason presets for the "Closed Lost" stage (free text plus presets).
+		{"Not intrested", "loss_reason", "loss reason"},
+		{"Fake", "loss_reason", "loss reason"},
 	}
-
-	statuses := []string{"New", "Active", "Cold", "Archived"}
-	for _, name := range statuses {
-		_, err := db.Exec(`INSERT INTO tags (name, type) VALUES ($1, 'status') ON CONFLICT (name, type) DO NOTHING`, name)
+	for _, t := range catalog {
+		_, err := db.Exec(
+			`INSERT INTO tags (name, type) VALUES ($1, $2) ON CONFLICT (name, type) DO NOTHING`,
+			t.name, t.typ,
+		)
 		if err != nil {
-			return fmt.Errorf("seed status %s: %w", name, err)
+			return fmt.Errorf("seed %s %s: %w", t.label, t.name, err)
 		}
 	}
 
@@ -252,24 +270,6 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		)
 		if err != nil {
 			return fmt.Errorf("seed quick reply %s: %w", st.name, err)
-		}
-	}
-
-	// Activity types (the "Stage Activity" labels; presets, not enforced).
-	activityTypes := []string{"Call", "WhatsApp", "Email", "Meeting"}
-	for _, name := range activityTypes {
-		_, err := db.Exec(`INSERT INTO tags (name, type) VALUES ($1, 'activity_type') ON CONFLICT (name, type) DO NOTHING`, name)
-		if err != nil {
-			return fmt.Errorf("seed activity type %s: %w", name, err)
-		}
-	}
-
-	// Loss-reason presets for the "Closed Lost" stage (free text plus presets).
-	lossReasons := []string{"Not intrested", "Fake"}
-	for _, name := range lossReasons {
-		_, err := db.Exec(`INSERT INTO tags (name, type) VALUES ($1, 'loss_reason') ON CONFLICT (name, type) DO NOTHING`, name)
-		if err != nil {
-			return fmt.Errorf("seed loss reason %s: %w", name, err)
 		}
 	}
 

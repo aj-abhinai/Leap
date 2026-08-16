@@ -55,11 +55,13 @@ func TestExportContactsCSVIntegration(t *testing.T) {
 			t.Fatalf("seed phone: %v", err)
 		}
 	}
-	if _, err := db.Exec(
-		`INSERT INTO contact_emails (contact_id, value, is_primary) VALUES ($1, 'alice@example.com', true)`,
-		contactID,
-	); err != nil {
-		t.Fatalf("seed email: %v", err)
+	for _, v := range []string{"alice@example.com", "ali@example.com"} {
+		if _, err := db.Exec(
+			`INSERT INTO contact_emails (contact_id, value, is_primary) VALUES ($1, $2, $3)`,
+			contactID, v, v == "alice@example.com",
+		); err != nil {
+			t.Fatalf("seed email: %v", err)
+		}
 	}
 	var statusID, tagID string
 	if err := db.QueryRow(`INSERT INTO tags (name, type) VALUES ('Active', 'status') RETURNING id`).Scan(&statusID); err != nil {
@@ -127,7 +129,10 @@ func TestExportContactsCSVIntegration(t *testing.T) {
 		t.Errorf("all_phones = %q, want primary-first joined", row[4])
 	}
 	if row[5] != "alice@example.com" {
-		t.Errorf("primary_email = %q", row[5])
+		t.Errorf("primary_email = %q, want alice@example.com", row[5])
+	}
+	if row[6] != "alice@example.com; ali@example.com" {
+		t.Errorf("all_emails = %q, want primary-first joined", row[6])
 	}
 	if row[7] != "Active" {
 		t.Errorf("status = %q, want Active", row[7])

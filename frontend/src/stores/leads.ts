@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
 import { apiClient } from '@/composables/useApi'
+import { usePagination, totalOf } from '@/composables/usePagination'
 
 export interface Lead {
   id: string
@@ -29,24 +29,17 @@ export interface Lead {
 }
 
 export const useLeadsStore = defineStore('leads', () => {
-  const leads = ref<Lead[]>([])
-  const total = ref(0)
-  const loading = ref(false)
+  const { items: leads, total, loading, fetch: fetchPage, setTotal } = usePagination<Lead>()
 
   async function fetchLeads(pipelineId = '', stageId = '', page = 1, perPage = 50) {
-    loading.value = true
-    try {
+    await fetchPage(async (p, pp) => {
       const params = new URLSearchParams()
-      params.set('page', String(page))
-      params.set('per_page', String(perPage))
+      params.set('page', String(p))
+      params.set('per_page', String(pp))
       if (pipelineId) params.set('pipeline_id', pipelineId)
       if (stageId) params.set('stage_id', stageId)
-      const res = await apiClient.get(`/api/leads?${params}`)
-      leads.value = res.data
-      total.value = res.meta?.total || 0
-    } finally {
-      loading.value = false
-    }
+      return apiClient.get(`/api/leads?${params}`)
+    }, page, perPage)
   }
 
   async function fetchTotal() {
@@ -54,7 +47,7 @@ export const useLeadsStore = defineStore('leads', () => {
       const params = new URLSearchParams()
       params.set('per_page', '1')
       const res = await apiClient.get(`/api/leads?${params}`)
-      total.value = res.meta?.total || 0
+      setTotal(totalOf(res))
     } catch {}
   }
 

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
 import { apiClient } from '@/composables/useApi'
+import { usePagination, totalOf } from '@/composables/usePagination'
 
 export interface TagRef {
   id: string
@@ -37,23 +37,16 @@ export interface Contact {
 }
 
 export const useContactsStore = defineStore('contacts', () => {
-  const contacts = ref<Contact[]>([])
-  const total = ref(0)
-  const loading = ref(false)
+  const { items: contacts, total, loading, fetch: fetchPage, setTotal } = usePagination<Contact>()
 
   async function fetchContacts(page = 1, perPage = 20, search = '') {
-    loading.value = true
-    try {
+    await fetchPage(async (p, pp) => {
       const params = new URLSearchParams()
-      params.set('page', String(page))
-      params.set('per_page', String(perPage))
+      params.set('page', String(p))
+      params.set('per_page', String(pp))
       if (search) params.set('q', search)
-      const res = await apiClient.get(`/api/contacts?${params}`)
-      contacts.value = res.data
-      total.value = res.meta?.total || 0
-    } finally {
-      loading.value = false
-    }
+      return apiClient.get(`/api/contacts?${params}`)
+    }, page, perPage)
   }
 
   async function fetchContact(id: string): Promise<Contact> {
@@ -66,7 +59,7 @@ export const useContactsStore = defineStore('contacts', () => {
       const params = new URLSearchParams()
       params.set('per_page', '1')
       const res = await apiClient.get(`/api/contacts?${params}`)
-      total.value = res.meta?.total || 0
+      setTotal(totalOf(res))
     } catch {}
   }
 

@@ -79,11 +79,11 @@ func (s *Service) ExportContactsCSV(w io.Writer) error {
 		return fmt.Errorf("iterate contacts: %w", err)
 	}
 
-	phones, err := s.phonesByContact(contactIDs)
+	phones, err := s.valuesByContact(contactIDs, contactPhones)
 	if err != nil {
 		return err
 	}
-	emails, err := s.emailsByContact(contactIDs)
+	emails, err := s.valuesByContact(contactIDs, contactEmails)
 	if err != nil {
 		return err
 	}
@@ -123,63 +123,39 @@ type valueSet struct {
 	all     string
 }
 
-// phonesByContact loads every phone per contact, primary first, and joins them
-// with "; " for the all-phones cell.
-func (s *Service) phonesByContact(contactIDs []string) (map[string]valueSet, error) {
-	result := make(map[string]valueSet, len(contactIDs))
-	if len(contactIDs) == 0 {
-		return result, nil
-	}
-	rows, err := s.db.Query(`
-		SELECT contact_id, value, is_primary FROM contact_phones
-		WHERE contact_id = ANY($1)
-		ORDER BY contact_id, is_primary DESC, created_at`, contactIDs)
-	if err != nil {
-		return nil, fmt.Errorf("query contact phones: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var contactID, value string
-		var isPrimary bool
-		if err := rows.Scan(&contactID, &value, &isPrimary); err != nil {
-			return nil, fmt.Errorf("scan contact phone: %w", err)
-		}
-		vs := result[contactID]
-		if isPrimary && vs.primary == "" {
-			vs.primary = value
-		}
-		if vs.all != "" {
-			vs.all += "; "
-		}
-		vs.all += value
-		result[contactID] = vs
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate contact phones: %w", err)
-	}
-	return result, nil
+// childTable is a contact child table (phones or emails) read by
+// valuesByContact. Its SQL name is interpolated into a query, so only the
+// package constants may be passed.
+type childTable struct {
+	sqlName string
+	label   string
 }
 
-// emailsByContact loads every email per contact, primary first, and joins them
-// with "; " for the all-emails cell.
-func (s *Service) emailsByContact(contactIDs []string) (map[string]valueSet, error) {
+var (
+	contactPhones = childTable{sqlName: "contact_phones", label: "phones"}
+	contactEmails = childTable{sqlName: "contact_emails", label: "emails"}
+)
+
+// valuesByContact loads every value per contact from the given child table,
+// primary first, and joins them with "; " for the all-values cell.
+func (s *Service) valuesByContact(contactIDs []string, table childTable) (map[string]valueSet, error) {
 	result := make(map[string]valueSet, len(contactIDs))
 	if len(contactIDs) == 0 {
 		return result, nil
 	}
 	rows, err := s.db.Query(`
-		SELECT contact_id, value, is_primary FROM contact_emails
+		SELECT contact_id, value, is_primary FROM `+table.sqlName+`
 		WHERE contact_id = ANY($1)
 		ORDER BY contact_id, is_primary DESC, created_at`, contactIDs)
 	if err != nil {
-		return nil, fmt.Errorf("query contact emails: %w", err)
+		return nil, fmt.Errorf("query contact %s: %w", table.label, err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var contactID, value string
 		var isPrimary bool
 		if err := rows.Scan(&contactID, &value, &isPrimary); err != nil {
-			return nil, fmt.Errorf("scan contact email: %w", err)
+			return nil, fmt.Errorf("scan contact %s: %w", table.label, err)
 		}
 		vs := result[contactID]
 		if isPrimary && vs.primary == "" {
@@ -192,7 +168,7 @@ func (s *Service) emailsByContact(contactIDs []string) (map[string]valueSet, err
 		result[contactID] = vs
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate contact emails: %w", err)
+		return nil, fmt.Errorf("iterate contact %s: %w", table.label, err)
 	}
 	return result, nil
 }
