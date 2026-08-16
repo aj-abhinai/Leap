@@ -5,11 +5,25 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"crm/internal/config"
 )
+
+// secureService returns a Service with secure cookies enabled so the cookie
+// helpers can be exercised without a database.
+func secureService() *Service {
+	return &Service{cfg: config.Auth{SecureCookies: true, RefreshTokenTTL: 7 * 24 * time.Hour}}
+}
+
+// csrfService returns a Service with a nonzero refresh TTL so the CSRF cookie
+// MaxAge can be asserted against the configured session lifetime.
+func csrfService() *Service {
+	return &Service{cfg: config.Auth{RefreshTokenTTL: 30 * 24 * time.Hour}}
+}
 
 func TestSetRefreshCookieAttributes(t *testing.T) {
 	rec := httptest.NewRecorder()
-	cookieConfig{secure: true}.setRefreshCookie(rec, "tok-123", 7*24*time.Hour)
+	secureService().setRefreshCookie(rec, "tok-123")
 
 	res := rec.Result()
 	defer res.Body.Close()
@@ -43,7 +57,7 @@ func TestSetRefreshCookieAttributes(t *testing.T) {
 
 func TestClearRefreshCookieExpiresImmediately(t *testing.T) {
 	rec := httptest.NewRecorder()
-	cookieConfig{}.clearRefreshCookie(rec)
+	secureService().clearRefreshCookie(rec)
 
 	res := rec.Result()
 	defer res.Body.Close()
@@ -62,7 +76,7 @@ func TestClearRefreshCookieExpiresImmediately(t *testing.T) {
 
 func TestSetCSRFCookieIsReadableByJavaScript(t *testing.T) {
 	rec := httptest.NewRecorder()
-	cookieConfig{}.setCSRFCookie(rec)
+	csrfService().setCSRFCookie(rec)
 
 	res := rec.Result()
 	defer res.Body.Close()
@@ -79,5 +93,9 @@ func TestSetCSRFCookieIsReadableByJavaScript(t *testing.T) {
 	}
 	if c.Path != "/" {
 		t.Errorf("path = %q, want /", c.Path)
+	}
+	wantMaxAge := int((30 * 24 * time.Hour).Seconds())
+	if c.MaxAge != wantMaxAge {
+		t.Errorf("MaxAge = %d, want %d (from refresh TTL)", c.MaxAge, wantMaxAge)
 	}
 }

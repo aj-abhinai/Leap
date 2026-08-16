@@ -251,6 +251,7 @@ func authTestConfig() config.Auth {
 		JWTIssuer:       "crm-test",
 		AccessTokenTTL:  15 * time.Minute,
 		RefreshTokenTTL: 7 * 24 * time.Hour,
+		SecureCookies:   false,
 	}
 }
 

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crm/internal/activity"
+	"crm/internal/config"
 	"crm/internal/ctxutil"
 	"crm/internal/testdb"
 	"encoding/json"
@@ -18,6 +19,13 @@ type handlerEnvelope struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// secureAuthConfig returns the test auth config with secure cookies enabled.
+func secureAuthConfig() config.Auth {
+	cfg := authTestConfig()
+	cfg.SecureCookies = true
+	return cfg
 }
 
 func doJSON(t *testing.T, h http.HandlerFunc, method, path, body string, mutate func(*http.Request) *http.Request) (*httptest.ResponseRecorder, handlerEnvelope) {
@@ -44,7 +52,7 @@ func TestHandlerLoginSuccess(t *testing.T) {
 	db := testdb.New(t)
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	act := activity.NewService(db)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, true, act)
+	h := NewHandler(NewService(db, secureAuthConfig()), act)
 
 	rec, env := doJSON(t, h.Login, http.MethodPost, "/api/auth/login",
 		`{"email":"alice@example.com","password":"correct-horse"}`, nil)
@@ -102,7 +110,7 @@ func TestHandlerLoginSuccess(t *testing.T) {
 
 func TestHandlerLoginInvalidJSON(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.Login, http.MethodPost, "/api/auth/login", `{not-json`, nil)
 
@@ -116,7 +124,7 @@ func TestHandlerLoginInvalidJSON(t *testing.T) {
 
 func TestHandlerLoginMissingFields(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.Login, http.MethodPost, "/api/auth/login", `{"email":"a@b.c"}`, nil)
 
@@ -131,7 +139,7 @@ func TestHandlerLoginMissingFields(t *testing.T) {
 func TestHandlerLoginInvalidCredentials(t *testing.T) {
 	db := testdb.New(t)
 	seedUser(t, db, "alice@example.com", "correct-horse")
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.Login, http.MethodPost, "/api/auth/login",
 		`{"email":"alice@example.com","password":"wrong-password"}`, nil)
@@ -147,7 +155,7 @@ func TestHandlerLoginInvalidCredentials(t *testing.T) {
 func TestHandlerLoginMustChangePassword(t *testing.T) {
 	db := testdb.New(t)
 	seedUserWithFlag(t, db, "bob@example.com", "correct-horse", true)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.Login, http.MethodPost, "/api/auth/login",
 		`{"email":"bob@example.com","password":"correct-horse"}`, nil)
@@ -169,7 +177,7 @@ func TestHandlerLoginMustChangePassword(t *testing.T) {
 func TestHandlerRefreshRotatesToken(t *testing.T) {
 	db := testdb.New(t)
 	seedUser(t, db, "alice@example.com", "correct-horse")
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	loginRec, _ := doJSON(t, h.Login, http.MethodPost, "/api/auth/login",
 		`{"email":"alice@example.com","password":"correct-horse"}`, nil)
@@ -208,11 +216,21 @@ func TestHandlerRefreshRotatesToken(t *testing.T) {
 	if newRefresh == "" || newRefresh == refreshCookie.Value {
 		t.Error("refresh handler should set a rotated refresh cookie")
 	}
+
+	var newCSRF string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == CSRFCookieName {
+			newCSRF = c.Value
+		}
+	}
+	if newCSRF == "" {
+		t.Error("refresh handler should re-issue the CSRF cookie so the session outlives a 7-day CSRF cookie")
+	}
 }
 
 func TestHandlerRefreshMissingCookie(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.Refresh, http.MethodPost, "/api/auth/refresh", "", nil)
 
@@ -231,7 +249,7 @@ func TestHandlerRefreshMissingCookie(t *testing.T) {
 
 func TestHandlerRefreshInvalidToken(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.Refresh, http.MethodPost, "/api/auth/refresh", "",
 		func(r *http.Request) *http.Request {
@@ -250,7 +268,7 @@ func TestHandlerRefreshInvalidToken(t *testing.T) {
 func TestHandlerRefreshReusedTokenRejected(t *testing.T) {
 	db := testdb.New(t)
 	seedUser(t, db, "alice@example.com", "correct-horse")
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	loginRec, _ := doJSON(t, h.Login, http.MethodPost, "/api/auth/login",
 		`{"email":"alice@example.com","password":"correct-horse"}`, nil)
@@ -281,7 +299,7 @@ func TestHandlerLogoutRevokesSession(t *testing.T) {
 	db := testdb.New(t)
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	act := activity.NewService(db)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, act)
+	h := NewHandler(NewService(db, authTestConfig()), act)
 
 	loginRec, _ := doJSON(t, h.Login, http.MethodPost, "/api/auth/login",
 		`{"email":"alice@example.com","password":"correct-horse"}`, nil)
@@ -327,7 +345,7 @@ func TestHandlerLogoutRevokesSession(t *testing.T) {
 
 func TestHandlerLogoutWithoutCookie(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.Logout, http.MethodPost, "/api/auth/logout", "", nil)
 
@@ -342,7 +360,7 @@ func TestHandlerLogoutWithoutCookie(t *testing.T) {
 func TestHandlerMe(t *testing.T) {
 	db := testdb.New(t)
 	id := seedUser(t, db, "alice@example.com", "correct-horse")
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.Me, http.MethodGet, "/api/auth/me", "",
 		func(r *http.Request) *http.Request {
@@ -364,7 +382,7 @@ func TestHandlerMe(t *testing.T) {
 func TestHandlerUpdateProfile(t *testing.T) {
 	db := testdb.New(t)
 	id := seedUser(t, db, "alice@example.com", "correct-horse")
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.UpdateProfile, http.MethodPatch, "/api/auth/me",
 		`{"name":"Alice Renamed","phone":"1234567890"}`,
@@ -387,7 +405,7 @@ func TestHandlerUpdateProfile(t *testing.T) {
 func TestHandlerChangePasswordSuccess(t *testing.T) {
 	db := testdb.New(t)
 	id := seedUserWithFlag(t, db, "carol@example.com", "original-pw", true)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, _ := doJSON(t, h.ChangePassword, http.MethodPatch, "/api/auth/me/password",
 		`{"current_password":"original-pw","new_password":"New-Passw0rd!"}`,
@@ -403,7 +421,7 @@ func TestHandlerChangePasswordSuccess(t *testing.T) {
 func TestHandlerChangePasswordWrongCurrent(t *testing.T) {
 	db := testdb.New(t)
 	id := seedUserWithFlag(t, db, "dave@example.com", "real-pw", true)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.ChangePassword, http.MethodPatch, "/api/auth/me/password",
 		`{"current_password":"wrong-current","new_password":"New-Passw0rd!"}`,
@@ -422,7 +440,7 @@ func TestHandlerChangePasswordWrongCurrent(t *testing.T) {
 func TestHandlerChangePasswordMissingFields(t *testing.T) {
 	db := testdb.New(t)
 	id := seedUser(t, db, "eve@example.com", "correct-horse")
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.ChangePassword, http.MethodPatch, "/api/auth/me/password",
 		`{"current_password":"correct-horse"}`,
@@ -440,7 +458,7 @@ func TestHandlerChangePasswordMissingFields(t *testing.T) {
 
 func TestHandlerMeUnknownUser(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.Me, http.MethodGet, "/api/auth/me", "",
 		func(r *http.Request) *http.Request {
@@ -458,7 +476,7 @@ func TestHandlerMeUnknownUser(t *testing.T) {
 func TestHandlerUpdateProfileInvalidJSON(t *testing.T) {
 	db := testdb.New(t)
 	id := seedUser(t, db, "alice@example.com", "correct-horse")
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.UpdateProfile, http.MethodPatch, "/api/auth/me", `{bad-json`,
 		func(r *http.Request) *http.Request {
@@ -475,7 +493,7 @@ func TestHandlerUpdateProfileInvalidJSON(t *testing.T) {
 
 func TestHandlerUpdateProfileUnknownUser(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.UpdateProfile, http.MethodPatch, "/api/auth/me",
 		`{"name":"Nobody"}`,
@@ -493,7 +511,7 @@ func TestHandlerUpdateProfileUnknownUser(t *testing.T) {
 
 func TestHandlerChangePasswordUnknownUser(t *testing.T) {
 	db := testdb.New(t)
-	h := NewHandler(NewService(db, authTestConfig()), 15*time.Minute, 7*24*time.Hour, false, nil)
+	h := NewHandler(NewService(db, authTestConfig()), nil)
 
 	rec, env := doJSON(t, h.ChangePassword, http.MethodPatch, "/api/auth/me/password",
 		`{"current_password":"pw","new_password":"New-Passw0rd!"}`,

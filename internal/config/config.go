@@ -72,7 +72,7 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	if !cfg.App.IsDevelopment() {
-		// Auth cookies carry the 7-day refresh token; outside development the
+		// Auth cookies carry the refresh token; outside development the
 		// Secure flag is forced so browsers only send them over HTTPS.
 		cfg.Auth.SecureCookies = true
 	}
@@ -169,6 +169,13 @@ func Validate(cfg Config) error {
 	}
 
 	development := cfg.App.IsDevelopment()
+
+	if cfg.Auth.AccessTokenTTL <= 0 {
+		problems = append(problems, fmt.Errorf("auth.access_token_ttl must be a positive duration (set access_token_ttl)"))
+	}
+	if cfg.Auth.RefreshTokenTTL.Seconds() < 1 {
+		problems = append(problems, fmt.Errorf("auth.refresh_token_ttl must be at least one second (set refresh_token_ttl)"))
+	}
 
 	secret := strings.TrimSpace(cfg.Auth.JWTSecret)
 	switch {

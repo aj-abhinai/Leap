@@ -104,7 +104,7 @@ func main() {
 	activitySvc := activity.NewService(database)
 
 	authSvc := auth.NewService(database, cfg.Auth)
-	authH := auth.NewHandler(authSvc, cfg.Auth.AccessTokenTTL, cfg.Auth.RefreshTokenTTL, cfg.Auth.SecureCookies, activitySvc)
+	authH := auth.NewHandler(authSvc, activitySvc)
 
 	rbacSvc := rbac.NewService(database)
 	rbacH := rbac.NewHandler(rbacSvc)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const validTOML = `
@@ -136,6 +137,8 @@ func TestInvalidEnvPortFails(t *testing.T) {
 func TestValidate(t *testing.T) {
 	cfg := &Config{}
 	cfg.App.Environment = "development"
+	cfg.Auth.AccessTokenTTL = 15 * time.Minute
+	cfg.Auth.RefreshTokenTTL = 24 * time.Hour
 	cfg.Superadmin.Email = "admin@admin.com"
 	cfg.Superadmin.Password = "admin"
 
@@ -191,10 +194,50 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestValidateTokenTTLs(t *testing.T) {
+	base := func() *Config {
+		cfg := &Config{}
+		cfg.App.Environment = "development"
+		cfg.Auth.JWTSecret = "0123456789abcdef0123456789abcdef"
+		cfg.Auth.AccessTokenTTL = 15 * time.Minute
+		cfg.Auth.RefreshTokenTTL = 24 * time.Hour
+		cfg.Superadmin.Email = "admin@admin.com"
+		cfg.Superadmin.Password = "admin"
+		return cfg
+	}
+
+	tests := []struct {
+		name       string
+		accessTTL  time.Duration
+		refreshTTL time.Duration
+		wantOK     bool
+	}{
+		{name: "valid", accessTTL: 15 * time.Minute, refreshTTL: 24 * time.Hour, wantOK: true},
+		{name: "zero access", accessTTL: 0, refreshTTL: 24 * time.Hour, wantOK: false},
+		{name: "zero refresh", accessTTL: 15 * time.Minute, refreshTTL: 0, wantOK: false},
+		{name: "negative access", accessTTL: -1 * time.Minute, refreshTTL: 24 * time.Hour, wantOK: false},
+		{name: "sub-second refresh", accessTTL: 15 * time.Minute, refreshTTL: 500 * time.Millisecond, wantOK: false},
+		{name: "both zero", accessTTL: 0, refreshTTL: 0, wantOK: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base()
+			cfg.Auth.AccessTokenTTL = tt.accessTTL
+			cfg.Auth.RefreshTokenTTL = tt.refreshTTL
+			err := Validate(*cfg)
+			if (err == nil) != tt.wantOK {
+				t.Fatalf("Validate(access=%v, refresh=%v) err = %v, wantOK %v", tt.accessTTL, tt.refreshTTL, err, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestValidateTrustedProxies(t *testing.T) {
 	cfg := &Config{}
 	cfg.App.Environment = "development"
 	cfg.Auth.JWTSecret = "0123456789abcdef0123456789abcdef"
+	cfg.Auth.AccessTokenTTL = 15 * time.Minute
+	cfg.Auth.RefreshTokenTTL = 24 * time.Hour
 	cfg.Superadmin.Email = "admin@admin.com"
 	cfg.Superadmin.Password = "admin"
 
@@ -248,6 +291,8 @@ func TestValidateRejectsDevSecretOutsideDevelopment(t *testing.T) {
 	cfg := &Config{}
 	cfg.App.Environment = "production"
 	cfg.Auth.JWTSecret = "dev-only-jwt-secret-0123456789abcdef"
+	cfg.Auth.AccessTokenTTL = 15 * time.Minute
+	cfg.Auth.RefreshTokenTTL = 24 * time.Hour
 	cfg.Superadmin.Email = "admin@example.com"
 	cfg.Superadmin.Password = "a-strong-password-12+"
 
@@ -260,6 +305,8 @@ func TestValidateAllowsDevSecretInDevelopment(t *testing.T) {
 	cfg := &Config{}
 	cfg.App.Environment = "development"
 	cfg.Auth.JWTSecret = "dev-only-jwt-secret-0123456789abcdef"
+	cfg.Auth.AccessTokenTTL = 15 * time.Minute
+	cfg.Auth.RefreshTokenTTL = 24 * time.Hour
 	cfg.Superadmin.Email = "admin@admin.com"
 	cfg.Superadmin.Password = "admin"
 

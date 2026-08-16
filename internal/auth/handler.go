@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
@@ -14,23 +13,11 @@ import (
 
 type Handler struct {
 	svc    *Service
-	cfg    cookieConfig
-	ttls   TokenTTLs
 	actLog *activity.Service
 }
 
-type TokenTTLs struct {
-	Access  time.Duration
-	Refresh time.Duration
-}
-
-func NewHandler(svc *Service, accessTTL, refreshTTL time.Duration, secureCookies bool, actLog *activity.Service) *Handler {
-	return &Handler{
-		svc:    svc,
-		cfg:    cookieConfig{secure: secureCookies},
-		ttls:   TokenTTLs{Access: accessTTL, Refresh: refreshTTL},
-		actLog: actLog,
-	}
+func NewHandler(svc *Service, actLog *activity.Service) *Handler {
+	return &Handler{svc: svc, actLog: actLog}
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
@@ -74,8 +61,8 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if h.actLog != nil {
 		h.actLog.LogLogin(u.ID, u.Name)
 	}
-	h.cfg.setRefreshCookie(w, resp.RefreshToken, h.ttls.Refresh)
-	h.cfg.setCSRFCookie(w)
+	h.svc.setRefreshCookie(w, resp.RefreshToken)
+	h.svc.setCSRFCookie(w)
 	respond.JSON(
 		w,
 		http.StatusOK,
@@ -92,7 +79,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(RefreshCookieName)
 	if err != nil || cookie.Value == "" {
-		h.cfg.clearRefreshCookie(w)
+		h.svc.clearRefreshCookie(w)
 		respond.JSON(
 			w,
 			http.StatusUnauthorized,
@@ -104,7 +91,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := h.svc.refresh(cookie.Value)
 	if err != nil {
-		h.cfg.clearRefreshCookie(w)
+		h.svc.clearRefreshCookie(w)
 		var ae *AuthError
 		if errors.As(err, &ae) {
 			respond.JSON(
@@ -119,7 +106,8 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		respond.ServerError(w, err)
 		return
 	}
-	h.cfg.setRefreshCookie(w, resp.RefreshToken, h.ttls.Refresh)
+	h.svc.setRefreshCookie(w, resp.RefreshToken)
+	h.svc.setCSRFCookie(w)
 	respond.JSON(
 		w,
 		http.StatusOK,
@@ -141,8 +129,8 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 			h.actLog.LogLogout(userID, userName)
 		}
 	}
-	h.cfg.clearRefreshCookie(w)
-	h.cfg.clearCSRFCookie(w)
+	h.svc.clearRefreshCookie(w)
+	h.svc.clearCSRFCookie(w)
 	respond.JSON(
 		w,
 		http.StatusOK,
