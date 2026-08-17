@@ -243,7 +243,7 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 		return nil, err
 	}
 	l.DisplayName = l.displayName()
-	s.logActivity(l.ID, "lead", "create", "", userID)
+	s.logActivity(l.ID, "lead", "create", fmt.Sprintf("Created lead %q", l.DisplayName), userID)
 	return &l, nil
 }
 

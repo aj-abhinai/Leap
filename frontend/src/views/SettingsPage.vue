@@ -186,6 +186,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
                   <TableHead>Description</TableHead>
                   <TableHead>Action</TableHead>
                   <TableHead>Type</TableHead>
+                  <TableHead>Actor</TableHead>
                   <TableHead class="text-right">Date</TableHead>
                 </TableRow>
               </TableHeader>
@@ -198,6 +199,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
                       {{ e.resource_type }}
                     </Badge>
                   </TableCell>
+                  <TableCell class="text-xs text-muted-foreground">{{ e.user_name || '—' }}</TableCell>
                   <TableCell class="text-right text-xs text-muted-foreground tabular-nums">
                     {{ formatDateTime(e.created_at) }}
                   </TableCell>

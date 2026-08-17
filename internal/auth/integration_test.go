@@ -294,7 +294,7 @@ func TestLoginLogoutAuditIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	act.LogLogin(userID, "Test User")
+	act.LogLogin(userID, "Test User", "alice@example.com")
 
 	var loginCount int
 	if err := db.QueryRow(
@@ -306,7 +306,7 @@ func TestLoginLogoutAuditIntegration(t *testing.T) {
 		t.Errorf("expected 1 login audit entry, got %d", loginCount)
 	}
 
-	act.LogLogout(userID, "Test User")
+	act.LogLogout(userID, "Test User", "alice@example.com")
 	var logoutCount int
 	if err := db.QueryRow(
 		`SELECT COUNT(*) FROM audit_logs WHERE action = 'logout' AND user_id = $1`, userID,
@@ -318,12 +318,12 @@ func TestLoginLogoutAuditIntegration(t *testing.T) {
 	}
 
 	// Logout via the service should revoke the token and still identify the actor.
-	gotID, gotName, err := svc.logout(resp.RefreshToken)
+	gotID, gotName, gotEmail, err := svc.logout(resp.RefreshToken)
 	if err != nil {
 		t.Fatalf("logout: %v", err)
 	}
-	if gotID != userID || gotName != "Test User" {
-		t.Errorf("expected logout to return user %q, got id=%q name=%q", userID, gotID, gotName)
+	if gotID != userID || gotName != "Test User" || gotEmail != "alice@example.com" {
+		t.Errorf("expected logout to return user %q, got id=%q name=%q email=%q", userID, gotID, gotName, gotEmail)
 	}
 }
 

@@ -14,18 +14,20 @@ import {
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
+import { Badge } from '@/components/ui/badge'
 import LeadKanban from '@/components/leads/LeadKanban.vue'
 import LeadForm from '@/components/leads/LeadForm.vue'
 import LeadActivity from '@/components/leads/LeadActivity.vue'
 import LeadActivityForm from '@/components/leads/LeadActivityForm.vue'
 import { useRBACStore } from '@/stores/rbac'
 import { toast } from 'vue-sonner'
-import { Plus, Layers } from '@lucide/vue'
+import { Plus, Layers, BookOpen } from '@lucide/vue'
+import { formatCurrency, formatContactDetail } from '@/utils/format'
+import type { LeadSaveBody } from '@/components/leads/LeadForm.vue'
 import { useLeadPipeline } from '@/composables/useLeadPipeline'
 import { useLeadDrawer } from '@/composables/useLeadDrawer'
 import { useActivityDrawer } from '@/composables/useActivityDrawer'
@@ -84,6 +86,27 @@ async function handleCloseLost() {
   if (lead.stage_id === target.id) return
   await moveStage(lead.id, target.id, lead.stage_id)
   activityDrawerOpen.value = false
+}
+
+// After a lead edit/delete from the activity drawer, the drawer header would
+// keep stale stage/value/contact data. Re-sync from the freshly reloaded
+// kanban columns; close the drawer if the lead no longer exists.
+function syncActivityLead() {
+  const id = activityLead.value?.id
+  if (!id) return
+  const fresh = kanbanColumns.value.flatMap((c) => c.leads).find((l) => l.id === id)
+  if (fresh) activityLead.value = fresh
+  else activityDrawerOpen.value = false
+}
+
+async function onLeadSaved(body: LeadSaveBody) {
+  await handleSave(body)
+  syncActivityLead()
+}
+
+async function onLeadDeleted(leadId: string) {
+  await deleteLead(leadId)
+  syncActivityLead()
 }
 
 onMounted(async () => {
@@ -157,21 +180,34 @@ onMounted(async () => {
               :initial-stage-id="initialStageId"
               :prefill-contact="prefillContact"
               :saving="saving"
-              @save="handleSave"
-              @delete="deleteLead"
+              @save="onLeadSaved"
+              @delete="onLeadDeleted"
             />
           </SheetContent>
         </Sheet>
 
         <Sheet v-model:open="activityDrawerOpen">
           <SheetContent class="p-0 sm:max-w-lg">
-            <SheetHeader class="px-6 pt-6">
-              <SheetTitle>Activities</SheetTitle>
-              <SheetDescription v-if="activityLead">
-                Activities for <strong>{{ activityLead.display_name }}</strong>
-              </SheetDescription>
+            <SheetHeader class="border-b px-6 py-4">
+              <SheetTitle class="truncate">{{ activityLead?.display_name ?? 'Activities' }}</SheetTitle>
+              <div v-if="activityLead" class="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                <Badge v-if="activityLead.stage_name" variant="secondary" class="text-xs">
+                  {{ activityLead.stage_name }}
+                </Badge>
+                <Badge v-if="activityLead.outcome === 'won'" class="text-xs">Won</Badge>
+                <Badge v-if="activityLead.outcome === 'lost'" variant="destructive" class="text-xs">Lost</Badge>
+                <span v-if="activityLead.program_name" class="flex items-center gap-1">
+                  <BookOpen class="size-3" /> {{ activityLead.program_name }}
+                </span>
+                <span v-if="activityLead.value" class="font-semibold text-primary tabular-nums">
+                  {{ formatCurrency(activityLead.value) }}
+                </span>
+                <span v-if="activityLead.contact_phone || activityLead.contact_email">
+                  {{ formatContactDetail(activityLead.contact_phone, activityLead.contact_email) }}
+                </span>
+              </div>
             </SheetHeader>
-            <div v-if="activityLead" class="flex-1 space-y-4 overflow-y-auto px-6 pb-6">
+            <div v-if="activityLead" class="flex-1 space-y-4 overflow-y-auto px-6 py-4">
               <LeadActivityForm
                 v-if="rbac.can('lead:write')"
                 :lead-id="activityLead.id!"

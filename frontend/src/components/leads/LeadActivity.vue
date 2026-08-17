@@ -34,10 +34,24 @@ onMounted(() => {
   if (settings.activityTypes.length === 0) settings.fetchTags()
 })
 
+// The drawer's first screenful shows the newest touchpoints without scrolling;
+// "Show all" expands the section to the full history. Declared above the
+// leadId watcher — its callback runs synchronously (immediate: true) and
+// resets this ref.
+const RECENT_LIMIT = 4
+const historyExpanded = shallowRef(false)
+
 // Watch the prop: the instance may be reused with a different lead id (the
 // drawer swaps activityLead without closing), so refetch when it changes.
 let fetchSeq = 0
-watch(() => props.leadId, () => fetchActivities(), { immediate: true })
+watch(
+  () => props.leadId,
+  () => {
+    historyExpanded.value = false
+    fetchActivities()
+  },
+  { immediate: true },
+)
 
 async function fetchActivities() {
   const seq = ++fetchSeq
@@ -84,6 +98,10 @@ const openActivities = computed(() => {
 const overdueActivities = computed(() => openActivities.value.filter(isOverdue))
 const upcomingActivities = computed(() => openActivities.value.filter(isUpcoming))
 const doneActivities = computed(() => activities.value.filter(isTouchpoint))
+
+const visibleDone = computed(() =>
+  historyExpanded.value ? doneActivities.value : doneActivities.value.slice(0, RECENT_LIMIT),
+)
 
 async function deleteActivity(id: string) {
   try {
@@ -141,49 +159,21 @@ defineExpose({ fetchActivities })
     </div>
 
     <template v-else>
-      <section v-if="overdueActivities.length">
-        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-destructive">Overdue</h3>
-        <div class="space-y-2">
-          <TaskRow
-            v-for="a in overdueActivities"
-            :key="a.id"
-            :lead-id="props.leadId"
-            :activity="a"
-            overdue
-            :quick-replies="settings.quickReplies"
-            :activity-types="settings.activityTypes"
-            @changed="fetchActivities"
-            @mark-done="markDone(a)"
-            @snooze="snooze(a, $event)"
-            @delete="deleteActivity(a.id)"
-            @close-lost="emit('closeLost')"
-          />
-        </div>
-      </section>
-
-      <section v-if="upcomingActivities.length">
-        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Upcoming</h3>
-        <div class="space-y-2">
-          <TaskRow
-            v-for="a in upcomingActivities"
-            :key="a.id"
-            :lead-id="props.leadId"
-            :activity="a"
-            :quick-replies="settings.quickReplies"
-            :activity-types="settings.activityTypes"
-            @changed="fetchActivities"
-            @mark-done="markDone(a)"
-            @snooze="snooze(a, $event)"
-            @delete="deleteActivity(a.id)"
-            @close-lost="emit('closeLost')"
-          />
-        </div>
-      </section>
-
       <section v-if="doneActivities.length">
-        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Past</h3>
+        <div class="mb-2 flex items-center justify-between">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">History</h3>
+          <Button
+            v-if="doneActivities.length > RECENT_LIMIT"
+            variant="ghost"
+            size="sm"
+            class="h-6 px-2 text-xs text-muted-foreground"
+            @click="historyExpanded = !historyExpanded"
+          >
+            {{ historyExpanded ? 'Show less' : `Show all ${doneActivities.length}` }}
+          </Button>
+        </div>
         <div class="space-y-2">
-          <Card v-for="a in doneActivities" :key="a.id" :class="a.is_cancelled ? 'opacity-60' : ''">
+          <Card v-for="a in visibleDone" :key="a.id" :class="a.is_cancelled ? 'opacity-60' : ''">
             <CardContent class="p-3">
               <div class="flex items-start justify-between gap-2">
                 <div class="flex items-start gap-2 min-w-0">
@@ -230,6 +220,45 @@ defineExpose({ fetchActivities })
               </div>
             </CardContent>
           </Card>
+        </div>
+      </section>
+
+      <section v-if="overdueActivities.length">
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-destructive">Overdue</h3>
+        <div class="space-y-2">
+          <TaskRow
+            v-for="a in overdueActivities"
+            :key="a.id"
+            :lead-id="props.leadId"
+            :activity="a"
+            overdue
+            :quick-replies="settings.quickReplies"
+            :activity-types="settings.activityTypes"
+            @changed="fetchActivities"
+            @mark-done="markDone(a)"
+            @snooze="snooze(a, $event)"
+            @delete="deleteActivity(a.id)"
+            @close-lost="emit('closeLost')"
+          />
+        </div>
+      </section>
+
+      <section v-if="upcomingActivities.length">
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Upcoming</h3>
+        <div class="space-y-2">
+          <TaskRow
+            v-for="a in upcomingActivities"
+            :key="a.id"
+            :lead-id="props.leadId"
+            :activity="a"
+            :quick-replies="settings.quickReplies"
+            :activity-types="settings.activityTypes"
+            @changed="fetchActivities"
+            @mark-done="markDone(a)"
+            @snooze="snooze(a, $event)"
+            @delete="deleteActivity(a.id)"
+            @close-lost="emit('closeLost')"
+          />
         </div>
       </section>
     </template>

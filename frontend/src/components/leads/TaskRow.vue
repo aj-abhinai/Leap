@@ -19,9 +19,9 @@ import {
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  MoreHorizontal, Trash2, CheckCircle2, Pencil, AlarmClockPlus, CalendarClock,
+  MoreHorizontal, Trash2, CheckCircle2, Pencil, AlarmClockPlus, CalendarClock, Check,
 } from '@lucide/vue'
-import { reminderIcon, snoozePresets } from '@/utils/reminders'
+import { nextPresets, reminderIcon, snoozePresets, type NextPreset } from '@/utils/reminders'
 import { formatDateTime, toLocalDateInput, toLocalTimeInput } from '@/utils/time'
 import { Badge } from '@/components/ui/badge'
 import { errorMessage } from '@/utils/errors'
@@ -173,36 +173,33 @@ function pickrescheduleQuickReply(id: string) {
   rescheduleTime.value = ''
 }
 
+function pickReschedulePreset(preset: NextPreset) {
+  const at = preset.at().toISOString()
+  rescheduleDate.value = toLocalDateInput(at)
+  rescheduleTime.value = toLocalTimeInput(at)
+}
+
+// One action: with a next time, the attempt is logged and the next task is
+// created; without one, the attempt is logged on its own.
 async function saveReschedule() {
   const behavior = rescheduleBehavior.value
-  if (behavior === 'next') {
-    const next = mergeDateTime(rescheduleDate.value, rescheduleTime.value)
-    if (!next) {
-      toast.error('Pick a new date and time')
-      return
-    }
-    savingReschedule.value = true
-    try {
-      await apiClient.patch(`/api/leads/${props.leadId}/activities/${props.activity.id}`, {
+  savingReschedule.value = true
+  try {
+    if (behavior === 'next') {
+      const body: Record<string, unknown> = {
         is_done: true,
         quick_reply_id: rescheduleQuickReply.value || null,
-        reschedule_at: next,
-      })
-      toast.success('Attempt logged, next task created')
+      }
+      const next = mergeDateTime(rescheduleDate.value, rescheduleTime.value)
+      if (next) body.reschedule_at = next
+      await apiClient.patch(`/api/leads/${props.leadId}/activities/${props.activity.id}`, body)
+      toast.success(next ? 'Attempt logged, next task created' : 'Attempt logged')
       cancelReschedule()
       emit('changed')
       return
-    } catch (e) {
-      toast.error(errorMessage(e, 'Failed to reschedule'))
-      return
-    } finally {
-      savingReschedule.value = false
     }
-  }
 
-  // log / close_lost: complete without a next task.
-  savingReschedule.value = true
-  try {
+    // log / close_lost: complete without a next task.
     await apiClient.patch(`/api/leads/${props.leadId}/activities/${props.activity.id}`, {
       is_done: true,
       quick_reply_id: rescheduleQuickReply.value || null,
@@ -221,8 +218,21 @@ async function saveReschedule() {
 }
 
 function statusChipClass(id: string): string {
-  return rescheduleQuickReply.value === id ? 'border-primary text-primary' : ''
+  return rescheduleQuickReply.value === id
+    ? 'border-primary bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+    : ''
 }
+
+// Highlights the preset that produced the current reschedule date/time.
+const selectedReschedulePreset = computed(() => {
+  const hasTime = !!mergeDateTime(rescheduleDate.value, rescheduleTime.value)
+  if (!hasTime) return ''
+  const preset = nextPresets.find((p) => {
+    const at = p.at().toISOString()
+    return toLocalDateInput(at) === rescheduleDate.value && toLocalTimeInput(at) === rescheduleTime.value
+  })
+  return preset?.label ?? ''
+})
 
 function typeLabel(type: string): string {
   return type || 'Task'
@@ -284,7 +294,7 @@ function typeLabel(type: string): string {
         <p class="text-sm">Log this attempt.</p>
         <div v-if="groupedQuickReplies.length" class="space-y-2">
           <Label class="text-xs">Quick reply</Label>
-          <div class="space-y-2">
+          <div class="space-y-2.5">
             <div v-for="g in groupedQuickReplies" :key="g.group">
               <p class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {{ g.group }}
@@ -295,10 +305,11 @@ function typeLabel(type: string): string {
                   :key="s.id"
                   size="sm"
                   variant="outline"
-                  class="h-7 px-2.5 text-xs"
+                  class="h-7 gap-1 px-2.5 text-xs"
                   :class="statusChipClass(s.id)"
                   @click="pickrescheduleQuickReply(s.id)"
                 >
+                  <Check v-if="rescheduleQuickReply === s.id" class="size-3" />
                   {{ s.name }}
                 </Button>
               </div>
@@ -313,6 +324,27 @@ function typeLabel(type: string): string {
         </template>
 
         <template v-else-if="showRescheduleNext">
+          <div class="space-y-1.5">
+            <Label class="text-xs">Quick schedule</Label>
+            <div class="flex flex-wrap gap-1.5">
+              <Button
+                v-for="p in nextPresets"
+                :key="p.label"
+                size="sm"
+                variant="outline"
+                class="h-7 gap-1 px-2.5 text-xs"
+                :class="
+                  selectedReschedulePreset === p.label
+                    ? 'border-primary bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground'
+                    : ''
+                "
+                @click="pickReschedulePreset(p)"
+              >
+                <Check v-if="selectedReschedulePreset === p.label" class="size-3" />
+                {{ p.label }}
+              </Button>
+            </div>
+          </div>
           <div class="grid grid-cols-2 gap-2">
             <div class="space-y-1.5">
               <Label class="text-xs">Next date</Label>
@@ -327,8 +359,8 @@ function typeLabel(type: string): string {
 
         <div class="flex justify-end gap-2">
           <Button size="sm" variant="ghost" @click="cancelReschedule">Cancel</Button>
-          <Button size="sm" :disabled="savingReschedule" @click="saveReschedule">
-            {{ savingReschedule ? 'Saving…' : showRescheduleNext ? 'Log & next' : 'Log' }}
+          <Button size="sm" :disabled="savingReschedule" @click="saveReschedule()">
+            {{ savingReschedule ? 'Saving…' : 'Save' }}
           </Button>
         </div>
       </div>

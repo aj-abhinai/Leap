@@ -16,22 +16,30 @@ func NewService(db *sql.DB) *Service {
 }
 
 // LogLogin records a successful sign-in in the audit log.
-func (s *Service) LogLogin(userID, userName string) {
+func (s *Service) LogLogin(userID, userName, email string) {
+	desc := "user logged in"
+	if email != "" {
+		desc = email + " logged in"
+	}
 	if _, err := s.db.Exec(
 		`INSERT INTO audit_logs (description, user_id, user_name, action, resource_type)
-		VALUES ('user logged in', $1, $2, 'login', 'user')`,
-		userID, userName,
+		VALUES ($1, $2, $3, 'login', 'user')`,
+		desc, userID, userName,
 	); err != nil {
 		slog.Error("log login", "error", err, "user_id", userID)
 	}
 }
 
 // LogLogout records a sign-out in the audit log.
-func (s *Service) LogLogout(userID, userName string) {
+func (s *Service) LogLogout(userID, userName, email string) {
+	desc := "user logged out"
+	if email != "" {
+		desc = email + " logged out"
+	}
 	if _, err := s.db.Exec(
 		`INSERT INTO audit_logs (description, user_id, user_name, action, resource_type)
-		VALUES ('user logged out', $1, $2, 'logout', 'user')`,
-		userID, userName,
+		VALUES ($1, $2, $3, 'logout', 'user')`,
+		desc, userID, userName,
 	); err != nil {
 		slog.Error("log logout", "error", err, "user_id", userID)
 	}

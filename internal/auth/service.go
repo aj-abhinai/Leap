@@ -103,28 +103,28 @@ func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {
 	return s.generateTokenPair(userID)
 }
 
-// logout revokes the refresh token and returns the owning user's id and name
-// so the caller can record a logout audit entry.
-func (s *Service) logout(refreshToken string) (string, string, error) {
+// logout revokes the refresh token and returns the owning user's id, name,
+// and email so the caller can record a logout audit entry.
+func (s *Service) logout(refreshToken string) (string, string, string, error) {
 	hash := hashToken(refreshToken)
-	var userID, name string
+	var userID, name, email string
 	err := s.db.QueryRow(
-		`SELECT u.id, u.name FROM refresh_tokens rt
+		`SELECT u.id, u.name, u.email FROM refresh_tokens rt
 		JOIN users u ON u.id = rt.user_id
 		WHERE rt.token_hash = $1 AND NOT rt.revoked`,
 		hash,
-	).Scan(&userID, &name)
+	).Scan(&userID, &name, &email)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Unknown or already-revoked token: nothing to revoke, no actor to log.
-		return "", "", nil
+		return "", "", "", nil
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("logout: lookup user: %w", err)
+		return "", "", "", fmt.Errorf("logout: lookup user: %w", err)
 	}
 	if _, err := s.db.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash); err != nil {
-		return "", "", fmt.Errorf("logout: revoke token: %w", err)
+		return "", "", "", fmt.Errorf("logout: revoke token: %w", err)
 	}
-	return userID, name, nil
+	return userID, name, email, nil
 }
 
 func (s *Service) generateTokenPair(userID string) (*TokenResponse, error) {

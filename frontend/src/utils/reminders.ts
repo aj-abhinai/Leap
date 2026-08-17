@@ -50,3 +50,27 @@ export const snoozePresets: SnoozePreset[] = [
 export function snoozeRemindAt(minutes: number): string {
   return new Date(Date.now() + minutes * 60_000).toISOString()
 }
+
+// One-tap follow-up slots for "log attempt + next" quick replies (Busy,
+// No reply, ...). Each preset returns a local wall-clock Date; consumers
+// convert it with toLocalDateInput/toLocalTimeInput to fill the inputs.
+export interface NextPreset {
+  label: string
+  at: () => Date
+}
+
+// Day-based presets anchor on the current wall-clock time (setDate keeps the
+// hours/minutes) so they don't drift across DST transitions.
+function inDays(days: number): Date {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  return d
+}
+
+export const nextPresets: NextPreset[] = [
+  { label: 'In 2 hours', at: () => new Date(Date.now() + 2 * 60 * 60_000) },
+  { label: 'Tomorrow', at: () => inDays(1) },
+  { label: 'In 2 days', at: () => inDays(2) },
+  { label: 'In 3 days', at: () => inDays(3) },
+  { label: 'Next week', at: () => inDays(7) },
+]

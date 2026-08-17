@@ -59,7 +59,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.actLog != nil {
-		h.actLog.LogLogin(u.ID, u.Name)
+		h.actLog.LogLogin(u.ID, u.Name, u.Email)
 	}
 	h.svc.setRefreshCookie(w, resp.RefreshToken)
 	h.svc.setCSRFCookie(w)
@@ -122,11 +122,11 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(RefreshCookieName); err == nil && cookie.Value != "" {
-		userID, userName, err := h.svc.logout(cookie.Value)
+		userID, userName, email, err := h.svc.logout(cookie.Value)
 		if err != nil {
 			slog.Error("logout revoke failed", "error", err)
 		} else if h.actLog != nil && userID != "" {
-			h.actLog.LogLogout(userID, userName)
+			h.actLog.LogLogout(userID, userName, email)
 		}
 	}
 	h.svc.clearRefreshCookie(w)
