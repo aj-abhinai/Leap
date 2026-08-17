@@ -6,7 +6,11 @@ import starlight from '@astrojs/starlight';
 export default defineConfig({
 	integrations: [
 		starlight({
-			title: 'CRM',
+			title: 'Leap',
+			logo: {
+				src: './src/assets/logo.png',
+			},
+			favicon: '/favicon.png',
 			sidebar: [
 				{
 					label: 'Guides',

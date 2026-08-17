@@ -45,12 +45,15 @@ const navItems: { title: string; url: string; icon: Component }[] = [
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton size="lg">
-            <div class="flex aspect-square size-8 items-center justify-center rounded-md group-data-[collapsible=icon]:size-5 bg-linear-to-br from-primary to-primary/70 text-primary-foreground shadow-sm">
-              <span class="text-sm font-bold">C</span>
-            </div>
+            <div
+              class="aspect-square size-8 rounded-md bg-cover bg-center group-data-[collapsible=icon]:size-5 shadow-sm"
+              style="background-image: url('/logo.png')"
+              role="img"
+              aria-label="Leap logo"
+            ></div>
             <div class="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-              <span class="truncate font-semibold">CRM</span>
-              <span class="truncate text-xs">Prayaan OS</span>
+              <span class="truncate font-semibold">Leap</span>
+              <span class="truncate text-xs">CRM</span>
             </div>
           </SidebarMenuButton>
         </SidebarMenuItem>

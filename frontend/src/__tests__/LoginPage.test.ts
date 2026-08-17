@@ -99,16 +99,21 @@ describe('LoginPage', () => {
   })
 
   it('navigates to change-password when the server flags the user', async () => {
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          access_token: 'jwt-access-token',
-          expires_at: 999,
-          must_change_password: true,
-        },
-      }),
-    )
-    fetchMock.mockResolvedValueOnce(jsonResponse({ data: [] }))
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            access_token: 'jwt-access-token',
+            expires_at: 999,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: { id: 'u1', name: 'Bob', email: 'b@b.c', must_change_password: true },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: [] }))
     const router = makeRouter()
     const pushSpy = vi.spyOn(router, 'push')
     const wrapper = mount(LoginPage, {
@@ -119,7 +124,7 @@ describe('LoginPage', () => {
     await flushPromises()
 
     expect(pushSpy).toHaveBeenCalledWith({ name: 'ChangePassword' })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('shows the server error message when login fails', async () => {

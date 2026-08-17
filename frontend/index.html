@@ -2,13 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CRM | Prayaan OS</title>
+    <title>Leap</title>
     <!-- CSP hash in internal/middleware/security.go is computed over this exact script content; keep it on one line, unchanged -->
     <script>;(function(){var t=localStorage.getItem('crm-theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark')}})();</script>
+    <style>
+      /* #fbfbfc and #1b1b1d mirror the --background tokens in src/style.css (light/dark); keep them in sync */
+      #splash{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:#fbfbfc;pointer-events:none;transition:opacity 300ms ease-out}
+      #splash img{width:64px;height:64px;border-radius:16px;box-shadow:0 4px 16px rgba(0,0,0,.12)}
+      #splash.splash-hide{opacity:0}
+      html.dark #splash{background:#1b1b1d}
+    </style>
   </head>
   <body>
+    <div id="splash" aria-hidden="true"><img src="/logo.png" alt="" /></div>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

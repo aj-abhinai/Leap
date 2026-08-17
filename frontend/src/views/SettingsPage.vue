@@ -178,7 +178,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
             <div v-if="activity.entries.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
               <Activity class="size-10 text-muted-foreground/40 mb-3" />
               <p class="text-sm font-medium text-muted-foreground">No activity logged yet</p>
-              <p class="text-xs text-muted-foreground/60 mt-1">Actions in the CRM will appear here</p>
+              <p class="text-xs text-muted-foreground/60 mt-1">Actions in Leap will appear here</p>
             </div>
             <Table v-else>
               <TableHeader>

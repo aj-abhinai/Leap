@@ -1,10 +1,10 @@
-# CRM
+# Leap
 
 <br> Self-hosted pipeline CRM for internal teams. Contacts, kanban leads with configurable stages, role-based access control, and a full audit log — in a single binary.
 
 ## Documentation
 
-For detailed documentation, read the [docs](https://aj-crm.pages.dev/).
+For detailed documentation, read the [docs](https://leapcrm.pages.dev/)
 
 ## Features
 
@@ -159,7 +159,7 @@ The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `l
 Health endpoints: `GET /healthz` (process alive) and `GET /readyz` (database ping).
 
 ## License
-CRM is distributed under the terms of the AGPLv3 License.  
+Leap is distributed under the terms of the AGPLv3 License.  
 &copy; [Abhinai](https://abhinai.pages.dev/)  
 ## Support  
 <a href="https://buymeacoffee.com/aj_abhinai" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>

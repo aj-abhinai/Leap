@@ -232,7 +232,7 @@ func WriteTemplate(path string) error {
 
 [app]
 port = 9000
-name = "CRM"
+name = "Leap"
 environment = "production"
 # Comma-separated CIDR prefixes of reverse proxies in front of this server.
 # Only requests arriving through these prefixes may contribute a real client

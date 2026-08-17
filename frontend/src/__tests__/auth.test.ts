@@ -152,7 +152,32 @@ describe('auth store', () => {
     expect(auth.isAuthenticated).toBe(false)
   })
 
-  it('login sets mustChangePassword when server returns the flag', async () => {
+  it('login sets mustChangePassword from the user record', async () => {
+    const fetchMock = vi.fn()
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          access_token: accessToken,
+          expires_at: 999,
+        },
+      }),
+    )
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        data: { id: 'u1', name: 'Alice', email: 'a@b.c', must_change_password: true },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const auth = useAuthStore()
+    await auth.login('user@example.com', 'password')
+
+    expect(auth.mustChangePassword).toBe(true)
+    expect(auth.user?.id).toBe('u1')
+    expect(auth.isAuthenticated).toBe(true)
+  })
+
+  it('login keeps mustChangePassword from the login response when the user fetch fails', async () => {
     const fetchMock = vi.fn()
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
@@ -163,14 +188,37 @@ describe('auth store', () => {
         },
       }),
     )
+    fetchMock.mockRejectedValueOnce(new Error('network down'))
     vi.stubGlobal('fetch', fetchMock)
 
     const auth = useAuthStore()
     await auth.login('user@example.com', 'password')
 
     expect(auth.mustChangePassword).toBe(true)
-    expect(auth.user).toBeNull()
     expect(auth.isAuthenticated).toBe(true)
+  })
+
+  it('login keeps mustChangePassword when the user record omits the field', async () => {
+    const fetchMock = vi.fn()
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        data: {
+          access_token: accessToken,
+          expires_at: 999,
+          must_change_password: true,
+        },
+      }),
+    )
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ data: { id: 'u1', name: 'Alice', email: 'a@b.c' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const auth = useAuthStore()
+    await auth.login('user@example.com', 'password')
+
+    expect(auth.mustChangePassword).toBe(true)
+    expect(auth.user?.id).toBe('u1')
   })
 
   it('changePassword clears the flag and returns the message', async () => {

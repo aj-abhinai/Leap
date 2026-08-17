@@ -9,10 +9,12 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Loader2, LogIn } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
+import { useSplash } from '@/composables/useSplash'
 
 const router = useRouter()
 const auth = useAuthStore()
 const rbac = useRBACStore()
+const { showSplash, hideSplash } = useSplash()
 
 const email = shallowRef('')
 const password = shallowRef('')
@@ -29,10 +31,15 @@ async function handleSubmit() {
   try {
     await auth.login(email.value, password.value)
     await rbac.fetchPermissions()
-    if (auth.mustChangePassword) {
-      router.push({ name: 'ChangePassword' })
-    } else {
-      router.push({ name: 'Dashboard' })
+    showSplash()
+    try {
+      if (auth.mustChangePassword) {
+        await router.push({ name: 'ChangePassword' })
+      } else {
+        await router.push({ name: 'Dashboard' })
+      }
+    } finally {
+      hideSplash()
     }
   } catch (e) {
     error.value = errorMessage(e, 'Login failed')
@@ -46,10 +53,13 @@ async function handleSubmit() {
   <div class="relative flex min-h-screen items-center justify-center p-4">
     <Card class="relative w-full max-w-sm shadow-lg">
       <CardHeader class="text-center pb-2">
-        <div class="mx-auto mb-3 flex size-12 items-center justify-center rounded-xl bg-linear-to-br from-primary to-primary/70 shadow-sm">
-          <span class="text-xl font-bold text-primary-foreground">C</span>
-        </div>
-        <CardTitle class="text-2xl">Prayaan CRM</CardTitle>
+        <div
+          class="mx-auto mb-3 size-12 rounded-xl bg-cover bg-center shadow-sm"
+          style="background-image: url('/logo.png')"
+          role="img"
+          aria-label="Leap logo"
+        ></div>
+        <CardTitle class="text-2xl">Leap</CardTitle>
         <CardDescription>Sign in to your account</CardDescription>
       </CardHeader>
       <CardContent>

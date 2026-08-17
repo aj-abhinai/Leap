@@ -1,11 +1,11 @@
 ---
 title: Quickstart
-description: Install and run CRM in minutes
+description: Install and run Leap in minutes
 ---
 
-This guide is a procedure. It shows how to install CRM and start it.
+This guide is a procedure. It shows how to install Leap and start it.
 
-You can run CRM in three ways:
+You can run Leap in three ways:
 
 - with Docker Compose (development),
 - with Docker Compose (production),

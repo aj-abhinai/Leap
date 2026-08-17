@@ -9,7 +9,7 @@ import { useThemeStore } from '@/stores/theme'
 
 const route = useRoute()
 const theme = useThemeStore()
-const title = computed(() => (route.meta.title as string) || 'CRM')
+const title = computed(() => (route.meta.title as string) || 'Leap')
 
 const breadcrumbs = computed(() => {
   const crumbs: { title: string; path?: string }[] = []

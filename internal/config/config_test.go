@@ -13,7 +13,7 @@ import (
 const validTOML = `
 [app]
 port = 9000
-name = "CRM"
+name = "Leap"
 environment = "development"
 
 [db]

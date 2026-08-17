@@ -1,9 +1,9 @@
 ---
 title: API Reference
-description: Explore the REST API of CRM
+description: Explore the REST API of Leap
 ---
 
-The CRM backend exposes a REST API. The API uses JSON for requests and responses. The frontend consumes this API.
+The Leap backend exposes a REST API. The API uses JSON for requests and responses. The frontend consumes this API.
 
 ## Base URL
 

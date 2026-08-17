@@ -1,5 +1,5 @@
-# CRM — Project Structure
-A full-stack, single-tenant pipeline CRM deployed as a single binary.
+# Leap — Project Structure
+A full-stack, single-tenant pipeline based CRM deployed as a single binary.
 
 ## Core features:
 - Contacts

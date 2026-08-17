@@ -8,7 +8,6 @@ interface User {
   email: string
   phone?: string
   avatar_url?: string
-  must_change_password: boolean
 }
 
 interface LoginResponse {
@@ -55,7 +54,9 @@ export const useAuthStore = defineStore('auth', () => {
       if (res.ok) {
         const json = await res.json()
         user.value = json.data
-        mustChangePassword.value = json.data.must_change_password === true
+        if ('must_change_password' in json.data) {
+          mustChangePassword.value = json.data.must_change_password === true
+        }
       }
     } catch {}
   }
@@ -107,10 +108,10 @@ export const useAuthStore = defineStore('auth', () => {
     const json = await res.json()
     if (json.error) throw new Error(json.error.message)
     setAccess(json.data)
+    // The login response is the authoritative source: if /me fails below, a
+    // user flagged for a forced password change must still be redirected.
     mustChangePassword.value = json.data.must_change_password === true
-    if (!mustChangePassword.value) {
-      await fetchUser()
-    }
+    await fetchUser()
     return json.data
   }
 
@@ -143,7 +144,6 @@ export const useAuthStore = defineStore('auth', () => {
   async function updateProfile(name: string, phone: string) {
     const res = await apiClient.patch('/api/auth/me', { name, phone })
     user.value = res.data
-    mustChangePassword.value = res.data.must_change_password === true
     return res.data
   }
 
