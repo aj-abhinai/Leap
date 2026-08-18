@@ -1,6 +1,7 @@
 package activity
 
 import (
+	"crm/internal/util"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -79,7 +80,7 @@ func (s *Service) list(page, perPage int, filters ActivityFilters) ([]Entry, int
 	if perPage < 1 {
 		perPage = 20
 	}
-	offset := (page - 1) * perPage
+	offset := util.Offset(page, perPage)
 
 	selectQuery := fmt.Sprintf(`
 		SELECT id, description, user_id, user_name, action, resource_type, resource_id, changes, created_at

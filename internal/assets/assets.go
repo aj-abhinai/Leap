@@ -1,6 +1,7 @@
 package assets
 
 import (
+	"crm/internal/respond"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -79,7 +80,8 @@ func (a *Assets) verify() error {
 
 // ServeFrontend serves the SPA. Files under /assets/* are served
 // directly; every other GET/HEAD path falls back to index.html.
-// Other methods are not handled.
+// Other methods are not handled. Unknown /api/* paths are API misses, not
+// SPA routes, so they return a JSON 404 instead of the SPA document.
 func (a *Assets) ServeFrontend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -87,6 +89,16 @@ func (a *Assets) ServeFrontend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+	if rel == "api" || strings.HasPrefix(rel, "api/") {
+		respond.JSON(
+			w,
+			http.StatusNotFound,
+			nil,
+			&respond.Error{Code: "NOT_FOUND", Message: "Not found"},
+			nil,
+		)
+		return
+	}
 	if rel != "" && strings.HasPrefix(rel, "assets/") {
 		// Hashed filenames are content-addressed: safe to cache forever.
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")

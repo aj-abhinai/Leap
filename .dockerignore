@@ -10,6 +10,7 @@ frontend/.vite
 frontend/node_modules/.vite
 
 .env
+**/.env
 *.log
 *.tmp
 .DS_Store

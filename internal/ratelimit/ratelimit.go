@@ -70,16 +70,39 @@ func (l *Limiter) pruneLocked(now time.Time) {
 func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !l.Allow(keyOf(r)) {
-			w.Header().Set("Retry-After", "60")
-			respond.JSON(
-				w,
-				http.StatusTooManyRequests,
-				nil,
-				&respond.Error{Code: "RATE_LIMITED", Message: "Too many requests, try again in a minute"},
-				nil,
-			)
+			deny(w)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// UserMiddleware limits requests per authenticated user, keyed on the user ID
+// resolved by the auth middleware. When no user is present it falls back to
+// the client IP so the limiter never becomes a no-op. This throttles
+// per-account attacks (e.g. current-password guessing) that a per-IP limiter
+// would not stop.
+func (l *Limiter) UserMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := ctxutil.GetUserID(r)
+		if key == "" {
+			key = keyOf(r)
+		}
+		if !l.Allow(key) {
+			deny(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func deny(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "60")
+	respond.JSON(
+		w,
+		http.StatusTooManyRequests,
+		nil,
+		&respond.Error{Code: "RATE_LIMITED", Message: "Too many requests, try again in a minute"},
+		nil,
+	)
 }

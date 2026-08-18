@@ -1,6 +1,7 @@
 package contact
 
 import (
+	"crm/internal/util"
 	"encoding/json"
 	"fmt"
 )
@@ -13,7 +14,7 @@ func (s *Service) listNotes(contactID string, page, perPage int) ([]Note, int, e
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count notes: %w", err)
 	}
-	offset := (page - 1) * perPage
+	offset := util.Offset(page, perPage)
 	rows, err := s.db.Query(`
 		SELECT cn.id, cn.contact_id, cn.user_id, COALESCE(u.name, ''), cn.note, cn.created_at, cn.updated_at
 		FROM contact_notes cn

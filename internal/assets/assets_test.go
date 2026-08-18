@@ -62,6 +62,8 @@ func TestServeFrontend(t *testing.T) {
 		{name: "client route falls back", method: "GET", path: "/contacts/123", wantStatus: 200, wantBody: "<title>test</title>"},
 		{name: "missing asset 404s", method: "GET", path: "/assets/missing.js", wantStatus: 404, wantBody: ""},
 		{name: "post not handled", method: "POST", path: "/contacts", wantStatus: 405, wantBody: ""},
+		{name: "unknown api 404s", method: "GET", path: "/api/nope", wantStatus: 404, wantBody: `"NOT_FOUND"`},
+		{name: "bare api 404s", method: "GET", path: "/api", wantStatus: 404, wantBody: `"NOT_FOUND"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

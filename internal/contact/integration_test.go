@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -409,6 +410,25 @@ func TestBulkCreateImportsFreshRowsIntegration(t *testing.T) {
 	}
 }
 
+func TestBulkCreateRejectsOverlongValuesIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Phone: strings.Repeat("9", maxValueLength+1)},
+		{Name: "Bob", Phone: "1112223333"},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 1 || resp.Failed != 1 {
+		t.Errorf("imported/failed = %d/%d, want 1/1", resp.Imported, resp.Failed)
+	}
+	if len(resp.Errors) != 1 || resp.Errors[0].Row != 1 || !strings.Contains(resp.Errors[0].Message, "too long") {
+		t.Errorf("errors = %+v, want row 1 too-long failure", resp.Errors)
+	}
+}
+
 func TestBulkCreateReportsUnknownTagsIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -547,6 +567,71 @@ func TestUpdateContactMissingReturnsNotFoundIntegration(t *testing.T) {
 
 	if err := svc.delete("00000000-0000-0000-0000-000000000000", ""); !errors.Is(err, ErrNotFound) {
 		t.Errorf("delete missing contact = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateContactRejectsCollectionLimitIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	phones := make([]PhoneValue, maxContactPhones+1)
+	for i := range phones {
+		phones[i] = PhoneValue{Value: fmt.Sprintf("98%d", i)}
+	}
+	if _, err := svc.create(CreateRequest{Name: "Alice", Phones: phones}); !errors.Is(err, ErrCollectionLimit) {
+		t.Errorf("create with %d phones = %v, want ErrCollectionLimit", len(phones), err)
+	}
+
+	emails := make([]EmailValue, maxContactEmails+1)
+	for i := range emails {
+		emails[i] = EmailValue{Value: fmt.Sprintf("a%d@example.com", i)}
+	}
+	if _, err := svc.create(CreateRequest{Name: "Bob", Emails: emails}); !errors.Is(err, ErrCollectionLimit) {
+		t.Errorf("create with %d emails = %v, want ErrCollectionLimit", len(emails), err)
+	}
+
+	tags := make([]string, maxContactTags+1)
+	if _, err := svc.create(CreateRequest{Name: "Carol", TagIDs: tags}); !errors.Is(err, ErrCollectionLimit) {
+		t.Errorf("create with %d tags = %v, want ErrCollectionLimit", len(tags), err)
+	}
+
+	overlong := []PhoneValue{{Value: strings.Repeat("9", maxValueLength+1)}}
+	if _, err := svc.create(CreateRequest{Name: "Dan", Phones: overlong}); !errors.Is(err, ErrCollectionLimit) {
+		t.Errorf("create with overlong phone value = %v, want ErrCollectionLimit", err)
+	}
+
+	// The scalar phone/email mirrors land in the same child tables and must
+	// obey the same value-length cap.
+	if _, err := svc.create(CreateRequest{Name: "Eve", Phone: strings.Repeat("9", maxValueLength+1)}); !errors.Is(err, ErrCollectionLimit) {
+		t.Errorf("create with overlong scalar phone = %v, want ErrCollectionLimit", err)
+	}
+	if _, err := svc.create(CreateRequest{Name: "Fay", Email: strings.Repeat("e", maxValueLength+1)}); !errors.Is(err, ErrCollectionLimit) {
+		t.Errorf("create with overlong scalar email = %v, want ErrCollectionLimit", err)
+	}
+}
+
+func TestUpdateContactRejectsCollectionLimitIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210"})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	emails := make([]EmailValue, maxContactEmails+1)
+	for i := range emails {
+		emails[i] = EmailValue{Value: fmt.Sprintf("a%d@example.com", i)}
+	}
+	if _, err := svc.update(created.ID, UpdateRequest{Emails: &emails}, ""); !errors.Is(err, ErrCollectionLimit) {
+		t.Errorf("update with %d emails = %v, want ErrCollectionLimit", len(emails), err)
+	}
+
+	// Scalar-only updates are capped too — they replace the child rows for
+	// the sent type.
+	overlongScalar := strings.Repeat("e", maxValueLength+1)
+	if _, err := svc.update(created.ID, UpdateRequest{Email: &overlongScalar}, ""); !errors.Is(err, ErrCollectionLimit) {
+		t.Errorf("update with overlong scalar email = %v, want ErrCollectionLimit", err)
 	}
 }
 

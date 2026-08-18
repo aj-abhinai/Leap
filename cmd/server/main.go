@@ -151,6 +151,9 @@ func main() {
 
 	loginLimiter := ratelimit.New(10, time.Minute)
 	refreshLimiter := ratelimit.New(30, time.Minute)
+	// Per-account limit on current-password guesses so a stolen access token
+	// cannot brute-force the account's password at full speed.
+	passwordChangeLimiter := ratelimit.New(5, time.Minute)
 
 	r.With(loginLimiter.Middleware).Post("/api/auth/login", authH.Login)
 	r.With(middleware.CSRF, refreshLimiter.Middleware).Post("/api/auth/refresh", authH.Refresh)
@@ -159,92 +162,98 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(authSvc))
 
+		// Self-service routes stay reachable while a forced password change
+		// is pending so the account can clear the flag.
 		r.Get("/api/auth/me", authH.Me)
 		r.Patch("/api/auth/me", authH.UpdateProfile)
-		r.Patch("/api/auth/me/password", authH.ChangePassword)
+		r.With(passwordChangeLimiter.UserMiddleware).Patch("/api/auth/me/password", authH.ChangePassword)
 		r.Get("/api/auth/me/permissions", rbacH.MePermissions)
 
-		r.Get("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:read", contactH.List))
-		r.Post("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Create))
-		r.Post("/api/contacts/bulk", middleware.RequirePermission(rbacSvc, "contact:write", contactH.BulkCreate))
-		// Registered before /api/contacts/{id} so the literal path wins over
-		// the param route (ADR 012 lead-entry resolve).
-		r.Get("/api/contacts/resolve", middleware.RequirePermission(rbacSvc, "lead:write", contactH.Resolve))
-		r.Get("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:read", contactH.Get))
-		r.Patch("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Update))
-		r.Delete("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Delete))
-		r.Get("/api/contacts/{id}/notes", middleware.RequirePermission(rbacSvc, "contact:read", contactH.ListNotes))
-		r.Post("/api/contacts/{id}/notes", middleware.RequirePermission(rbacSvc, "contact:write", contactH.CreateNote))
-		r.Delete(
-			"/api/contacts/{id}/notes/{note_id}",
-			middleware.RequirePermission(rbacSvc, "contact:write", contactH.DeleteNote),
-		)
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequirePasswordChanged(authSvc))
 
-		r.Get("/api/leads", middleware.RequirePermission(rbacSvc, "lead:read", leadH.List))
-		r.Post("/api/leads", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Create))
-		r.Patch("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Update))
-		r.Delete("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Delete))
+			r.Get("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:read", contactH.List))
+			r.Post("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Create))
+			r.Post("/api/contacts/bulk", middleware.RequirePermission(rbacSvc, "contact:write", contactH.BulkCreate))
+			// Registered before /api/contacts/{id} so the literal path wins over
+			// the param route (ADR 012 lead-entry resolve).
+			r.Get("/api/contacts/resolve", middleware.RequirePermission(rbacSvc, "lead:write", contactH.Resolve))
+			r.Get("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:read", contactH.Get))
+			r.Patch("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Update))
+			r.Delete("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Delete))
+			r.Get("/api/contacts/{id}/notes", middleware.RequirePermission(rbacSvc, "contact:read", contactH.ListNotes))
+			r.Post("/api/contacts/{id}/notes", middleware.RequirePermission(rbacSvc, "contact:write", contactH.CreateNote))
+			r.Delete(
+				"/api/contacts/{id}/notes/{note_id}",
+				middleware.RequirePermission(rbacSvc, "contact:write", contactH.DeleteNote),
+			)
 
-		r.Get("/api/leads/{id}/activities", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListActivities))
-		r.Post("/api/leads/{id}/activities", middleware.RequirePermission(rbacSvc, "lead:write", leadH.CreateActivity))
-		r.Patch(
-			"/api/leads/{id}/activities/{activity_id}",
-			middleware.RequirePermission(rbacSvc, "lead:write", leadH.UpdateActivity),
-		)
-		r.Delete(
-			"/api/leads/{id}/activities/{activity_id}",
-			middleware.RequirePermission(rbacSvc, "lead:write", leadH.DeleteActivity),
-		)
-		r.Get("/api/leads/{id}/history", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListHistory))
+			r.Get("/api/leads", middleware.RequirePermission(rbacSvc, "lead:read", leadH.List))
+			r.Post("/api/leads", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Create))
+			r.Patch("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Update))
+			r.Delete("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Delete))
 
-		r.Get("/api/reminders", middleware.RequirePermission(rbacSvc, "lead:read", leadH.PendingReminders))
-		r.Get("/api/activities", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListAllActivities))
-		r.Patch("/api/leads/{lead_id}/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
-		r.Post("/api/leads/{lead_id}/reminders/{id}/snooze", middleware.RequirePermission(rbacSvc, "lead:write", leadH.SnoozeReminder))
+			r.Get("/api/leads/{id}/activities", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListActivities))
+			r.Post("/api/leads/{id}/activities", middleware.RequirePermission(rbacSvc, "lead:write", leadH.CreateActivity))
+			r.Patch(
+				"/api/leads/{id}/activities/{activity_id}",
+				middleware.RequirePermission(rbacSvc, "lead:write", leadH.UpdateActivity),
+			)
+			r.Delete(
+				"/api/leads/{id}/activities/{activity_id}",
+				middleware.RequirePermission(rbacSvc, "lead:write", leadH.DeleteActivity),
+			)
+			r.Get("/api/leads/{id}/history", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListHistory))
 
-		r.Get("/api/pipelines", middleware.RequirePermission(rbacSvc, "lead:read", pipelineH.List))
-		r.Post("/api/pipelines", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.Create))
-		r.Patch("/api/pipelines/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.Update))
-		r.Delete("/api/pipelines/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.Delete))
+			r.Get("/api/reminders", middleware.RequirePermission(rbacSvc, "lead:read", leadH.PendingReminders))
+			r.Get("/api/activities", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListAllActivities))
+			r.Patch("/api/leads/{lead_id}/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
+			r.Post("/api/leads/{lead_id}/reminders/{id}/snooze", middleware.RequirePermission(rbacSvc, "lead:write", leadH.SnoozeReminder))
 
-		r.Get("/api/programs", middleware.RequirePermission(rbacSvc, "lead:read", programH.ListActive))
-		r.Get("/api/programs/manage", middleware.RequirePermission(rbacSvc, "settings:manage", programH.ListAll))
-		r.Post("/api/programs", middleware.RequirePermission(rbacSvc, "settings:manage", programH.Create))
-		r.Patch("/api/programs/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", programH.Update))
-		r.Delete("/api/programs/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", programH.Archive))
-		r.Post("/api/programs/{id}/restore", middleware.RequirePermission(rbacSvc, "settings:manage", programH.Restore))
+			r.Get("/api/pipelines", middleware.RequirePermission(rbacSvc, "lead:read", pipelineH.List))
+			r.Post("/api/pipelines", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.Create))
+			r.Patch("/api/pipelines/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.Update))
+			r.Delete("/api/pipelines/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.Delete))
 
-		r.Post("/api/pipelines/{id}/stages", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.CreateStage))
-		r.Patch("/api/stages/{stage_id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.UpdateStage))
-		r.Delete("/api/stages/{stage_id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.DeleteStage))
+			r.Get("/api/programs", middleware.RequirePermission(rbacSvc, "lead:read", programH.ListActive))
+			r.Get("/api/programs/manage", middleware.RequirePermission(rbacSvc, "settings:manage", programH.ListAll))
+			r.Post("/api/programs", middleware.RequirePermission(rbacSvc, "settings:manage", programH.Create))
+			r.Patch("/api/programs/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", programH.Update))
+			r.Delete("/api/programs/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", programH.Archive))
+			r.Post("/api/programs/{id}/restore", middleware.RequirePermission(rbacSvc, "settings:manage", programH.Restore))
 
-		r.Get("/api/roles", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ListRoles))
-		r.Post("/api/roles", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.CreateRole))
-		r.Patch("/api/roles/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.UpdateRole))
-		r.Delete("/api/roles/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.DeleteRole))
+			r.Post("/api/pipelines/{id}/stages", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.CreateStage))
+			r.Patch("/api/stages/{stage_id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.UpdateStage))
+			r.Delete("/api/stages/{stage_id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.DeleteStage))
 
-		r.Get("/api/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ListPermissions))
-		r.Get("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.GetRolePermissions))
-		r.Post("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.AssignPermission))
-		r.Put("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.SetRolePermissions))
-		r.Delete(
-			"/api/roles/{id}/permissions/{permission_id}",
-			middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.RemovePermission),
-		)
+			r.Get("/api/roles", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ListRoles))
+			r.Post("/api/roles", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.CreateRole))
+			r.Patch("/api/roles/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.UpdateRole))
+			r.Delete("/api/roles/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.DeleteRole))
 
-		r.Get("/api/users", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ListUsers))
-		r.Post("/api/users", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.CreateUser))
-		r.Delete("/api/users/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.DeleteUser))
-		r.Put("/api/users/{id}/role", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.SetUserRole))
+			r.Get("/api/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ListPermissions))
+			r.Get("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.GetRolePermissions))
+			r.Post("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.AssignPermission))
+			r.Put("/api/roles/{id}/permissions", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.SetRolePermissions))
+			r.Delete(
+				"/api/roles/{id}/permissions/{permission_id}",
+				middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.RemovePermission),
+			)
 
-		r.Get("/api/activity", middleware.RequirePermission(rbacSvc, "activity:read", activityH.List))
+			r.Get("/api/users", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ListUsers))
+			r.Post("/api/users", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.CreateUser))
+			r.Delete("/api/users/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.DeleteUser))
+			r.Put("/api/users/{id}/role", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.SetUserRole))
 
-		r.Get("/api/tags", middleware.RequireAny(rbacSvc, []string{"contact:read", "lead:read", "settings:manage"}, tagH.List))
-		r.Post("/api/tags", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Create))
-		r.Patch("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Update))
-		r.Delete("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Delete))
+			r.Get("/api/activity", middleware.RequirePermission(rbacSvc, "activity:read", activityH.List))
 
-		r.Get("/api/export/csv", middleware.RequirePermission(rbacSvc, "data:export", exportH.CSV))
+			r.Get("/api/tags", middleware.RequireAny(rbacSvc, []string{"contact:read", "lead:read", "settings:manage"}, tagH.List))
+			r.Post("/api/tags", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Create))
+			r.Patch("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Update))
+			r.Delete("/api/tags/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Delete))
+
+			r.Get("/api/export/csv", middleware.RequirePermission(rbacSvc, "data:export", exportH.CSV))
+		})
 	})
 
 	r.Get("/", appAssets.ServeFrontend)

@@ -3,6 +3,7 @@ package auth
 import (
 	"crm/internal/config"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,32 @@ func TestHashPassword(t *testing.T) {
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
 		t.Error("password verification failed")
+	}
+}
+
+func TestDummyHashUsesConfiguredCost(t *testing.T) {
+	cfg := authTestConfig()
+	cfg.BcryptCost = bcrypt.MinCost
+	s := NewService(nil, cfg)
+	if !strings.HasPrefix(s.dummyHash, "$2a$04$") {
+		t.Errorf("dummy hash = %q, want bcrypt cost prefix 04", s.dummyHash[:7])
+	}
+
+	// The dummy tracks the configured cost so the unknown-account path never
+	// runs systematically slower or faster than real (config-cost) hashes.
+	cfg.BcryptCost = 5
+	s = NewService(nil, cfg)
+	if !strings.HasPrefix(s.dummyHash, "$2a$05$") {
+		t.Errorf("dummy hash = %q, want bcrypt cost prefix 05", s.dummyHash[:7])
+	}
+}
+
+func TestDummyHashSurvivesInvalidCost(t *testing.T) {
+	cfg := authTestConfig()
+	cfg.BcryptCost = 99 // above bcrypt.MaxCost; must fall back, not panic
+	s := NewService(nil, cfg)
+	if !strings.HasPrefix(s.dummyHash, "$2a$") {
+		t.Errorf("dummy hash = %q, want a valid bcrypt hash", s.dummyHash[:7])
 	}
 }
 

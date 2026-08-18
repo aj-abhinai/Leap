@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -19,10 +21,14 @@ import (
 type Service struct {
 	db  *sql.DB
 	cfg config.Auth
+	// dummyHash is compared against the supplied password when no account
+	// matches, at the same bcrypt cost the service hashes real passwords
+	// with, so unknown and known accounts take comparable time to reject.
+	dummyHash string
 }
 
 func NewService(db *sql.DB, cfg config.Auth) *Service {
-	return &Service{db: db, cfg: cfg}
+	return &Service{db: db, cfg: cfg, dummyHash: dummyHashForCost(cfg.BcryptCost)}
 }
 
 func (s *Service) login(email, password string) (*User, *TokenResponse, bool, error) {
@@ -32,9 +38,12 @@ func (s *Service) login(email, password string) (*User, *TokenResponse, bool, er
 		util.NormalizeEmail(email),
 	).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.MustChangePassword, &u.LastLoginAt)
 	if err != nil {
+		// Equalize response timing: an unknown or deleted account must take
+		// about as long as a known one, so latency cannot enumerate accounts.
+		_ = comparePassword([]byte(s.dummyHash), []byte(password))
 		return nil, nil, false, ErrInvalidCredentials
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
+	if err := comparePassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		return nil, nil, false, ErrInvalidCredentials
 	}
 	resp, err := s.generateTokenPair(u.ID)
@@ -43,6 +52,25 @@ func (s *Service) login(email, password string) (*User, *TokenResponse, bool, er
 	}
 	s.recordLogin(u.ID)
 	return &u, resp, u.MustChangePassword, nil
+}
+
+// MustChangePassword reports whether the user is flagged to set a new
+// password before using the application. A soft-deleted user reports false,
+// preserving the documented behavior that existing access tokens stay valid
+// until their short TTL expires.
+func (s *Service) MustChangePassword(userID string) (bool, error) {
+	var must bool
+	err := s.db.QueryRow(
+		`SELECT must_change_password FROM users WHERE id = $1 AND deleted_at IS NULL`,
+		userID,
+	).Scan(&must)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check must_change_password: %w", err)
+	}
+	return must, nil
 }
 
 // recordLogin updates the user's last successful sign-in timestamp. It is a
@@ -204,6 +232,24 @@ func (s *Service) getUser(userID string) (*User, error) {
 }
 
 func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*User, error) {
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return nil, ErrNameRequired
+		}
+		if len([]rune(name)) > 100 {
+			return nil, ErrNameTooLong
+		}
+		req.Name = &name
+	}
+	if req.Phone != nil {
+		// Count runes, matching the name check: a phone with multibyte
+		// formatting characters must not be rejected below the 20-character
+		// limit just because its byte length is larger.
+		if len([]rune(*req.Phone)) > 20 {
+			return nil, ErrPhoneTooLong
+		}
+	}
 	var u User
 	err := s.db.QueryRow(`
 		UPDATE users SET
@@ -267,6 +313,40 @@ func (s *Service) changePassword(userID, currentPassword, newPassword string) er
 func HashPassword(password string, cost int) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), cost)
 	return string(bytes), err
+}
+
+// comparePassword is the bcrypt comparison used by login. It is a variable
+// so tests can prove both the known and unknown login paths run a
+// comparison without relying on brittle wall-clock thresholds.
+var comparePassword = bcrypt.CompareHashAndPassword
+
+// dummyPasswordSecret is the plaintext hashed for the login timing equalizer.
+const dummyPasswordSecret = "crm-login-timing-equalizer"
+
+var (
+	dummyHashMu    sync.Mutex
+	dummyHashCache = map[int]string{}
+)
+
+// dummyHashForCost returns a bcrypt hash of dummyPasswordSecret at the given
+// cost, memoized so repeated NewService calls (e.g. in tests) do not keep
+// regenerating it. An invalid configured cost falls back to bcrypt's default
+// rather than failing startup, mirroring GenerateFromPassword's own
+// leniency for costs below the minimum.
+func dummyHashForCost(cost int) string {
+	dummyHashMu.Lock()
+	defer dummyHashMu.Unlock()
+	if h, ok := dummyHashCache[cost]; ok {
+		return h
+	}
+	h, err := bcrypt.GenerateFromPassword([]byte(dummyPasswordSecret), cost)
+	if err != nil {
+		if h, err = bcrypt.GenerateFromPassword([]byte(dummyPasswordSecret), bcrypt.DefaultCost); err != nil {
+			panic("auth: generate dummy password hash: " + err.Error())
+		}
+	}
+	dummyHashCache[cost] = string(h)
+	return string(h)
 }
 
 func generateRandomToken() (string, error) {

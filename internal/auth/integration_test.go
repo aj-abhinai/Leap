@@ -245,6 +245,85 @@ func TestChangePasswordRevokesSessionsIntegration(t *testing.T) {
 	}
 }
 
+func TestLoginUnknownUserRunsPasswordComparison(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db, authTestConfig())
+
+	orig := comparePassword
+	calls := 0
+	comparePassword = func(hash, pw []byte) error {
+		calls++
+		return orig(hash, pw)
+	}
+	t.Cleanup(func() { comparePassword = orig })
+
+	_, _, _, err := svc.login("nobody@example.com", "whatever-password")
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 password comparison for an unknown account, got %d", calls)
+	}
+}
+
+func TestLoginKnownUserRunsPasswordComparison(t *testing.T) {
+	db := testdb.New(t)
+	seedUser(t, db, "alice@example.com", "correct-horse")
+	svc := NewService(db, authTestConfig())
+
+	orig := comparePassword
+	calls := 0
+	comparePassword = func(hash, pw []byte) error {
+		calls++
+		return orig(hash, pw)
+	}
+	t.Cleanup(func() { comparePassword = orig })
+
+	_, _, _, err := svc.login("alice@example.com", "wrong-password")
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 password comparison for a known account, got %d", calls)
+	}
+}
+
+func TestMustChangePasswordIntegration(t *testing.T) {
+	db := testdb.New(t)
+	flagID := seedUserWithFlag(t, db, "grace@example.com", "correct-horse", true)
+	clearID := seedUserWithFlag(t, db, "henry@example.com", "correct-horse", false)
+	svc := NewService(db, authTestConfig())
+
+	must, err := svc.MustChangePassword(flagID)
+	if err != nil {
+		t.Fatalf("MustChangePassword(flagged): %v", err)
+	}
+	if !must {
+		t.Error("expected true for a flagged user")
+	}
+
+	must, err = svc.MustChangePassword(clearID)
+	if err != nil {
+		t.Fatalf("MustChangePassword(clear): %v", err)
+	}
+	if must {
+		t.Error("expected false for a user who already changed their password")
+	}
+
+	// A soft-deleted user is not flagged, preserving the documented behavior
+	// that existing access tokens stay valid until their short TTL expires.
+	if _, err := db.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1`, flagID); err != nil {
+		t.Fatalf("soft-delete user: %v", err)
+	}
+	must, err = svc.MustChangePassword(flagID)
+	if err != nil {
+		t.Fatalf("MustChangePassword(deleted): %v", err)
+	}
+	if must {
+		t.Error("expected false for a soft-deleted user")
+	}
+}
+
 func authTestConfig() config.Auth {
 	return config.Auth{
 		JWTSecret:       "test-secret-key-0123456789abcdef0123456789",

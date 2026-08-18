@@ -402,6 +402,32 @@ func TestHandlerUpdateProfile(t *testing.T) {
 	}
 }
 
+func TestHandlerUpdateProfileRejectsInvalidFields(t *testing.T) {
+	db := testdb.New(t)
+	id := seedUser(t, db, "alice@example.com", "correct-horse")
+	h := NewHandler(NewService(db, authTestConfig()), nil)
+	ctx := func(r *http.Request) *http.Request {
+		return r.WithContext(ctxutil.WithUserID(r.Context(), id))
+	}
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "empty name", body: `{"name":"   "}`},
+		{name: "overlong name", body: `{"name":"` + strings.Repeat("x", 101) + `"}`},
+		{name: "overlong phone", body: `{"phone":"` + strings.Repeat("9", 21) + `"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, _ := doJSON(t, h.UpdateProfile, http.MethodPatch, "/api/auth/me", tt.body, ctx)
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d (body: %s)", rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandlerChangePasswordSuccess(t *testing.T) {
 	db := testdb.New(t)
 	id := seedUserWithFlag(t, db, "carol@example.com", "original-pw", true)

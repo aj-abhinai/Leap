@@ -171,6 +171,17 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := h.svc.updateProfile(userID, req)
 	if err != nil {
+		var ae *AuthError
+		if errors.As(err, &ae) {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: ae.Code, Message: ae.Message},
+				nil,
+			)
+			return
+		}
 		respond.ServerError(w, err)
 		return
 	}

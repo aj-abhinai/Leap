@@ -48,6 +48,9 @@ var (
 	ErrPasswordNeedsLower   = &AuthError{Code: "BAD_REQUEST", Message: "Password must include a lowercase letter"}
 	ErrPasswordNeedsDigit   = &AuthError{Code: "BAD_REQUEST", Message: "Password must include a digit"}
 	ErrPasswordNeedsSpecial = &AuthError{Code: "BAD_REQUEST", Message: "Password must include a special character"}
+	ErrNameRequired         = &AuthError{Code: "BAD_REQUEST", Message: "Name cannot be empty"}
+	ErrNameTooLong          = &AuthError{Code: "BAD_REQUEST", Message: "Name must be at most 100 characters"}
+	ErrPhoneTooLong         = &AuthError{Code: "BAD_REQUEST", Message: "Phone must be at most 20 characters"}
 )
 
 type AuthError struct {

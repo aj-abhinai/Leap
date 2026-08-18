@@ -3,6 +3,7 @@ package seed
 import (
 	"crm/internal/auth"
 	"crm/internal/config"
+	"crm/internal/util"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -41,7 +42,9 @@ func Seed(db *sql.DB, authCfg config.Auth, superadmin config.Superadmin) error {
 // either both commit or neither does, and the next boot sees an empty table
 // and bootstraps cleanly. It reports whether the bootstrap admin was created.
 func seedSuperadmin(db *sql.DB, cfg config.Auth, superadmin config.Superadmin) (bool, error) {
-	email := superadmin.Email
+	// Normalize the configured email exactly like the login lookup
+	// (util.NormalizeEmail), so a mixed-case address in config can still log in.
+	email := util.NormalizeEmail(superadmin.Email)
 	password := superadmin.Password
 
 	tx, err := db.Begin()

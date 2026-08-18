@@ -10,6 +10,7 @@ import (
 
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
+	"crm/internal/util"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -37,6 +38,18 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	pipelineID := r.URL.Query().Get("pipeline_id")
 	stageID := r.URL.Query().Get("stage_id")
 	contactID := r.URL.Query().Get("contact_id")
+	for name, value := range map[string]string{"pipeline_id": pipelineID, "stage_id": stageID, "contact_id": contactID} {
+		if value != "" && !util.IsUUID(value) {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: name + " must be a valid id"},
+				nil,
+			)
+			return
+		}
+	}
 
 	leads, total, err := h.svc.list(pipelineID, stageID, contactID, page, perPage)
 	if err != nil {
@@ -56,7 +69,9 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive),
 		errors.Is(err, ErrContactRequired), errors.Is(err, ErrNoContactDetail),
-		errors.Is(err, ErrInvalidQuickReply), errors.Is(err, ErrEmptyType):
+		errors.Is(err, ErrInvalidQuickReply), errors.Is(err, ErrEmptyType),
+		errors.Is(err, ErrContactNotActive), errors.Is(err, ErrInvalidAssignee),
+		errors.Is(err, ErrInvalidContactID), errors.Is(err, ErrNothingToUpdate):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -432,7 +447,18 @@ func (h *Handler) SnoozeReminder(w http.ResponseWriter, r *http.Request) {
 	}
 	snoozed, err := h.svc.snoozeReminder(leadID, id, req.RemindAt)
 	if err != nil {
-		respond.ServerError(w, err)
+		switch {
+		case errors.Is(err, ErrSnoozePast), errors.Is(err, ErrSnoozeTooFar):
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+				nil,
+			)
+		default:
+			respond.ServerError(w, err)
+		}
 		return
 	}
 	if !snoozed {

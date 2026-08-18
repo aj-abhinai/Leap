@@ -39,8 +39,9 @@ func TestDismissReminderFoundIntegration(t *testing.T) {
 	}
 	var activityID string
 	if err := db.QueryRow(
-		`INSERT INTO lead_activities (lead_id, stage_id, type, description) VALUES ($1, $2, 'call', 'Follow up') RETURNING id`,
-		leadID, stageID,
+		`INSERT INTO lead_activities (lead_id, stage_id, type, description, scheduled_at)
+		VALUES ($1, $2, 'call', 'Follow up', $3) RETURNING id`,
+		leadID, stageID, time.Now().Add(time.Hour),
 	).Scan(&activityID); err != nil {
 		t.Fatalf("seed activity: %v", err)
 	}
@@ -102,6 +103,164 @@ func TestDismissReminderWrongLeadScopedIntegration(t *testing.T) {
 	}
 }
 
+func TestDismissReminderRequiresOpenReminderIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	// A reminder-less open task is not a reminder and cannot be dismissed.
+	var noReminderID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type) VALUES ($1, $2, 'call') RETURNING id`,
+		created.ID, stageID,
+	).Scan(&noReminderID); err != nil {
+		t.Fatalf("seed reminder-less activity: %v", err)
+	}
+	if dismissed, err := svc.dismissReminder(created.ID, noReminderID); err != nil || dismissed {
+		t.Errorf("dismiss reminder-less = %v, %v; want false, nil", dismissed, err)
+	}
+
+	// A done task cannot be dismissed.
+	var doneID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type, scheduled_at, is_done)
+		VALUES ($1, $2, 'call', $3, true) RETURNING id`,
+		created.ID, stageID, time.Now().Add(time.Hour),
+	).Scan(&doneID); err != nil {
+		t.Fatalf("seed done activity: %v", err)
+	}
+	if dismissed, err := svc.dismissReminder(created.ID, doneID); err != nil || dismissed {
+		t.Errorf("dismiss done = %v, %v; want false, nil", dismissed, err)
+	}
+
+	// A cancelled task cannot be dismissed.
+	var cancelledID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type, scheduled_at, is_cancelled)
+		VALUES ($1, $2, 'call', $3, true) RETURNING id`,
+		created.ID, stageID, time.Now().Add(time.Hour),
+	).Scan(&cancelledID); err != nil {
+		t.Fatalf("seed cancelled activity: %v", err)
+	}
+	if dismissed, err := svc.dismissReminder(created.ID, cancelledID); err != nil || dismissed {
+		t.Errorf("dismiss cancelled = %v, %v; want false, nil", dismissed, err)
+	}
+}
+
+func TestSnoozeReminderBoundsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	var activityID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type, scheduled_at)
+		VALUES ($1, $2, 'call', $3) RETURNING id`,
+		created.ID, stageID, time.Now().Add(time.Hour),
+	).Scan(&activityID); err != nil {
+		t.Fatalf("seed activity: %v", err)
+	}
+
+	if _, err := svc.snoozeReminder(created.ID, activityID, time.Now().Add(-time.Minute)); !errors.Is(err, ErrSnoozePast) {
+		t.Errorf("snooze to the past = %v, want ErrSnoozePast", err)
+	}
+
+	tooFar := time.Now().Add(maxSnoozeHorizon + 24*time.Hour)
+	if _, err := svc.snoozeReminder(created.ID, activityID, tooFar); !errors.Is(err, ErrSnoozeTooFar) {
+		t.Errorf("snooze beyond horizon = %v, want ErrSnoozeTooFar", err)
+	}
+
+	// The row is untouched by the rejected attempts.
+	snoozed, err := svc.snoozeReminder(created.ID, activityID, time.Now().Add(2*time.Hour).UTC().Truncate(time.Second))
+	if err != nil || !snoozed {
+		t.Errorf("valid snooze = %v, %v; want true, nil", snoozed, err)
+	}
+}
+
+func TestPendingRemindersExcludeDeletedLeadsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	live, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create live lead: %v", err)
+	}
+	deleted, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Bob", Phone: "0987654321"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create to-be-deleted lead: %v", err)
+	}
+
+	for _, leadID := range []string{live.ID, deleted.ID} {
+		if _, err := db.Exec(
+			`INSERT INTO lead_activities (lead_id, stage_id, type, remind_at)
+			VALUES ($1, $2, 'call', $3)`,
+			leadID, stageID, time.Now().Add(time.Hour),
+		); err != nil {
+			t.Fatalf("seed reminder: %v", err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE leads SET deleted_at = now() WHERE id = $1`, deleted.ID); err != nil {
+		t.Fatalf("soft-delete lead: %v", err)
+	}
+
+	reminders, err := svc.getPendingReminders()
+	if err != nil {
+		t.Fatalf("get pending reminders: %v", err)
+	}
+	if len(reminders) != 1 || reminders[0].LeadID != live.ID {
+		t.Errorf("pending reminders = %+v, want only the live lead's reminder", reminders)
+	}
+}
+
+func TestUpdateActivityEmptyRequestRejectedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{}); !errors.Is(err, ErrNothingToUpdate) {
+		t.Errorf("empty update = %v, want ErrNothingToUpdate", err)
+	}
+}
+
 func TestCreateActivityWithOutcomeSetsRespondedAtIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -118,7 +277,7 @@ func TestCreateActivityWithOutcomeSetsRespondedAtIntegration(t *testing.T) {
 	statusID := seedQuickReplyTag(t, db, "No Reply")
 
 	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
-		Type:      "Call 1",
+		Type:         "Call 1",
 		QuickReplyID: &statusID,
 	})
 	if err != nil {
@@ -388,9 +547,9 @@ func TestCreateActivityDoneWithOutcomeIntegration(t *testing.T) {
 
 	done := true
 	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
-		Type:      "Call 1",
+		Type:         "Call 1",
 		QuickReplyID: &statusID,
-		IsDone:    &done,
+		IsDone:       &done,
 	})
 	if err != nil {
 		t.Fatalf("create done activity: %v", err)

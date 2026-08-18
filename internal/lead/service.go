@@ -26,6 +26,17 @@ var (
 	// ErrClosingStageAtCreate marks lead creation into a closing stage; closing
 	// is reachable only by moving an existing lead (ADR 012).
 	ErrClosingStageAtCreate = errors.New("a lead cannot be created in a closing stage")
+	// ErrContactNotActive marks a contact_id that does not exist or has been
+	// deleted; leads must not link to soft-deleted contacts.
+	ErrContactNotActive = errors.New("contact not found or deleted")
+	// ErrInvalidContactID marks a contact_id that is not a well-formed UUID, so
+	// a malformed value surfaces as a clean 400 instead of a server error.
+	ErrInvalidContactID = errors.New("contact_id must be a valid contact reference")
+	// ErrInvalidAssignee marks an assigned_to that does not reference a live
+	// (non-deleted) user, or that is not a well-formed UUID; deleted users must
+	// not remain assignable and malformed values must not surface as server
+	// errors.
+	ErrInvalidAssignee = errors.New("assigned_to must reference an active user")
 )
 
 type Service struct {
@@ -70,7 +81,7 @@ func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int)
 	if perPage < 1 {
 		perPage = 50
 	}
-	offset := (page - 1) * perPage
+	offset := util.Offset(page, perPage)
 
 	selectQuery := fmt.Sprintf(
 		`SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
@@ -183,6 +194,29 @@ func (l *Lead) displayName() string {
 	return l.ContactName
 }
 
+// validateAssignedToTx rejects assigned_to values that do not reference a live
+// (non-deleted) user, so deleted users cannot remain assignable and a
+// non-UUID value surfaces as a clean 400 instead of a server error.
+func (s *Service) validateAssignedToTx(tx *sql.Tx, assignedTo *string) error {
+	if assignedTo == nil || *assignedTo == "" {
+		return nil
+	}
+	if !util.IsUUID(*assignedTo) {
+		return ErrInvalidAssignee
+	}
+	var live bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`,
+		*assignedTo,
+	).Scan(&live); err != nil {
+		return fmt.Errorf("validate assigned_to: %w", err)
+	}
+	if !live {
+		return ErrInvalidAssignee
+	}
+	return nil
+}
+
 func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 	if req.Value != nil {
 		return nil, ErrCustomValueRejected
@@ -196,6 +230,10 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 	// Resolve-or-create the backing contact.
 	contactID, err := s.resolveOrCreateContactTx(tx, req.ContactID, req.NewContact, userID)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := s.validateAssignedToTx(tx, req.AssignedTo); err != nil {
 		return nil, err
 	}
 
@@ -253,6 +291,24 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 // matches. This is the "contact is the single source of truth" entry flow.
 func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *NewContact, userID string) (string, error) {
 	if contactID != nil && *contactID != "" {
+		// Reject deleted or unknown contacts so a lead can never be attached
+		// to a soft-deleted contact's row (ADR 009 identity rules). Malformed
+		// ids are rejected up front so a non-UUID value cannot surface as a
+		// Postgres cast error.
+		if !util.IsUUID(*contactID) {
+			return "", ErrInvalidContactID
+		}
+		var live bool
+		err := tx.QueryRow(
+			`SELECT EXISTS(SELECT 1 FROM contacts WHERE id = $1 AND deleted_at IS NULL)`,
+			*contactID,
+		).Scan(&live)
+		if err != nil {
+			return "", fmt.Errorf("validate contact: %w", err)
+		}
+		if !live {
+			return "", ErrContactNotActive
+		}
 		return *contactID, nil
 	}
 	if nc == nil || nc.Name == "" {
@@ -283,7 +339,9 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	if phone := util.NormalizePhone(nc.Phone); phone != "" {
 		var found string
 		err := tx.QueryRow(
-			`SELECT contact_id FROM contact_phones WHERE regexp_replace(value, '\D', '', 'g') IN ($1, '91' || $1) LIMIT 1`,
+			`SELECT cp.contact_id FROM contact_phones cp
+			JOIN contacts c ON c.id = cp.contact_id AND c.deleted_at IS NULL
+			WHERE regexp_replace(cp.value, '\D', '', 'g') IN ($1, '91' || $1) LIMIT 1`,
 			phone,
 		).Scan(&found)
 		if err == nil {
@@ -296,7 +354,9 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	if email := util.NormalizeEmail(nc.Email); email != "" {
 		var found string
 		err := tx.QueryRow(
-			`SELECT contact_id FROM contact_emails WHERE lower(trim(value)) = $1 LIMIT 1`,
+			`SELECT ce.contact_id FROM contact_emails ce
+			JOIN contacts c ON c.id = ce.contact_id AND c.deleted_at IS NULL
+			WHERE lower(trim(ce.value)) = $1 LIMIT 1`,
 			email,
 		).Scan(&found)
 		if err == nil {
@@ -382,6 +442,25 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		).Scan(&stageID); err != nil {
 			return nil, ErrStageNotInPipeline
 		}
+	}
+	if req.ContactID != nil && *req.ContactID != "" {
+		if !util.IsUUID(*req.ContactID) {
+			return nil, ErrInvalidContactID
+		}
+		var live bool
+		err := tx.QueryRow(
+			`SELECT EXISTS(SELECT 1 FROM contacts WHERE id = $1 AND deleted_at IS NULL)`,
+			*req.ContactID,
+		).Scan(&live)
+		if err != nil {
+			return nil, fmt.Errorf("update lead: validate contact: %w", err)
+		}
+		if !live {
+			return nil, ErrContactNotActive
+		}
+	}
+	if err := s.validateAssignedToTx(tx, req.AssignedTo); err != nil {
+		return nil, err
 	}
 
 	// Resolve the outcome when the lead moves into or out of a closing stage.

@@ -694,12 +694,118 @@ func TestSnoozeMissingReminderIsCleanNoopIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	changed, err := svc.snoozeReminder("00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000", time.Now())
+	changed, err := svc.snoozeReminder("00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000", time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("snooze missing: %v", err)
 	}
 	if changed {
 		t.Error("snooze missing id reported a change, want false")
+	}
+}
+
+func TestSnoozeReminderLessOpenTaskIsCleanNoopIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	// An open task with neither a reminder nor a schedule carries no due time
+	// and must not be silently converted into a future reminder by snoozing —
+	// matching dismissReminder, which treats the same row as a clean no-op.
+	var activityID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type)
+		VALUES ($1, $2, 'call') RETURNING id`,
+		created.ID, stageID,
+	).Scan(&activityID); err != nil {
+		t.Fatalf("seed activity: %v", err)
+	}
+
+	changed, err := svc.snoozeReminder(created.ID, activityID, time.Now().Add(2*time.Hour).UTC().Truncate(time.Second))
+	if err != nil {
+		t.Fatalf("snooze reminder-less: %v", err)
+	}
+	if changed {
+		t.Error("snooze reminder-less task reported a change, want false")
+	}
+
+	var remindAt *time.Time
+	if err := db.QueryRow(`SELECT remind_at FROM lead_activities WHERE id = $1`, activityID).Scan(&remindAt); err != nil {
+		t.Fatalf("reload activity: %v", err)
+	}
+	if remindAt != nil {
+		t.Errorf("remind_at = %v, want nil (task had no reminder)", remindAt)
+	}
+}
+
+func TestLeadAssignedToValidatesActiveUserIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	userID := seedTestUser(t, db, "agent@example.com")
+	deletedUserID := seedTestUser(t, db, "gone@example.com")
+	if _, err := db.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1`, deletedUserID); err != nil {
+		t.Fatalf("soft-delete user: %v", err)
+	}
+
+	base := CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}
+
+	// Create with an active assignee succeeds.
+	live := base
+	live.AssignedTo = &userID
+	created, err := svc.create(live, "")
+	if err != nil {
+		t.Fatalf("create with active assignee: %v", err)
+	}
+
+	// Create with a deleted assignee is rejected.
+	deleted := base
+	deleted.AssignedTo = &deletedUserID
+	if _, err := svc.create(deleted, ""); !errors.Is(err, ErrInvalidAssignee) {
+		t.Errorf("create with deleted assignee = %v, want ErrInvalidAssignee", err)
+	}
+
+	// Create with a missing UUID surfaces as a clean validation error.
+	missing := base
+	missingUUID := "00000000-0000-0000-0000-000000000000"
+	missing.AssignedTo = &missingUUID
+	if _, err := svc.create(missing, ""); !errors.Is(err, ErrInvalidAssignee) {
+		t.Errorf("create with missing assignee = %v, want ErrInvalidAssignee", err)
+	}
+
+	// Create with a malformed (non-UUID) assignee is rejected up front instead
+	// of surfacing as a Postgres cast error.
+	malformed := base
+	notAUserID := "not-a-uuid"
+	malformed.AssignedTo = &notAUserID
+	if _, err := svc.create(malformed, ""); !errors.Is(err, ErrInvalidAssignee) {
+		t.Errorf("create with malformed assignee = %v, want ErrInvalidAssignee", err)
+	}
+	if _, err := svc.update(created.ID, UpdateRequest{AssignedTo: &notAUserID}, ""); !errors.Is(err, ErrInvalidAssignee) {
+		t.Errorf("update to malformed assignee = %v, want ErrInvalidAssignee", err)
+	}
+
+	// Update reassigns to an active user and rejects a deleted one.
+	reassign := userID
+	if updated, err := svc.update(created.ID, UpdateRequest{AssignedTo: &reassign}, ""); err != nil {
+		t.Fatalf("update to active assignee: %v", err)
+	} else if updated.AssignedTo == nil || *updated.AssignedTo != userID {
+		t.Errorf("assigned_to after update = %v, want %q", updated.AssignedTo, userID)
+	}
+	if _, err := svc.update(created.ID, UpdateRequest{AssignedTo: &deletedUserID}, ""); !errors.Is(err, ErrInvalidAssignee) {
+		t.Errorf("update to deleted assignee = %v, want ErrInvalidAssignee", err)
 	}
 }
 
@@ -874,5 +980,116 @@ func TestCreateLeadAuditWithoutActorIntegration(t *testing.T) {
 	}
 	if gotUserID.Valid || gotUserName.Valid {
 		t.Errorf("expected NULL actor for system-created contact, got %+v/%+v", gotUserID, gotUserName)
+	}
+}
+
+func TestCreateLeadRejectsDeletedContactIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var contactID string
+	if err := db.QueryRow(
+		`INSERT INTO contacts (name, email, phone) VALUES ('Soft Deleted', 'gone@example.com', '555') RETURNING id`,
+	).Scan(&contactID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, contactID); err != nil {
+		t.Fatalf("soft-delete contact: %v", err)
+	}
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+
+	_, err := svc.create(CreateRequest{
+		ContactID:  &contactID,
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if !errors.Is(err, ErrContactNotActive) {
+		t.Errorf("create with deleted contact = %v, want ErrContactNotActive", err)
+	}
+
+	// A malformed contact_id is rejected up front instead of surfacing as a
+	// Postgres cast error.
+	notAContactID := "not-a-uuid"
+	if _, err := svc.create(CreateRequest{
+		ContactID:  &notAContactID,
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, ""); !errors.Is(err, ErrInvalidContactID) {
+		t.Errorf("create with malformed contact_id = %v, want ErrInvalidContactID", err)
+	}
+
+	var leadCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM leads`).Scan(&leadCount); err != nil {
+		t.Fatalf("count leads: %v", err)
+	}
+	if leadCount != 0 {
+		t.Errorf("expected no lead created, got %d", leadCount)
+	}
+}
+
+func TestUpdateLeadRejectsDeletedContactIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	var deletedID string
+	if err := db.QueryRow(
+		`INSERT INTO contacts (name, email, phone) VALUES ('Soft Deleted', 'gone2@example.com', '556') RETURNING id`,
+	).Scan(&deletedID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, deletedID); err != nil {
+		t.Fatalf("soft-delete contact: %v", err)
+	}
+
+	_, err = svc.update(created.ID, UpdateRequest{ContactID: &deletedID}, "")
+	if !errors.Is(err, ErrContactNotActive) {
+		t.Errorf("update to deleted contact = %v, want ErrContactNotActive", err)
+	}
+
+	// A malformed contact_id on update is rejected up front.
+	notAContactID := "not-a-uuid"
+	if _, err := svc.update(created.ID, UpdateRequest{ContactID: &notAContactID}, ""); !errors.Is(err, ErrInvalidContactID) {
+		t.Errorf("update to malformed contact_id = %v, want ErrInvalidContactID", err)
+	}
+}
+
+func TestResolveOrCreateSkipsDeletedContactsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	// A deleted contact whose phone/email would otherwise match must not be
+	// resolved: the lead entry creates a fresh contact instead.
+	var deletedID string
+	if err := db.QueryRow(
+		`INSERT INTO contacts (name, email, phone) VALUES ('Deleted Match', 'match@example.com', '9876543210') RETURNING id`,
+	).Scan(&deletedID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, deletedID); err != nil {
+		t.Fatalf("soft-delete contact: %v", err)
+	}
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Fresh", Phone: "9876543210"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if created.ContactID == deletedID {
+		t.Error("lead resolved to the soft-deleted contact")
 	}
 }

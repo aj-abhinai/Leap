@@ -138,6 +138,25 @@ func TestSeedSuperadminSkipsAndRollsBackOnExistingUsers(t *testing.T) {
 	}
 }
 
+func TestSeedNormalizesSuperadminEmail(t *testing.T) {
+	db := testdb.New(t)
+	superadmin := config.Superadmin{Email: "  Admin@Example.com ", Password: "admin"}
+
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+
+	// Login normalizes email with util.NormalizeEmail, so the stored address
+	// must be the normalized form or a mixed-case config cannot log in.
+	var email string
+	if err := db.QueryRow(`SELECT email FROM users`).Scan(&email); err != nil {
+		t.Fatalf("load seeded email: %v", err)
+	}
+	if email != "admin@example.com" {
+		t.Errorf("seeded email = %q, want admin@example.com", email)
+	}
+}
+
 func TestSeedSeedsTagCatalog(t *testing.T) {
 	db := testdb.New(t)
 	superadmin := config.Superadmin{Email: "admin@admin.com", Password: "admin"}

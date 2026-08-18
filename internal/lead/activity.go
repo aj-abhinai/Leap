@@ -1,6 +1,7 @@
 package lead
 
 import (
+	"crm/internal/util"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -12,6 +13,17 @@ import (
 // ErrInvalidQuickReply marks a quick_reply_id that does not reference a
 // quick-reply tag (type 'quick_reply', ADR 020).
 var ErrInvalidQuickReply = errors.New("quick_reply_id must reference a quick_reply tag")
+
+// ErrSnoozePast marks a snooze whose remind_at is not in the future.
+var ErrSnoozePast = errors.New("remind_at must be in the future")
+
+// ErrSnoozeTooFar marks a snooze beyond the allowed horizon.
+var ErrSnoozeTooFar = errors.New("remind_at is too far in the future")
+
+// maxSnoozeHorizon bounds how far a snooze may push a reminder forward so a
+// misbehaving client cannot queue tasks years out. The frontend presets cap at
+// 24 hours; a year is far beyond any legitimate manual entry.
+const maxSnoozeHorizon = 365 * 24 * time.Hour
 
 const activitySelect = `
 	SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
@@ -48,6 +60,9 @@ func (s *Service) validateQuickReplyTx(q interface {
 // ErrEmptyType marks an activity request with a blank type. Descriptions are
 // optional (ADR 018) — a quick "Call 1 / Busy, reschedule" entry needs no prose.
 var ErrEmptyType = errors.New("activity type cannot be empty")
+
+// ErrNothingToUpdate marks an activity update request with no fields set.
+var ErrNothingToUpdate = errors.New("nothing to update")
 
 // validateActivityFields enforces the shared create/update invariant: a type
 // is never blank. Descriptions are optional.
@@ -88,7 +103,7 @@ func (s *Service) listActivities(leadID string, page, perPage int) ([]Activity, 
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count activities: %w", err)
 	}
-	offset := (page - 1) * perPage
+	offset := util.Offset(page, perPage)
 	rows, err := s.db.Query(activitySelect+`
 		WHERE la.lead_id = $1
 		ORDER BY la.created_at DESC
@@ -192,7 +207,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	if req.QuickReplyID == nil && req.IsDone == nil && req.Type == nil && req.Description == nil &&
 		req.ScheduledAt == nil && req.RemindAt == nil && req.OccurredAt == nil &&
 		req.IsCancelled == nil && req.RescheduleAt == nil {
-		return nil, errors.New("nothing to update")
+		return nil, ErrNothingToUpdate
 	}
 
 	// Load the current row so we only stamp response times on the null->set edge.
@@ -305,11 +320,18 @@ func (s *Service) deleteActivity(leadID, activityID string) error {
 }
 
 // dismissReminder marks an activity as reminded and reports whether a row
-// actually changed; a missing or already-reminded id is a clean (false, nil)
-// instead of an error.
+// actually changed. Only open, non-cancelled activities that carry a reminder
+// or schedule are eligible, so dismiss stays aligned with reminder semantics;
+// a missing, already-reminded, done, cancelled, or reminder-less id is a clean
+// (false, nil) instead of an error.
 func (s *Service) dismissReminder(leadID, activityID string) (bool, error) {
 	res, err := s.db.Exec(
-		`UPDATE lead_activities SET is_reminded = true WHERE id = $1 AND lead_id = $2 AND NOT is_reminded`,
+		`UPDATE lead_activities SET is_reminded = true
+		WHERE id = $1 AND lead_id = $2
+			AND NOT is_reminded
+			AND NOT is_done
+			AND NOT is_cancelled
+			AND (remind_at IS NOT NULL OR scheduled_at IS NOT NULL)`,
 		activityID, leadID,
 	)
 	if err != nil {
@@ -325,9 +347,18 @@ func (s *Service) dismissReminder(leadID, activityID string) (bool, error) {
 // snoozeReminder pushes an activity's reminder forward and re-opens it
 // (is_reminded = false) so it re-enters the pending pool. The task's scheduled
 // time shifts by the same delta as the reminder, so snooze behaves as a quick
-// reschedule of an open task (ADR 018). It reports whether a row actually
-// changed; a missing id is a clean (false, nil) instead of an error.
+// reschedule of an open task (ADR 018). The new time must be future-only and
+// within the snooze horizon. Only open, non-cancelled activities that carry a
+// reminder or schedule are eligible — matching dismissReminder — so a missing
+// or reminder-less id is a clean (false, nil) instead of an error.
 func (s *Service) snoozeReminder(leadID, activityID string, remindAt time.Time) (bool, error) {
+	now := time.Now()
+	if !remindAt.After(now) {
+		return false, ErrSnoozePast
+	}
+	if remindAt.After(now.Add(maxSnoozeHorizon)) {
+		return false, ErrSnoozeTooFar
+	}
 	res, err := s.db.Exec(
 		`UPDATE lead_activities SET
 			remind_at = $2,
@@ -336,7 +367,8 @@ func (s *Service) snoozeReminder(leadID, activityID string, remindAt time.Time) 
 				WHEN scheduled_at IS NOT NULL AND remind_at IS NOT NULL THEN scheduled_at + ($2 - remind_at)
 				ELSE scheduled_at
 			END
-		WHERE id = $1 AND lead_id = $3 AND NOT is_done`,
+		WHERE id = $1 AND lead_id = $3 AND NOT is_done AND NOT is_cancelled
+			AND (remind_at IS NOT NULL OR scheduled_at IS NOT NULL)`,
 		activityID, remindAt, leadID,
 	)
 	if err != nil {
@@ -355,7 +387,8 @@ func (s *Service) snoozeReminder(leadID, activityID string, remindAt time.Time) 
 // reminders page can render Overdue / Upcoming / Done sections; dismissed
 // (is_reminded) rows are included too so the Dismissed section can list them.
 func (s *Service) getPendingReminders() ([]Activity, error) {
-	rows, err := s.db.Query(activitySelect+`
+	rows, err := s.db.Query(activitySelect + `
+		JOIN leads l ON l.id = la.lead_id AND l.deleted_at IS NULL
 		WHERE NOT la.is_done AND NOT la.is_cancelled
 			AND (la.remind_at IS NOT NULL OR la.scheduled_at IS NOT NULL)
 		ORDER BY COALESCE(la.remind_at, la.scheduled_at) ASC

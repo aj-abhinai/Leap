@@ -94,6 +94,62 @@ func TestKeyOfFallsBackToSocketPeer(t *testing.T) {
 	}
 }
 
+func TestUserMiddlewareKeysPerUser(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := New(1, time.Minute).UserMiddleware(handler)
+
+	req := httptest.NewRequest(http.MethodPatch, "/", nil)
+	req = req.WithContext(ctxutil.WithUserID(req.Context(), "user-a"))
+	rr := httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("user-a first request: expected 200, got %d", rr.Code)
+	}
+
+	// A different user has its own bucket and is not throttled.
+	req = httptest.NewRequest(http.MethodPatch, "/", nil)
+	req = req.WithContext(ctxutil.WithUserID(req.Context(), "user-b"))
+	rr = httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("user-b should have its own bucket: expected 200, got %d", rr.Code)
+	}
+
+	// The same user is now over the limit.
+	req = httptest.NewRequest(http.MethodPatch, "/", nil)
+	req = req.WithContext(ctxutil.WithUserID(req.Context(), "user-a"))
+	rr = httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("user-a second request: expected 429, got %d", rr.Code)
+	}
+	if rr.Header().Get("Retry-After") != "60" {
+		t.Errorf("Retry-After = %q, want 60", rr.Header().Get("Retry-After"))
+	}
+}
+
+func TestUserMiddlewareFallsBackToIPWhenUnauthenticated(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := New(1, time.Minute).UserMiddleware(handler)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPatch, "/", nil)
+		req.RemoteAddr = "1.2.3.4:1234"
+		rr := httptest.NewRecorder()
+		mw.ServeHTTP(rr, req)
+		if i == 0 && rr.Code != http.StatusOK {
+			t.Fatalf("first request: expected 200, got %d", rr.Code)
+		}
+		if i == 1 && rr.Code != http.StatusTooManyRequests {
+			t.Fatalf("second request from same IP: expected 429, got %d", rr.Code)
+		}
+	}
+}
+
 func TestSpoofedHeadersDoNotResetBucket(t *testing.T) {
 	// A client rotating forwarded headers from an untrusted peer must keep
 	// hitting the same bucket keyed on the socket peer.

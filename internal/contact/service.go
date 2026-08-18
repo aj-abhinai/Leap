@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -18,6 +19,19 @@ var (
 	ErrInvalidStatus = errors.New("status_id must reference a status tag")
 	// ErrNoContactDetail marks contacts created without a phone or an email.
 	ErrNoContactDetail = errors.New("contact must have at least one phone or one email")
+	// ErrCollectionLimit marks requests whose phones, emails, or tag lists
+	// exceed the per-contact caps or whose value lengths exceed the maximum.
+	ErrCollectionLimit = errors.New("contact collection limit exceeded")
+)
+
+// Per-contact collection and value caps bound the work a single create/update
+// request can trigger: each element is inserted with its own Exec inside the
+// mutation transaction, so unbounded arrays can exhaust the connection pool.
+const (
+	maxContactPhones = 10
+	maxContactEmails = 10
+	maxContactTags   = 50
+	maxValueLength   = 255
 )
 
 type Service struct {
@@ -36,10 +50,10 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 
 	if search != "" {
 		baseWhere += fmt.Sprintf(
-			" AND (name ILIKE $%d OR nickname ILIKE $%d OR email ILIKE $%d OR phone ILIKE $%d)",
+			" AND (name ILIKE $%d ESCAPE '\\' OR nickname ILIKE $%d ESCAPE '\\' OR email ILIKE $%d ESCAPE '\\' OR phone ILIKE $%d ESCAPE '\\')",
 			argIdx, argIdx+1, argIdx+2, argIdx+3,
 		)
-		searchTerm := "%" + search + "%"
+		searchTerm := "%" + escapeLike(search) + "%"
 		args = append(args, searchTerm, searchTerm, searchTerm, searchTerm)
 		argIdx += 4
 	}
@@ -56,7 +70,7 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 	if perPage < 1 {
 		perPage = 20
 	}
-	offset := (page - 1) * perPage
+	offset := util.Offset(page, perPage)
 
 	selectQuery := fmt.Sprintf(
 		`SELECT id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''),
@@ -331,11 +345,134 @@ func (s *Service) get(id string) (*Contact, error) {
 }
 
 func (s *Service) create(req CreateRequest) (*Contact, error) {
-	keys, err := s.loadContactKeys()
-	if err != nil {
-		return nil, fmt.Errorf("create contact: load duplicate keys: %w", err)
+	if err := validateCollectionLimits(req.Phones, req.Emails, req.TagIDs, req.Phone, req.Email); err != nil {
+		return nil, err
 	}
-	return s.createWithKeys(req, keys)
+	// Advisory duplicate warning via targeted indexed lookups, not a full-table
+	// key scan (the bulk import path still scans once for the whole file). Runs
+	// before the insert so the new contact itself is not flagged.
+	reason, err := s.duplicateReasonPoint(req.Phone, req.Email)
+	if err != nil {
+		return nil, err
+	}
+	created, err := s.createWithKeys(req, contactKeys{})
+	if err != nil {
+		return nil, err
+	}
+	if reason != "" {
+		created.Warnings = append(created.Warnings, reason)
+	}
+	return created, nil
+}
+
+// escapeLike escapes LIKE/ILIKE metacharacters in user input so a query such
+// as q=% cannot widen the pattern into an unfiltered scan.
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
+// validateCollectionLimits enforces the per-contact caps on phones, emails,
+// and tags so a single request cannot flood the child tables or hold a pooled
+// connection for thousands of sequential inserts. The scalar phone/email
+// mirrors are checked too — they land in the same child tables.
+func validateCollectionLimits(phones []PhoneValue, emails []EmailValue, tagIDs []string, scalarPhone, scalarEmail string) error {
+	if len(phones) > maxContactPhones {
+		return fmt.Errorf("%w: at most %d phones per contact", ErrCollectionLimit, maxContactPhones)
+	}
+	if len(emails) > maxContactEmails {
+		return fmt.Errorf("%w: at most %d emails per contact", ErrCollectionLimit, maxContactEmails)
+	}
+	if len(tagIDs) > maxContactTags {
+		return fmt.Errorf("%w: at most %d tags per contact", ErrCollectionLimit, maxContactTags)
+	}
+	if len(scalarPhone) > maxValueLength {
+		return fmt.Errorf("%w: phone value is too long", ErrCollectionLimit)
+	}
+	if len(scalarEmail) > maxValueLength {
+		return fmt.Errorf("%w: email value is too long", ErrCollectionLimit)
+	}
+	for _, p := range phones {
+		if len(p.Value) > maxValueLength {
+			return fmt.Errorf("%w: phone value is too long", ErrCollectionLimit)
+		}
+	}
+	for _, e := range emails {
+		if len(e.Value) > maxValueLength {
+			return fmt.Errorf("%w: email value is too long", ErrCollectionLimit)
+		}
+	}
+	return nil
+}
+
+// duplicateReasonPoint reports whether the given phone/email already belong to
+// a live contact, using targeted indexed lookups rather than materializing the
+// whole contact table (the single-create path). Both the child tables and the
+// legacy scalar columns are checked so rows predating the child tables still
+// dedupe.
+func (s *Service) duplicateReasonPoint(phone, email string) (string, error) {
+	p := util.NormalizePhone(phone)
+	e := util.NormalizeEmail(email)
+
+	phoneMatch := false
+	if p != "" {
+		if err := s.db.QueryRow(
+			`SELECT EXISTS(
+				SELECT 1 FROM contact_phones cp
+				JOIN contacts c ON c.id = cp.contact_id AND c.deleted_at IS NULL
+				WHERE regexp_replace(cp.value, '\D', '', 'g') IN ($1, '91' || $1)
+			)`, p,
+		).Scan(&phoneMatch); err != nil {
+			return "", fmt.Errorf("check duplicate phone: %w", err)
+		}
+		if !phoneMatch {
+			if err := s.db.QueryRow(
+				`SELECT EXISTS(
+					SELECT 1 FROM contacts
+					WHERE deleted_at IS NULL
+					  AND regexp_replace(COALESCE(phone, ''), '\D', '', 'g') IN ($1, '91' || $1)
+				)`, p,
+			).Scan(&phoneMatch); err != nil {
+				return "", fmt.Errorf("check duplicate phone: %w", err)
+			}
+		}
+	}
+
+	emailMatch := false
+	if e != "" {
+		if err := s.db.QueryRow(
+			`SELECT EXISTS(
+				SELECT 1 FROM contact_emails ce
+				JOIN contacts c ON c.id = ce.contact_id AND c.deleted_at IS NULL
+				WHERE lower(trim(ce.value)) = $1
+			)`, e,
+		).Scan(&emailMatch); err != nil {
+			return "", fmt.Errorf("check duplicate email: %w", err)
+		}
+		if !emailMatch {
+			if err := s.db.QueryRow(
+				`SELECT EXISTS(
+					SELECT 1 FROM contacts
+					WHERE deleted_at IS NULL AND lower(trim(COALESCE(email, ''))) = $1
+				)`, e,
+			).Scan(&emailMatch); err != nil {
+				return "", fmt.Errorf("check duplicate email: %w", err)
+			}
+		}
+	}
+
+	switch {
+	case phoneMatch && emailMatch:
+		return "phone and email match an existing contact", nil
+	case phoneMatch:
+		return "phone matches an existing contact", nil
+	case emailMatch:
+		return "email matches an existing contact", nil
+	default:
+		return "", nil
+	}
 }
 
 // createWithKeys inserts a contact while reusing already-loaded duplicate
@@ -487,6 +624,27 @@ func insertEmailRows(q queryer, contactID string, emails []EmailValue) error {
 }
 
 func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact, error) {
+	scalarPhone, scalarEmail := "", ""
+	if req.Phone != nil {
+		scalarPhone = *req.Phone
+	}
+	if req.Email != nil {
+		scalarEmail = *req.Email
+	}
+	if req.Phones != nil || req.Emails != nil || req.TagIDs != nil || req.Phone != nil || req.Email != nil {
+		var phones []PhoneValue
+		if req.Phones != nil {
+			phones = *req.Phones
+		}
+		var emails []EmailValue
+		if req.Emails != nil {
+			emails = *req.Emails
+		}
+		if err := validateCollectionLimits(phones, emails, req.TagIDs, scalarPhone, scalarEmail); err != nil {
+			return nil, err
+		}
+	}
+
 	old, err := s.get(id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
