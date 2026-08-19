@@ -78,10 +78,11 @@ func (a *Assets) verify() error {
 	return nil
 }
 
-// ServeFrontend serves the SPA. Files under /assets/* are served
-// directly; every other GET/HEAD path falls back to index.html.
-// Other methods are not handled. Unknown /api/* paths are API misses, not
-// SPA routes, so they return a JSON 404 instead of the SPA document.
+// ServeFrontend serves the SPA. Files under /assets/* and top-level public
+// files (logo.png, favicons, etc.) are served directly; every other GET/HEAD
+// path falls back to index.html. Other methods are not handled. Unknown
+// /api/* paths are API misses, not SPA routes, so they return a JSON 404
+// instead of the SPA document.
 func (a *Assets) ServeFrontend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -105,10 +106,25 @@ func (a *Assets) ServeFrontend(w http.ResponseWriter, r *http.Request) {
 		a.serveFile(w, r, rel)
 		return
 	}
+	if rel != "" && a.hasFile(rel) {
+		// Top-level public files (logo.png, favicons, etc.) are copied to
+		// the dist root by the build. Serve them directly; everything else
+		// is a client route.
+		a.serveFile(w, r, rel)
+		return
+	}
 	// index.html references hashed assets; always revalidate so new
 	// builds are picked up.
 	w.Header().Set("Cache-Control", "no-cache")
 	a.serveFile(w, r, "index.html")
+}
+
+func (a *Assets) hasFile(rel string) bool {
+	if strings.HasPrefix(rel, "../") {
+		return false
+	}
+	_, err := a.fs.Get(frontendPrefix + "/" + rel)
+	return err == nil
 }
 
 func (a *Assets) serveFile(w http.ResponseWriter, r *http.Request, rel string) {

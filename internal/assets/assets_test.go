@@ -59,6 +59,7 @@ func TestServeFrontend(t *testing.T) {
 		{name: "root serves index", method: "GET", path: "/", wantStatus: 200, wantBody: "<title>test</title>"},
 		{name: "head root", method: "HEAD", path: "/", wantStatus: 200, wantBody: ""},
 		{name: "asset served", method: "GET", path: "/assets/app.js", wantStatus: 200, wantBody: "console.log"},
+		{name: "top-level public file served", method: "GET", path: "/logo.png", wantStatus: 200, wantBody: "not-a-real-png"},
 		{name: "client route falls back", method: "GET", path: "/contacts/123", wantStatus: 200, wantBody: "<title>test</title>"},
 		{name: "missing asset 404s", method: "GET", path: "/assets/missing.js", wantStatus: 404, wantBody: ""},
 		{name: "post not handled", method: "POST", path: "/contacts", wantStatus: 405, wantBody: ""},
@@ -91,6 +92,7 @@ func TestServeFrontendCacheHeaders(t *testing.T) {
 		{name: "assets immutable", path: "/assets/app.js", want: "public, max-age=31536000, immutable"},
 		{name: "index no-cache", path: "/", want: "no-cache"},
 		{name: "spa fallback no-cache", path: "/contacts/123", want: "no-cache"},
+		{name: "top-level public file direct", path: "/logo.png", want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
