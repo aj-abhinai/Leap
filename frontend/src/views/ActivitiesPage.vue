@@ -29,9 +29,11 @@ import { reminderIcon, snoozePresets, snoozeRemindAt } from '@/utils/reminders'
 import { toast } from 'vue-sonner'
 import { CheckCircle2, Trash2, MoreHorizontal, AlarmClockPlus, ClipboardList } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
+import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
 const store = useActivitiesStore()
 const settings = useSettingsStore()
+const { openLeadDrawer } = useLeadDrawerGlobal()
 
 const search = shallowRef('')
 const typeFilter = shallowRef('')
@@ -354,7 +356,15 @@ function typeClass(type: string): string {
                       @change="toggle(item.id)"
                     />
                   </TableCell>
-                  <TableCell class="font-medium">{{ item.lead_display_name }}</TableCell>
+                  <TableCell>
+                    <button
+                      type="button"
+                      class="cursor-pointer font-medium hover:text-primary"
+                      @click="openLeadDrawer(item.lead_id)"
+                    >
+                      {{ item.lead_display_name }}
+                    </button>
+                  </TableCell>
                   <TableCell>
                     <span class="inline-flex items-center gap-1.5 text-sm">
                       <component :is="reminderIcon(item.type)" class="size-4 text-muted-foreground" />

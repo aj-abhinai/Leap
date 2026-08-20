@@ -205,7 +205,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		return nil, err
 	}
 	if req.QuickReplyID == nil && req.IsDone == nil && req.Type == nil && req.Description == nil &&
-		req.ScheduledAt == nil && req.RemindAt == nil && req.OccurredAt == nil &&
+		!req.ScheduledAt.Set && !req.RemindAt.Set && req.OccurredAt == nil &&
 		req.IsCancelled == nil && req.RescheduleAt == nil {
 		return nil, ErrNothingToUpdate
 	}
@@ -267,17 +267,18 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 			responded_at = COALESCE($5, responded_at),
 			type = COALESCE($6, type),
 			description = COALESCE($7, description),
-			scheduled_at = COALESCE($8, scheduled_at),
-			remind_at = COALESCE($9, remind_at),
-			is_reminded = CASE WHEN $9::timestamptz IS NOT NULL THEN false ELSE is_reminded END,
-			occurred_at = COALESCE($10, occurred_at, CASE WHEN $4 = true THEN now() ELSE NULL END),
-			is_cancelled = COALESCE($11, is_cancelled),
+			scheduled_at = CASE WHEN $8 THEN $9 ELSE scheduled_at END,
+			remind_at = CASE WHEN $10 THEN $11 ELSE remind_at END,
+			is_reminded = CASE WHEN $10 AND $11::timestamptz IS NOT NULL THEN false ELSE is_reminded END,
+			occurred_at = COALESCE($12, occurred_at, CASE WHEN $4 = true THEN now() ELSE NULL END),
+			is_cancelled = COALESCE($13, is_cancelled),
 			updated_at = now()
 		WHERE id = $1 AND lead_id = $2
 		RETURNING id, lead_id, stage_id, '', user_id, '', type, description, quick_reply_id, '',
 			scheduled_at, remind_at, responded_at, occurred_at, is_done, is_cancelled, is_reminded, created_at, updated_at`,
 		activityID, leadID, req.QuickReplyID, req.IsDone, respondedAt, req.Type, desc,
-		req.ScheduledAt, req.RemindAt, req.OccurredAt, req.IsCancelled,
+		req.ScheduledAt.Set, req.ScheduledAt.Value, req.RemindAt.Set, req.RemindAt.Value,
+		req.OccurredAt, req.IsCancelled,
 	).Scan(
 		&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
 		&a.Type, &a.Description, &quickReplyID, &quickReplyName,
@@ -386,9 +387,21 @@ func (s *Service) snoozeReminder(leadID, activityID string, remindAt time.Time) 
 // reminder-only entry). Both overdue and upcoming are included so the
 // reminders page can render Overdue / Upcoming / Done sections; dismissed
 // (is_reminded) rows are included too so the Dismissed section can list them.
-func (s *Service) getPendingReminders() ([]Activity, error) {
-	rows, err := s.db.Query(activitySelect + `
+// Each row carries the lead display name and contact id so reminder surfaces
+// can show whose lead the task belongs to and open the lead drawer.
+func (s *Service) getPendingReminders() ([]ActivityListItem, error) {
+	rows, err := s.db.Query(`
+		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
+			la.type, la.description, la.quick_reply_id, COALESCE(t.name, ''),
+			la.scheduled_at, la.remind_at, la.responded_at, la.occurred_at,
+			la.is_done, la.is_cancelled, la.is_reminded, la.created_at, la.updated_at,
+			COALESCE(NULLIF(l.nickname, ''), c.name, ''), l.contact_id
+		FROM lead_activities la
 		JOIN leads l ON l.id = la.lead_id AND l.deleted_at IS NULL
+		LEFT JOIN contacts c ON c.id = l.contact_id
+		LEFT JOIN lead_stages ls ON ls.id = la.stage_id
+		LEFT JOIN users u ON u.id = la.user_id
+		LEFT JOIN tags t ON t.id = la.quick_reply_id
 		WHERE NOT la.is_done AND NOT la.is_cancelled
 			AND (la.remind_at IS NOT NULL OR la.scheduled_at IS NOT NULL)
 		ORDER BY COALESCE(la.remind_at, la.scheduled_at) ASC
@@ -398,15 +411,29 @@ func (s *Service) getPendingReminders() ([]Activity, error) {
 		return nil, fmt.Errorf("get pending reminders: %w", err)
 	}
 	defer rows.Close()
-	activities := []Activity{}
+	items := []ActivityListItem{}
 	for rows.Next() {
-		a, err := scanActivity(rows)
-		if err != nil {
+		var a Activity
+		var quickReplyID, quickReplyName sql.NullString
+		var displayName, contactID string
+		if err := rows.Scan(
+			&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
+			&a.Type, &a.Description, &quickReplyID, &quickReplyName,
+			&a.ScheduledAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
+			&a.IsDone, &a.IsCancelled, &a.IsReminded, &a.CreatedAt, &a.UpdatedAt,
+			&displayName, &contactID,
+		); err != nil {
 			return nil, fmt.Errorf("get pending reminders: scan: %w", err)
 		}
-		activities = append(activities, a)
+		a.QuickReplyID = quickReplyID.String
+		a.QuickReplyName = quickReplyName.String
+		items = append(items, ActivityListItem{
+			Activity:        a,
+			LeadDisplayName: displayName,
+			ContactID:       contactID,
+		})
 	}
-	return activities, nil
+	return items, rows.Err()
 }
 
 // listAllActivities returns every activity across leads with optional filters

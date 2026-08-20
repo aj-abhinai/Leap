@@ -190,6 +190,7 @@ func main() {
 
 			r.Get("/api/leads", middleware.RequirePermission(rbacSvc, "lead:read", leadH.List))
 			r.Post("/api/leads", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Create))
+			r.Get("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:read", leadH.Get))
 			r.Patch("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Update))
 			r.Delete("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Delete))
 
@@ -241,6 +242,7 @@ func main() {
 			)
 
 			r.Get("/api/users", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ListUsers))
+			r.Get("/api/users/options", middleware.RequirePermission(rbacSvc, "lead:read", rbacH.ListAssigneeOptions))
 			r.Post("/api/users", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.CreateUser))
 			r.Delete("/api/users/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.DeleteUser))
 			r.Put("/api/users/{id}/role", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.SetUserRole))

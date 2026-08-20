@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiClient } from '@/composables/useApi'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -14,26 +15,25 @@ import {
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { Badge } from '@/components/ui/badge'
 import LeadKanban from '@/components/leads/LeadKanban.vue'
 import LeadForm from '@/components/leads/LeadForm.vue'
-import LeadActivity from '@/components/leads/LeadActivity.vue'
-import LeadActivityForm from '@/components/leads/LeadActivityForm.vue'
 import { useRBACStore } from '@/stores/rbac'
+import { useUsersStore } from '@/stores/users'
 import { toast } from 'vue-sonner'
-import { Plus, Layers, BookOpen } from '@lucide/vue'
-import { formatCurrency, formatContactDetail } from '@/utils/format'
+import { Plus, Layers, Search } from '@lucide/vue'
 import type { LeadSaveBody } from '@/components/leads/LeadForm.vue'
 import { useLeadPipeline } from '@/composables/useLeadPipeline'
 import { useLeadDrawer } from '@/composables/useLeadDrawer'
-import { useActivityDrawer } from '@/composables/useActivityDrawer'
+import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
 const route = useRoute()
 const rbac = useRBACStore()
+const users = useUsersStore()
 
 const {
   pipelineStore,
@@ -44,6 +44,9 @@ const {
   loadLeads,
   moveStage,
   bulkMoveStage,
+  search,
+  outcomeFilter,
+  assigneeFilter,
 } = useLeadPipeline()
 
 const {
@@ -58,82 +61,75 @@ const {
   deleteLead,
 } = useLeadDrawer(loadLeads)
 
-const {
-  activityDrawerOpen,
-  activityLead,
-  activityRef,
-  openActivities,
-} = useActivityDrawer()
+const { openLeadDrawer } = useLeadDrawerGlobal()
 
-// A close_lost quick reply on an activity logs the reply then moves the lead to
-// its pipeline's closing stage (prefer a "lost"-named stage, else the first
-// closing stage). Reaching a closing stage resolves the deal and cancels open
-// tasks, so the flow "ends there" for the lead.
-async function handleCloseLost() {
-  if (!activityLead.value?.id) return
-  const lead = activityLead.value
-  const pipeline = pipelineStore.pipelines.find((p) => p.id === lead.pipeline_id)
-  const stages = pipeline?.stages || []
-  const closing = stages.filter((s) => s.is_closing)
-  const target =
-    closing.find((s) => /lost/i.test(s.name)) ||
-    closing.find((s) => /closed/i.test(s.name)) ||
-    closing[0]
-  if (!target) {
-    toast.error('No closing stage available in this pipeline')
-    return
-  }
-  if (lead.stage_id === target.id) return
-  await moveStage(lead.id, target.id, lead.stage_id)
-  activityDrawerOpen.value = false
-}
+const totalShown = computed(() => kanbanColumns.value.reduce((n, c) => n + c.leads.length, 0))
 
-// After a lead edit/delete from the activity drawer, the drawer header would
-// keep stale stage/value/contact data. Re-sync from the freshly reloaded
-// kanban columns; close the drawer if the lead no longer exists.
-function syncActivityLead() {
-  const id = activityLead.value?.id
-  if (!id) return
-  const fresh = kanbanColumns.value.flatMap((c) => c.leads).find((l) => l.id === id)
-  if (fresh) activityLead.value = fresh
-  else activityDrawerOpen.value = false
-}
+const outcomeOptions = [
+  { value: '', label: 'All' },
+  { value: 'open', label: 'Open' },
+  { value: 'won', label: 'Won' },
+  { value: 'lost', label: 'Lost' },
+] as const
+
+// Debounce the text search; outcome/assignee filters apply immediately.
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => search.value,
+  () => {
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => loadLeads(), 300)
+  },
+)
+watch([outcomeFilter, assigneeFilter], () => loadLeads())
 
 async function onLeadSaved(body: LeadSaveBody) {
   await handleSave(body)
-  syncActivityLead()
 }
 
 async function onLeadDeleted(leadId: string) {
   await deleteLead(leadId)
-  syncActivityLead()
+}
+
+// Opens the create form prefilled with an existing contact (used by the
+// "New lead for this contact" action on closed leads). Reactive so it also
+// works when already on this page with a new ?contact= query.
+async function handleContactPrefill(contactId?: string) {
+  if (!contactId) return
+  try {
+    const res = await apiClient.get(`/api/contacts/${contactId}`)
+    const c = res.data as { id: string; name: string; email?: string; phone?: string }
+    editingLead.value = null
+    prefillContact.value = {
+      id: c.id,
+      name: c.name,
+      email: c.email,
+      phone: c.phone,
+    }
+    if (pipelineStore.pipelines.length > 0 && pipelineStore.pipelines[0].stages?.length) {
+      initialStageId.value = pipelineStore.pipelines[0].stages[0].id
+    }
+    drawerOpen.value = true
+  } catch {}
 }
 
 onMounted(async () => {
   await pipelineStore.fetchPipelines()
+  users.fetchOptions()
   if (pipelineStore.pipelines.length > 0) {
     selectedPipelineId.value = pipelineStore.pipelines[0].id
     loadLeads()
   }
   const contactIdQuery = route.query.contact as string | undefined
-  const contactId = contactIdQuery || route.query.contact_id as string | undefined
-  if (contactId) {
-    try {
-      const res = await apiClient.get(`/api/contacts/${contactId}`)
-      const c = res.data as { id: string; name: string; email?: string; phone?: string }
-      prefillContact.value = {
-        id: c.id,
-        name: c.name,
-        email: c.email,
-        phone: c.phone,
-      }
-      if (pipelineStore.pipelines.length > 0 && pipelineStore.pipelines[0].stages?.length) {
-        initialStageId.value = pipelineStore.pipelines[0].stages[0].id
-      }
-      drawerOpen.value = true
-    } catch {}
-  }
+  await handleContactPrefill(contactIdQuery || (route.query.contact_id as string | undefined))
 })
+
+watch(
+  () => route.query.contact as string | undefined,
+  (id) => {
+    if (id) handleContactPrefill(id)
+  },
+)
 </script>
 
 <template>
@@ -143,10 +139,44 @@ onMounted(async () => {
         <h1 class="text-2xl font-semibold tracking-tight">Leads</h1>
         <p v-if="selectedPipeline" class="mt-0.5 text-sm text-muted-foreground">
           {{ selectedPipeline.name }}
-          <span class="tabular-nums text-muted-foreground/70">{{ kanbanColumns.reduce((n, c) => n + c.leads.length, 0) }} leads</span>
+          <span class="tabular-nums text-muted-foreground/70">
+            {{ totalShown }}<template v-if="leadsStore.total !== totalShown"> of {{ leadsStore.total }}</template> leads
+          </span>
+          <span v-if="leadsStore.capped" class="ml-1 text-xs text-warning">(cap reached — narrow filters)</span>
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <div class="relative">
+          <Search class="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input v-model="search" placeholder="Search name, phone, email…" class="h-9 w-56 pl-8" />
+        </div>
+
+        <div class="flex items-center gap-0.5 rounded-md border p-0.5" role="group" aria-label="Outcome filter">
+          <button
+            v-for="opt in outcomeOptions"
+            :key="opt.value"
+            type="button"
+            class="rounded px-2.5 py-1 text-xs transition-colors"
+            :class="outcomeFilter === opt.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
+            @click="outcomeFilter = opt.value"
+          >
+            {{ opt.label }}
+          </button>
+        </div>
+
+        <Select v-model="assigneeFilter">
+          <SelectTrigger class="h-9 w-44">
+            <SelectValue placeholder="Assignee" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All assignees</SelectItem>
+            <SelectItem value="none">Unassigned</SelectItem>
+            <SelectItem v-for="u in users.options" :key="u.id" :value="u.id">
+              {{ u.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+
         <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">
           <SelectTrigger class="w-48">
             <SelectValue placeholder="Select pipeline" />
@@ -185,39 +215,6 @@ onMounted(async () => {
             />
           </SheetContent>
         </Sheet>
-
-        <Sheet v-model:open="activityDrawerOpen">
-          <SheetContent class="p-0 sm:max-w-lg">
-            <SheetHeader class="border-b px-6 py-4">
-              <SheetTitle class="truncate">{{ activityLead?.display_name ?? 'Activities' }}</SheetTitle>
-              <div v-if="activityLead" class="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                <Badge v-if="activityLead.stage_name" variant="secondary" class="text-xs">
-                  {{ activityLead.stage_name }}
-                </Badge>
-                <Badge v-if="activityLead.outcome === 'won'" class="text-xs">Won</Badge>
-                <Badge v-if="activityLead.outcome === 'lost'" variant="destructive" class="text-xs">Lost</Badge>
-                <span v-if="activityLead.program_name" class="flex items-center gap-1">
-                  <BookOpen class="size-3" /> {{ activityLead.program_name }}
-                </span>
-                <span v-if="activityLead.value" class="font-semibold text-primary tabular-nums">
-                  {{ formatCurrency(activityLead.value) }}
-                </span>
-                <span v-if="activityLead.contact_phone || activityLead.contact_email">
-                  {{ formatContactDetail(activityLead.contact_phone, activityLead.contact_email) }}
-                </span>
-              </div>
-            </SheetHeader>
-            <div v-if="activityLead" class="flex-1 space-y-4 overflow-y-auto px-6 py-4">
-              <LeadActivityForm
-                v-if="rbac.can('lead:write')"
-                :lead-id="activityLead.id!"
-                @saved="activityRef?.fetchActivities()"
-                @close-lost="handleCloseLost"
-              />
-              <LeadActivity ref="activityRef" :lead-id="activityLead.id!" @close-lost="handleCloseLost" />
-            </div>
-          </SheetContent>
-        </Sheet>
       </div>
     </div>
 
@@ -243,7 +240,7 @@ onMounted(async () => {
       :pipeline-id="selectedPipelineId"
       @create="openCreate"
       @edit="openEdit"
-      @view-activities="openActivities"
+      @view-activities="(lead) => openLeadDrawer(lead.id!, lead)"
       @move-stage="moveStage"
       @bulk-move="bulkMoveStage"
       @stage-added="async () => { await pipelineStore.fetchPipelines(); loadLeads() }"

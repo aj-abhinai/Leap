@@ -257,7 +257,7 @@ func TestOneContactTwoProgramsIntegration(t *testing.T) {
 		}
 	}
 
-	leads, total, err := svc.list("", "", contactID, 1, 20)
+	leads, total, err := svc.list(ListFilters{ContactID: contactID}, 1, 20)
 	if err != nil {
 		t.Fatalf("list leads by contact: %v", err)
 	}
@@ -443,6 +443,106 @@ func TestDeleteActivityScopedToLeadIntegration(t *testing.T) {
 	}
 }
 
+func TestLeadListFiltersIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	// Pipeline with an open stage, a won closing stage, and a lost closing stage.
+	var pipelineID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Filter Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	var openStage, wonStage, lostStage string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Open', 0, 'open') RETURNING id`, pipelineID).Scan(&openStage); err != nil {
+		t.Fatalf("seed open stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 1, true, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
+		t.Fatalf("seed won stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Lost', 2, true, 'lost') RETURNING id`, pipelineID).Scan(&lostStage); err != nil {
+		t.Fatalf("seed lost stage: %v", err)
+	}
+
+	assignee := seedTestUser(t, db, "assignee@example.com")
+
+	// Alice in the open stage, assigned to assignee.
+	alice, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice Example", Phone: "1111111111"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+		AssignedTo: &assignee,
+	}, "")
+	if err != nil {
+		t.Fatalf("create alice: %v", err)
+	}
+	// Bob moved to won.
+	bob, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Bob Builder", Phone: "2222222222"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+	}, "")
+	if err != nil {
+		t.Fatalf("create bob: %v", err)
+	}
+	if _, err := svc.update(bob.ID, UpdateRequest{StageID: &wonStage}, ""); err != nil {
+		t.Fatalf("move bob to won: %v", err)
+	}
+	// Carol moved to lost.
+	carol, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Carol King", Phone: "3333333333"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+	}, "")
+	if err != nil {
+		t.Fatalf("create carol: %v", err)
+	}
+	if _, err := svc.update(carol.ID, UpdateRequest{StageID: &lostStage}, ""); err != nil {
+		t.Fatalf("move carol to lost: %v", err)
+	}
+	_ = alice
+
+	// Search matches the contact name.
+	searched, total, err := svc.list(ListFilters{Search: "builder"}, 1, 50)
+	if err != nil {
+		t.Fatalf("list search: %v", err)
+	}
+	if total != 1 || len(searched) != 1 || searched[0].ID != bob.ID {
+		t.Errorf("search 'builder' = %+v (total %d), want only Bob", searched, total)
+	}
+
+	// Outcome filters by the stage's declared outcome.
+	won, total, err := svc.list(ListFilters{Outcome: "won"}, 1, 50)
+	if err != nil {
+		t.Fatalf("list outcome won: %v", err)
+	}
+	if total != 1 || len(won) != 1 || won[0].ID != bob.ID {
+		t.Errorf("outcome won = %+v (total %d), want only Bob", won, total)
+	}
+	open, total, err := svc.list(ListFilters{Outcome: "open"}, 1, 50)
+	if err != nil {
+		t.Fatalf("list outcome open: %v", err)
+	}
+	if total != 1 || open[0].ID != alice.ID {
+		t.Errorf("outcome open = %+v (total %d), want only Alice", open, total)
+	}
+
+	// Assigned_to filters by user id and 'none' for unassigned.
+	byAssignee, total, err := svc.list(ListFilters{AssignedTo: assignee}, 1, 50)
+	if err != nil {
+		t.Fatalf("list assigned_to: %v", err)
+	}
+	if total != 1 || byAssignee[0].ID != alice.ID {
+		t.Errorf("assigned_to = %+v (total %d), want only Alice", byAssignee, total)
+	}
+	unassigned, total, err := svc.list(ListFilters{AssignedTo: "none"}, 1, 50)
+	if err != nil {
+		t.Fatalf("list unassigned: %v", err)
+	}
+	if total != 2 || len(unassigned) != 2 {
+		t.Errorf("unassigned total = %d (len %d), want 2 (Bob and Carol)", total, len(unassigned))
+	}
+}
+
 func TestStageMoveSetsOutcomeAndHistoryIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -456,7 +556,7 @@ func TestStageMoveSetsOutcomeAndHistoryIntegration(t *testing.T) {
 	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Open', 0, false) RETURNING id`, pipelineID).Scan(&openStage); err != nil {
 		t.Fatalf("seed open stage: %v", err)
 	}
-	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Closed Lost', 1, true) RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Closed Lost', 1, true, 'lost') RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
 		t.Fatalf("seed closed stage: %v", err)
 	}
 
@@ -505,7 +605,7 @@ func TestStageMoveOutOfClosingClearsOutcomeIntegration(t *testing.T) {
 	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Open', 0, false) RETURNING id`, pipelineID).Scan(&openStage); err != nil {
 		t.Fatalf("seed open stage: %v", err)
 	}
-	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Converted', 1, true) RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Converted', 1, true, 'won') RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
 		t.Fatalf("seed closed stage: %v", err)
 	}
 
@@ -566,7 +666,7 @@ func TestActivityEditFieldsIntegration(t *testing.T) {
 	updated, err := svc.updateActivity(lead.ID, activity.ID, "", UpdateActivityRequest{
 		Type:        &newType,
 		Description: &newDesc,
-		RemindAt:    &newRemind,
+		RemindAt:    optTime(&newRemind),
 	})
 	if err != nil {
 		t.Fatalf("update activity: %v", err)
@@ -633,6 +733,55 @@ func TestActivityEditBlankDescriptionAllowedIntegration(t *testing.T) {
 	}
 	if updated.Description != "" {
 		t.Errorf("description = %q, want trimmed empty", updated.Description)
+	}
+}
+
+func TestActivityPatchNullClearsScheduleHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	svc := NewService(db)
+	lead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	sched := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	act, err := svc.createActivity(lead.ID, stageID, "", CreateActivityRequest{
+		Type:        "Call 1",
+		ScheduledAt: &sched,
+	})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	// The edit form clears date/time inputs by sending null; a null must
+	// clear the stored value rather than being merged away by COALESCE.
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/leads/"+lead.ID+"/activities/"+act.ID,
+		strings.NewReader(`{"scheduled_at":null,"remind_at":null}`),
+	)
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", lead.ID)
+	ctx.URLParams.Add("activity_id", act.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+	h.UpdateActivity(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp Activity
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ScheduledAt != nil || resp.RemindAt != nil {
+		t.Errorf("scheduled_at/remind_at = %v/%v, want nil/nil after null patch", resp.ScheduledAt, resp.RemindAt)
 	}
 }
 
@@ -890,7 +1039,7 @@ func TestCreateLeadRejectsClosingStageIntegration(t *testing.T) {
 	}
 	var closingStage string
 	if err := db.QueryRow(
-		`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Closed Lost', 0, true) RETURNING id`,
+		`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Closed Lost', 0, true, 'lost') RETURNING id`,
 		pipelineID,
 	).Scan(&closingStage); err != nil {
 		t.Fatalf("seed closing stage: %v", err)

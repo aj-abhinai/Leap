@@ -8,9 +8,10 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
-import { AlarmClockPlus, X } from '@lucide/vue'
+import { AlarmClockPlus, X, ChevronRight } from '@lucide/vue'
 import { formatReminderText, reminderIcon, snoozePresets } from '@/utils/reminders'
 import { formatDateTime } from '@/utils/time'
+import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
 const props = defineProps<{
   reminder: Reminder
@@ -21,6 +22,8 @@ const emit = defineEmits<{
   (e: 'snooze', minutes: number): void
   (e: 'dismiss'): void
 }>()
+
+const { openLeadDrawer } = useLeadDrawerGlobal()
 
 const reminderText = computed(() => formatReminderText(props.reminder))
 const icon = computed(() => reminderIcon(props.reminder.type))
@@ -43,20 +46,31 @@ const createdLabel = computed(() => formatDateTime(props.reminder.created_at))
             class="size-5 mt-0.5 shrink-0"
             :class="overdue ? 'text-warning' : 'text-muted-foreground'"
           />
-          <div>
-            <div class="flex items-center gap-2">
-              <p class="font-medium text-sm">{{ reminderText }}</p>
-              <Badge v-if="overdue" variant="destructive" class="text-xs">Overdue</Badge>
+            <div>
+              <button
+                type="button"
+                class="group flex items-center gap-1 text-left"
+                :title="reminder.lead_display_name ? 'Open lead' : ''"
+                @click="openLeadDrawer(reminder.lead_id)"
+              >
+                <span v-if="reminder.lead_display_name" class="truncate text-sm font-medium hover:text-primary">
+                  {{ reminder.lead_display_name }}
+                </span>
+                <span v-if="reminder.lead_display_name" class="text-muted-foreground/60 text-xs">·</span>
+                <span class="text-xs text-muted-foreground">{{ reminderText }}</span>
+                <ChevronRight class="size-3 shrink-0 text-muted-foreground/60 group-hover:text-primary" />
+                <Badge v-if="overdue" variant="destructive" class="text-xs">Overdue</Badge>
+              </button>
+              <p v-if="reminder.description" class="text-xs text-muted-foreground mt-0.5">{{ reminder.description }}</p>
+              <p v-if="reminder.stage_name" class="text-xs text-muted-foreground/70 mt-0.5">{{ reminder.stage_name }}</p>
+              <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
+                <span v-if="scheduledLabel">Scheduled: {{ scheduledLabel }}</span>
+                <span v-if="remindLabel" :class="overdue ? 'text-warning' : ''">
+                  Reminder: {{ remindLabel }}
+                </span>
+              </div>
+              <p class="text-xs text-muted-foreground mt-1">Created {{ createdLabel }}</p>
             </div>
-            <p v-if="reminder.description" class="text-xs text-muted-foreground mt-0.5">{{ reminder.description }}</p>
-            <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-              <span v-if="scheduledLabel">Scheduled: {{ scheduledLabel }}</span>
-              <span v-if="remindLabel" :class="overdue ? 'text-warning' : ''">
-                Reminder: {{ remindLabel }}
-              </span>
-            </div>
-            <p class="text-xs text-muted-foreground mt-1">Created {{ createdLabel }}</p>
-          </div>
         </div>
         <div v-if="!reminder.is_done && !reminder.is_cancelled" class="flex items-center gap-1 shrink-0">
           <DropdownMenu v-if="reminder.remind_at">

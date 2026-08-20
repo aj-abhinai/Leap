@@ -425,12 +425,87 @@ func TestUpdateActivityScheduledAtEditableIntegration(t *testing.T) {
 	}
 
 	newTime := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
-	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{ScheduledAt: &newTime})
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{ScheduledAt: optTime(&newTime)})
 	if err != nil {
 		t.Fatalf("update scheduled_at: %v", err)
 	}
 	if updated.ScheduledAt == nil || !updated.ScheduledAt.Equal(newTime) {
 		t.Errorf("scheduled_at = %v, want %v", updated.ScheduledAt, newTime)
+	}
+}
+
+func TestUpdateActivityClearScheduleIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	sched := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	remind := time.Now().Add(49 * time.Hour).UTC().Truncate(time.Second)
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:        "Call 1",
+		ScheduledAt: &sched,
+		RemindAt:    &remind,
+	})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	if act.ScheduledAt == nil || act.RemindAt == nil {
+		t.Fatal("seed activity should carry both schedule and reminder")
+	}
+
+	// Explicit null clears both fields — the edit form sends null when the
+	// date/time inputs are emptied.
+	cleared, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
+		ScheduledAt: optTime(nil),
+		RemindAt:    optTime(nil),
+	})
+	if err != nil {
+		t.Fatalf("clear schedule: %v", err)
+	}
+	if cleared.ScheduledAt != nil || cleared.RemindAt != nil {
+		t.Errorf("after clear scheduled_at/remind_at = %v/%v, want nil/nil", cleared.ScheduledAt, cleared.RemindAt)
+	}
+}
+
+func TestUpdateActivityAbsentScheduleKeepsValueIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	sched := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:        "Call 1",
+		ScheduledAt: &sched,
+	})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	// Updating only the description leaves the schedule untouched (absent key
+	// is "keep"), unlike an explicit null which would clear it.
+	desc := "touched"
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{Description: &desc})
+	if err != nil {
+		t.Fatalf("update description only: %v", err)
+	}
+	if updated.ScheduledAt == nil || !updated.ScheduledAt.Equal(sched) {
+		t.Errorf("scheduled_at = %v, want unchanged %v when field absent", updated.ScheduledAt, sched)
 	}
 }
 

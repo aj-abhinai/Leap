@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { type Lead } from '@/stores/leads'
 import { apiClient } from '@/composables/useApi'
 import { useSettingsStore } from '@/stores/settings'
 import { useRBACStore } from '@/stores/rbac'
+import { useUsersStore } from '@/stores/users'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -64,6 +65,7 @@ export interface LeadSaveBody {
   notes: string
   program_id: string
   lost_reason?: string
+  assigned_to?: string
   contact_id?: string
   new_contact?: { name: string; phone: string; email: string }
 }
@@ -74,7 +76,9 @@ const emit = defineEmits<{
 }>()
 
 const settings = useSettingsStore()
+const users = useUsersStore()
 
+const UNASSIGNED = '__unassigned__'
 const programs = shallowRef<Program[]>([])
 const formProgramId = shallowRef<string>(props.editingLead?.program_id || '__none__')
 const linkedContactId = shallowRef(props.editingLead?.contact_id || props.prefillContact?.id || null)
@@ -82,6 +86,7 @@ const linkedContactName = shallowRef(props.editingLead?.contact_name || props.pr
 const formNickname = shallowRef(props.editingLead?.nickname || '')
 const formNotes = shallowRef(props.editingLead?.notes || '')
 const formLostReason = shallowRef(props.editingLead?.lost_reason || '')
+const formAssignedTo = shallowRef(props.editingLead?.assigned_to || UNASSIGNED)
 const formStageId = shallowRef(props.editingLead?.stage_id || props.initialStageId || props.stages[0]?.id || '')
 const formError = shallowRef('')
 
@@ -116,6 +121,21 @@ const isClosingStage = computed(() => !!selectedStage.value?.is_closing)
 const lossReasonPresets = computed(() => settings.lossReasons.map(t => t.name))
 
 const selectedProgram = computed(() => programs.value.find(p => p.id === formProgramId.value))
+
+// If the lead is assigned to a user who has since been deleted, that id is not
+// in the options; sending it would fail validation (ErrInvalidAssignee). Reset
+// to Unassigned once the option list loads so the form can still be saved.
+// Only reset on a successful fetch: a transient fetch failure empties the
+// options too, and must not silently unassign a valid assignee.
+watch(
+  () => users.options,
+  () => {
+    if (users.error) return
+    if (formAssignedTo.value !== UNASSIGNED && !users.options.some((u) => u.id === formAssignedTo.value)) {
+      formAssignedTo.value = UNASSIGNED
+    }
+  },
+)
 
 const snapshotValue = computed(() => {
   if (props.editingLead?.program_id === formProgramId.value) {
@@ -178,6 +198,7 @@ function chooseExisting() {
 
 onMounted(async () => {
   if (settings.lossReasons.length === 0) settings.fetchTags()
+  users.fetchOptions()
   try {
     const res = await apiClient.get('/api/programs')
     programs.value = res.data
@@ -192,6 +213,7 @@ async function handleSave() {
     stage_id: formStageId.value,
     notes: formNotes.value,
     program_id: programIdToSend(),
+    assigned_to: formAssignedTo.value === UNASSIGNED ? '' : formAssignedTo.value,
   }
   if (isClosingStage.value) {
     body.lost_reason = formLostReason.value.trim()
@@ -378,6 +400,20 @@ function createNewPersonInstead() {
     <div class="space-y-2">
       <Label for="lnotes">Notes</Label>
       <Textarea id="lnotes" v-model="formNotes" placeholder="Notes..." rows="3" />
+    </div>
+    <div class="space-y-2">
+      <Label>Assignee</Label>
+      <Select v-model="formAssignedTo">
+        <SelectTrigger>
+          <SelectValue placeholder="Unassigned" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem :value="UNASSIGNED">Unassigned</SelectItem>
+          <SelectItem v-for="u in users.options" :key="u.id" :value="u.id">
+            {{ u.name }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
     </div>
     <div class="space-y-2">
       <Label>Stage</Label>

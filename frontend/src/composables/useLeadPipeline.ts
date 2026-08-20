@@ -5,10 +5,21 @@ import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
 
+// Module-level singleton state so LeadsPage and the app-level lead drawer
+// share the same pipeline selection and lead store: a stage move made from
+// the drawer refreshes the kanban without extra wiring.
+const selectedPipelineId = shallowRef('')
+const search = shallowRef('')
+const outcomeFilter = shallowRef<'open' | 'won' | 'lost' | ''>('')
+// '__all__' = no assignee filter; 'none' = unassigned; otherwise a user id.
+const assigneeFilter = shallowRef('__all__')
+// Remembers the last query that hit the fetch-all cap so the warning toast
+// appears once per distinct query, not on every loadLeads call.
+let lastCappedQuery = ''
+
 export function useLeadPipeline() {
   const pipelineStore = usePipelineStore()
   const leadsStore = useLeadsStore()
-  const selectedPipelineId = shallowRef('')
 
   const selectedPipeline = computed(() =>
     pipelineStore.pipelines.find((p) => p.id === selectedPipelineId.value)
@@ -25,7 +36,19 @@ export function useLeadPipeline() {
   async function loadLeads() {
     if (!selectedPipelineId.value) return
     try {
-      await leadsStore.fetchLeads(selectedPipelineId.value, '', 1, 200)
+      await leadsStore.fetchAllLeads({
+        pipelineId: selectedPipelineId.value,
+        q: search.value.trim() || undefined,
+        outcome: outcomeFilter.value || undefined,
+        assignedTo: assigneeFilter.value === '__all__' ? undefined : assigneeFilter.value || undefined,
+      })
+      // Warn once per distinct capped query so repeated calls (debounced
+      // keystrokes, filter toggles) don't spam the toast.
+      const sig = `${selectedPipelineId.value}|${search.value}|${outcomeFilter.value}|${assigneeFilter.value}`
+      if (leadsStore.capped && lastCappedQuery !== sig) {
+        lastCappedQuery = sig
+        toast.warning('Showing first 2000 leads — narrow the search or filters')
+      }
     } catch {
       toast.error('Failed to load leads')
     }
@@ -81,6 +104,9 @@ export function useLeadPipeline() {
     selectedPipelineId,
     selectedPipeline,
     kanbanColumns,
+    search,
+    outcomeFilter,
+    assigneeFilter,
     loadLeads,
     moveStage,
     bulkMoveStage,

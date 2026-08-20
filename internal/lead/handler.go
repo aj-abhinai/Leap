@@ -35,11 +35,19 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if perPage > 200 {
 		perPage = 200
 	}
-	pipelineID := r.URL.Query().Get("pipeline_id")
-	stageID := r.URL.Query().Get("stage_id")
-	contactID := r.URL.Query().Get("contact_id")
-	for name, value := range map[string]string{"pipeline_id": pipelineID, "stage_id": stageID, "contact_id": contactID} {
-		if value != "" && !util.IsUUID(value) {
+	f := ListFilters{
+		PipelineID: r.URL.Query().Get("pipeline_id"),
+		StageID:    r.URL.Query().Get("stage_id"),
+		ContactID:  r.URL.Query().Get("contact_id"),
+		Search:     r.URL.Query().Get("q"),
+		Outcome:    r.URL.Query().Get("outcome"),
+		AssignedTo: r.URL.Query().Get("assigned_to"),
+	}
+	for name, value := range map[string]string{
+		"pipeline_id": f.PipelineID, "stage_id": f.StageID,
+		"contact_id": f.ContactID, "assigned_to": f.AssignedTo,
+	} {
+		if value != "" && value != "none" && !util.IsUUID(value) {
 			respond.JSON(
 				w,
 				http.StatusBadRequest,
@@ -50,8 +58,20 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	switch f.Outcome {
+	case "", "open", "won", "lost":
+	default:
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "outcome must be open, won, or lost"},
+			nil,
+		)
+		return
+	}
 
-	leads, total, err := h.svc.list(pipelineID, stageID, contactID, page, perPage)
+	leads, total, err := h.svc.list(f, page, perPage)
 	if err != nil {
 		respond.ServerError(w, err)
 		return
@@ -98,6 +118,22 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 	default:
 		respond.ServerError(w, err)
 	}
+}
+
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	l, err := h.svc.get(id)
+	if err != nil {
+		respondLeadMutationError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		l,
+		nil,
+		nil,
+	)
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {

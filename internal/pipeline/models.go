@@ -18,8 +18,11 @@ type Stage struct {
 	Order      int       `json:"order"`
 	Color      string    `json:"color,omitempty"`
 	IsClosing  bool      `json:"is_closing"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	// Outcome declares what reaching the stage means for a lead: 'open'
+	// (in play), 'won', or 'lost'. Closing stages must be won or lost.
+	Outcome   string    `json:"outcome"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type CreatePipelineRequest struct {
@@ -37,6 +40,7 @@ type CreateStageRequest struct {
 	Order     int    `json:"order"`
 	Color     string `json:"color,omitempty"`
 	IsClosing bool   `json:"is_closing,omitempty"`
+	Outcome   string `json:"outcome,omitempty"`
 }
 
 type UpdateStageRequest struct {
@@ -44,4 +48,5 @@ type UpdateStageRequest struct {
 	Order     *int    `json:"order,omitempty"`
 	Color     *string `json:"color,omitempty"`
 	IsClosing *bool   `json:"is_closing,omitempty"`
+	Outcome   *string `json:"outcome,omitempty"`
 }

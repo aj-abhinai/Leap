@@ -789,6 +789,28 @@ func (s *Service) listUsers() ([]UserInfo, error) {
 	return users, nil
 }
 
+// listAssigneeOptions returns the id+name of every live user for lead
+// assignment pickers. It exposes no email/role/avatar so a lead:read caller
+// can power the dropdown without admin user details.
+func (s *Service) listAssigneeOptions() ([]AssigneeOption, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name FROM users WHERE deleted_at IS NULL ORDER BY name`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list assignee options: %w", err)
+	}
+	defer rows.Close()
+	options := []AssigneeOption{}
+	for rows.Next() {
+		var o AssigneeOption
+		if err := rows.Scan(&o.ID, &o.Name); err != nil {
+			return nil, fmt.Errorf("list assignee options: scan: %w", err)
+		}
+		options = append(options, o)
+	}
+	return options, rows.Err()
+}
+
 func (s *Service) createUser(name, email, password string, actorID string) (*UserInfo, error) {
 	hash, err := auth.HashPassword(password, 12)
 	if err != nil {

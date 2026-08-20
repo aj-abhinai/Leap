@@ -7,9 +7,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { BellOff, X } from '@lucide/vue'
 import { formatReminderText, formatReminderTime, reminderIcon } from '@/utils/reminders'
 import { timeAgo } from '@/utils/time'
+import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
 const emit = defineEmits<{ close: [] }>()
 const store = useRemindersStore()
+const { openLeadDrawer } = useLeadDrawerGlobal()
 
 // Precompute the per-row display strings once so they are not re-derived on
 // every re-render (formatReminderTime was previously called twice per row).
@@ -46,11 +48,15 @@ const openRows = computed(() =>
           v-for="reminder in openRows"
           :key="reminder.id"
           class="group relative px-3 py-2.5 hover:bg-muted/50 cursor-pointer transition-colors"
+          @click="openLeadDrawer(reminder.lead_id)"
         >
           <div class="flex gap-2.5">
             <component :is="reminderIcon(reminder.type)" class="flex-shrink-0 h-4 w-4 mt-0.5 text-muted-foreground" />
             <div class="flex-1 min-w-0">
-              <p class="text-xs font-medium">{{ reminder.reminderText }}</p>
+              <p class="text-xs font-medium truncate">{{ reminder.reminderText }}</p>
+              <p v-if="reminder.lead_display_name" class="text-xs text-muted-foreground mt-0.5">
+                {{ reminder.lead_display_name }}
+              </p>
               <p v-if="reminder.reminderTime" class="text-xs text-muted-foreground mt-0.5">{{ reminder.reminderTime }}</p>
               <p class="text-xs text-muted-foreground/70 mt-0.5">{{ timeAgo(reminder.created_at) }}</p>
             </div>

@@ -36,6 +36,14 @@ func respondError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "CONFLICT", Message: "Delete the leads using this pipeline or stage first"},
 			nil,
 		)
+	case errors.Is(err, ErrInvalidStageOutcome):
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+			nil,
+		)
 	default:
 		respond.ServerError(w, err)
 	}

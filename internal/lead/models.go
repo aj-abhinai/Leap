@@ -1,6 +1,9 @@
 package lead
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Lead struct {
 	ID           string     `json:"id"`
@@ -63,6 +66,19 @@ type UpdateRequest struct {
 	AssignedTo *string  `json:"assigned_to,omitempty"`
 }
 
+// ListFilters drives the lead list (GET /api/leads). Search matches the lead
+// nickname, contact name, primary phone, primary email, or program name;
+// Outcome filters on the linked stage's outcome ('open' | 'won' | 'lost');
+// AssignedTo filters on the assignee (a user id or "none" for unassigned).
+type ListFilters struct {
+	PipelineID string
+	StageID    string
+	ContactID  string
+	Search     string
+	Outcome    string
+	AssignedTo string
+}
+
 type Activity struct {
 	ID             string     `json:"id"`
 	LeadID         string     `json:"lead_id"`
@@ -103,17 +119,52 @@ type CreateActivityRequest struct {
 }
 
 type UpdateActivityRequest struct {
-	QuickReplyID *string    `json:"quick_reply_id,omitempty"`
-	IsDone       *bool      `json:"is_done,omitempty"`
-	Type         *string    `json:"type,omitempty"`
-	Description  *string    `json:"description,omitempty"`
-	ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
-	RemindAt     *time.Time `json:"remind_at,omitempty"`
-	OccurredAt   *time.Time `json:"occurred_at,omitempty"`
-	IsCancelled  *bool      `json:"is_cancelled,omitempty"`
+	QuickReplyID *string `json:"quick_reply_id,omitempty"`
+	IsDone       *bool   `json:"is_done,omitempty"`
+	Type         *string `json:"type,omitempty"`
+	Description  *string `json:"description,omitempty"`
+	// ScheduledAt and RemindAt use optionalTime so an update can distinguish
+	// "not sent" (keep the current value) from an explicit null (clear it).
+	// A plain *time.Time cannot tell the two apart — both decode to nil — which
+	// made schedules impossible to clear via the edit form.
+	ScheduledAt  optionalTime `json:"scheduled_at,omitempty"`
+	RemindAt     optionalTime `json:"remind_at,omitempty"`
+	OccurredAt   *time.Time   `json:"occurred_at,omitempty"`
+	IsCancelled  *bool        `json:"is_cancelled,omitempty"`
 	// RescheduleAt, when set with is_done=true, logs the completed attempt and
 	// auto-creates the next occurrence of the same type at this time.
 	RescheduleAt *time.Time `json:"reschedule_at,omitempty"`
+}
+
+// optionalTime decodes a nullable timestamp while recording whether the field
+// was present at all. Set is true when the key appears in the JSON body —
+// either with a value (Value non-nil) or as null (Value nil). An absent key
+// leaves Set false and Value nil.
+type optionalTime struct {
+	Set   bool
+	Value *time.Time
+}
+
+func (o *optionalTime) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		return nil
+	}
+	var t time.Time
+	if err := json.Unmarshal(b, &t); err != nil {
+		return err
+	}
+	o.Value = &t
+	return nil
+}
+
+// optTime builds an optionalTime with an explicit value (helper for tests and
+// in-process callers that construct request structs directly).
+func optTime(t *time.Time) optionalTime {
+	if t == nil {
+		return optionalTime{Set: true}
+	}
+	return optionalTime{Set: true, Value: t}
 }
 
 type SnoozeRequest struct {

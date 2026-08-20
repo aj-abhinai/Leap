@@ -4,6 +4,14 @@ import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ArrowDown, ArrowUp, Check, Layers, Plus, Trash2, Pencil, X } from '@lucide/vue'
@@ -13,6 +21,8 @@ interface Stage {
   id: string
   name: string
   order: number
+  is_closing?: boolean
+  outcome?: string
 }
 
 interface Pipeline {
@@ -30,6 +40,11 @@ const creatingPipeline = shallowRef(false)
 const newStageNames = ref<Record<string, string>>({})
 const editingStageId = shallowRef('')
 const editingStageName = shallowRef('')
+
+// Remember the last won/lost choice per stage: unchecking "Closing" forces the
+// stage to 'open' server-side, so without this the win/loss would be lost and
+// re-checking would silently default to 'lost'.
+const rememberedOutcome = shallowRef<Record<string, string>>({})
 
 onMounted(() => loadPipelines())
 
@@ -129,6 +144,39 @@ async function deleteStage(stageId: string) {
     toast.error(errorMessage(e, 'Failed to delete stage'))
   }
 }
+
+// Closing stages resolve the deal (won/lost) and cancel open tasks; non-closing
+// stages stay 'open'. Outcome is chosen explicitly so close-lost never has to
+// guess by stage name.
+async function setClosing(stage: Stage, isClosing: boolean) {
+  const current = stage.outcome === 'won' || stage.outcome === 'lost' ? stage.outcome : ''
+  try {
+    if (isClosing) {
+      const outcome = rememberedOutcome.value[stage.id] || current || 'lost'
+      delete rememberedOutcome.value[stage.id]
+      await apiClient.patch(`/api/stages/${stage.id}`, { is_closing: true, outcome })
+      toast.success('Stage marked as closing')
+    } else {
+      if (current) rememberedOutcome.value[stage.id] = current
+      await apiClient.patch(`/api/stages/${stage.id}`, { is_closing: false, outcome: 'open' })
+      toast.success('Stage is now open')
+    }
+    loadPipelines()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to update stage'))
+  }
+}
+
+async function setStageOutcome(stage: Stage, outcome: string) {
+  delete rememberedOutcome.value[stage.id]
+  try {
+    await apiClient.patch(`/api/stages/${stage.id}`, { outcome })
+    toast.success('Stage outcome updated')
+    loadPipelines()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to update outcome'))
+  }
+}
 </script>
 
 <template>
@@ -183,6 +231,28 @@ async function deleteStage(stageId: string) {
             <Badge variant="secondary" class="text-xs">
               {{ s.name }}
             </Badge>
+            <label class="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground" :title="`Mark ${s.name} as a closing stage`">
+              <Checkbox
+                :model-value="!!s.is_closing"
+                class="size-3.5"
+                :aria-label="`Mark ${s.name} as closing`"
+                @update:model-value="(v) => setClosing(s, v === true)"
+              />
+              Closing
+            </label>
+            <Select
+              v-if="s.is_closing"
+              :model-value="s.outcome === 'won' ? 'won' : 'lost'"
+              @update:model-value="(v) => setStageOutcome(s, String(v ?? 'lost'))"
+            >
+              <SelectTrigger class="h-7 w-24 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="lost">Lost</SelectItem>
+                <SelectItem value="won">Won</SelectItem>
+              </SelectContent>
+            </Select>
             <div class="ml-auto flex items-center gap-1">
               <template v-if="editingStageId === s.id">
                 <Input

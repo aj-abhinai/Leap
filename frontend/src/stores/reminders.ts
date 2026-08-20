@@ -7,6 +7,8 @@ import { errorMessage } from '@/utils/errors'
 export interface Reminder {
   id: string
   lead_id: string
+  contact_id?: string
+  lead_display_name?: string
   stage_id: string
   stage_name?: string
   user_id?: string

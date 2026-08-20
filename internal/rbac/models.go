@@ -40,3 +40,11 @@ type SetUserRoleRequest struct {
 type SetRolePermissionsRequest struct {
 	PermissionIDs []string `json:"permission_ids"`
 }
+
+// AssigneeOption is the minimal user shape a lead assignee dropdown needs:
+// id + name, deliberately excluding email/role/avatar so a lead:read caller
+// can power the picker without admin user details.
+type AssigneeOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}

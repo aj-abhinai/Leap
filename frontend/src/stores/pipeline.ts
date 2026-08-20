@@ -9,6 +9,7 @@ export interface Stage {
   order: number
   color?: string
   is_closing: boolean
+  outcome?: 'open' | 'won' | 'lost'
 }
 
 export interface Pipeline {

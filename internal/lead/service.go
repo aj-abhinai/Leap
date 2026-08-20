@@ -47,29 +47,74 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) list(pipelineID, stageID, contactID string, page, perPage int) ([]Lead, int, error) {
+func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 	var total int
 	baseWhere := "WHERE l.deleted_at IS NULL"
 	args := []any{}
 	argIdx := 1
 
-	if pipelineID != "" {
+	if f.PipelineID != "" {
 		baseWhere += fmt.Sprintf(" AND l.pipeline_id = $%d", argIdx)
-		args = append(args, pipelineID)
+		args = append(args, f.PipelineID)
 		argIdx++
 	}
-	if stageID != "" {
+	if f.StageID != "" {
 		baseWhere += fmt.Sprintf(" AND l.stage_id = $%d", argIdx)
-		args = append(args, stageID)
+		args = append(args, f.StageID)
 		argIdx++
 	}
-	if contactID != "" {
+	if f.ContactID != "" {
 		baseWhere += fmt.Sprintf(" AND l.contact_id = $%d", argIdx)
-		args = append(args, contactID)
+		args = append(args, f.ContactID)
+		argIdx++
+	}
+	if f.Search != "" {
+		// Escape ILIKE wildcards so a literal '%' or '_' in the query is
+		// matched literally instead of matching everything.
+		escape := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+		pat := "%" + escape.Replace(f.Search) + "%"
+		baseWhere += fmt.Sprintf(
+			" AND (COALESCE(l.nickname, '') ILIKE $%d ESCAPE '\\' OR c.name ILIKE $%d ESCAPE '\\' OR pcp.value ILIKE $%d ESCAPE '\\' OR pce.value ILIKE $%d ESCAPE '\\' OR COALESCE(p.name, '') ILIKE $%d ESCAPE '\\')",
+			argIdx, argIdx, argIdx, argIdx, argIdx,
+		)
+		args = append(args, pat)
+		argIdx++
+	}
+	switch f.Outcome {
+	case "open", "won", "lost":
+		baseWhere += fmt.Sprintf(" AND ls.outcome = $%d", argIdx)
+		args = append(args, f.Outcome)
+		argIdx++
+	}
+	switch f.AssignedTo {
+	case "none":
+		baseWhere += " AND l.assigned_to IS NULL"
+	case "":
+		// no filter
+	default:
+		baseWhere += fmt.Sprintf(" AND l.assigned_to = $%d", argIdx)
+		args = append(args, f.AssignedTo)
 		argIdx++
 	}
 
-	countQuery := "SELECT COUNT(*) FROM leads l " + baseWhere
+	// The count needs the same joins the where clauses reference (contacts for
+	// search names, stage for outcome). The phone/email laterals are only
+	// referenced by the search clause, so add them just for searches to keep the
+	// near-universal no-search count from paying for per-row correlated lookups.
+	countFrom := `FROM leads l
+		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
+		LEFT JOIN contacts c ON l.contact_id = c.id
+		LEFT JOIN programs p ON l.program_id = p.id`
+	if f.Search != "" {
+		countFrom += `
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+		) pcp ON true
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+		) pce ON true`
+	}
+	countQuery := "SELECT COUNT(*)" + countFrom + baseWhere
 	err := s.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count leads: %w", err)
@@ -464,8 +509,10 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	}
 
 	// Resolve the outcome when the lead moves into or out of a closing stage.
-	// outcome is set by the system on stage move (won/lost); lost_reason may be
-	// supplied by the caller when the lead is marked lost.
+	// outcome is set from the target stage's declared outcome (ADR 019
+	// amendment), so 'won' and 'lost' come from stage metadata rather than
+	// matching stage names by text; lost_reason may be supplied by the caller
+	// when the lead is marked lost.
 	var outcome *string
 	var lostReason *string
 	var targetStage *stageInfo
@@ -476,12 +523,14 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		}
 		targetStage = info
 		if info.IsClosing {
-			out := "lost"
-			if strings.Contains(strings.ToLower(info.Name), "won") || strings.EqualFold(info.Name, "Converted") {
-				out = "won"
+			// The stage declares its outcome ('won' or 'lost'); both are valid.
+			// The pipeline package's stageOutcome enforces that closing stages
+			// are never 'open', but guard anyway for malformed data.
+			if info.Outcome == "" || info.Outcome == "open" {
+				info.Outcome = "lost"
 			}
-			outcome = &out
-			if req.LostReason != nil && out == "lost" {
+			outcome = &info.Outcome
+			if req.LostReason != nil && info.Outcome == "lost" {
 				lostReason = req.LostReason
 			}
 		} else {
@@ -712,16 +761,20 @@ type stageInfo struct {
 	ID        string
 	Name      string
 	IsClosing bool
+	// Outcome is the stage's declared outcome ('open' | 'won' | 'lost'),
+	// authoritative for lead outcome resolution (ADR 019 amendment).
+	Outcome string
 }
 
-// stageInfoTx loads a stage's name and closing flag inside a transaction so
-// the outcome resolution and history insert see a consistent view.
+// stageInfoTx loads a stage's name, closing flag, and outcome inside a
+// transaction so the outcome resolution and history insert see a consistent
+// view.
 func (s *Service) stageInfoTx(tx *sql.Tx, stageID string) (*stageInfo, error) {
 	var info stageInfo
 	err := tx.QueryRow(
-		`SELECT id, name, is_closing FROM lead_stages WHERE id = $1`,
+		`SELECT id, name, is_closing, outcome FROM lead_stages WHERE id = $1`,
 		stageID,
-	).Scan(&info.ID, &info.Name, &info.IsClosing)
+	).Scan(&info.ID, &info.Name, &info.IsClosing, &info.Outcome)
 	if err != nil {
 		return nil, fmt.Errorf("load stage info: %w", err)
 	}

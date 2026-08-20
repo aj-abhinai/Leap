@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { type Lead } from '@/stores/leads'
 import { type Stage } from '@/stores/pipeline'
 import { useRBACStore } from '@/stores/rbac'
+import { useUsersStore } from '@/stores/users'
 import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import draggable from 'vuedraggable'
@@ -36,12 +37,14 @@ import {
   GripVertical,
   SlidersHorizontal,
   Check,
+  User,
 } from '@lucide/vue'
 import { formatCurrency, formatContactDetail } from '@/utils/format'
 import { timeAgo } from '@/utils/time'
 import { errorMessage } from '@/utils/errors'
 
 const rbac = useRBACStore()
+const users = useUsersStore()
 
 const props = defineProps<{
   columns: (Stage & { leads: Lead[] })[]
@@ -69,7 +72,7 @@ const MAX_WIDTH = 480
 
 const collapsed = shallowRef<Record<string, boolean>>(loadJson(collapsedKey(props.pipelineId), {}))
 const columnWidths = shallowRef<Record<string, number>>(loadJson(widthsKey(props.pipelineId), {}))
-const cardFields = shallowRef<string[]>(loadJson(fieldsKey(props.pipelineId), ['contact', 'program', 'outcome', 'value', 'next_task', 'last_touch']))
+const cardFields = shallowRef<string[]>(loadJson(fieldsKey(props.pipelineId), ['contact', 'program', 'assignee', 'outcome', 'value', 'next_task', 'last_touch']))
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -88,6 +91,14 @@ watch(collapsed, (v) => saveJson(collapsedKey(props.pipelineId), v), { deep: tru
 watch(columnWidths, (v) => saveJson(widthsKey(props.pipelineId), v), { deep: true })
 watch(cardFields, (v) => saveJson(fieldsKey(props.pipelineId), v), { deep: true })
 
+onMounted(() => users.fetchOptions())
+
+// Resolve the assignee's name from the users store; falls back to a neutral
+// label when the id is unknown (e.g. a deleted user).
+function assigneeName(assignedTo: string): string {
+  return users.options.find((u) => u.id === assignedTo)?.name || 'Assigned'
+}
+
 // Reload per-pipeline prefs when the pipeline selector changes; without this,
 // switching pipelines would render with the previous pipeline's saved prefs
 // and then overwrite the new pipeline's stored values with stale ones.
@@ -96,7 +107,7 @@ watch(
   (id) => {
     collapsed.value = loadJson(collapsedKey(id), {})
     columnWidths.value = loadJson(widthsKey(id), {})
-    cardFields.value = loadJson(fieldsKey(id), ['contact', 'program', 'outcome', 'value', 'next_task', 'last_touch'])
+    cardFields.value = loadJson(fieldsKey(id), ['contact', 'program', 'assignee', 'outcome', 'value', 'next_task', 'last_touch'])
     selectedCardFields.value = new Set(cardFields.value)
     clearSelection()
     bulkTargetStageId.value = ''
@@ -169,6 +180,7 @@ async function addStage() {
 const CARD_FIELD_OPTIONS = [
   { key: 'contact', label: 'Contact detail' },
   { key: 'program', label: 'Program' },
+  { key: 'assignee', label: 'Assignee' },
   { key: 'outcome', label: 'Outcome / Lost reason' },
   { key: 'value', label: 'Value' },
   { key: 'next_task', label: 'Next task' },
@@ -409,6 +421,10 @@ function showField(key: string): boolean {
                 <div v-if="showField('program') && lead.program_name" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                   <BookOpen class="size-3" />
                   <span class="truncate">{{ lead.program_name }}</span>
+                </div>
+                <div v-if="showField('assignee') && lead.assigned_to" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                  <User class="size-3" />
+                  <span class="truncate">{{ assigneeName(lead.assigned_to) }}</span>
                 </div>
                 <div v-if="showField('outcome') && lead.outcome" class="mt-1.5 flex items-center gap-1.5">
                   <Badge

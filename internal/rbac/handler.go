@@ -309,6 +309,24 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+// ListAssigneeOptions serves the minimal id+name user list for lead assignee
+// dropdowns. Gated on lead:read (not settings:manage) so sales users can
+// assign without seeing admin user details.
+func (h *Handler) ListAssigneeOptions(w http.ResponseWriter, r *http.Request) {
+	options, err := h.svc.listAssigneeOptions()
+	if err != nil {
+		respond.ServerError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		options,
+		nil,
+		nil,
+	)
+}
+
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name     string `json:"name"`

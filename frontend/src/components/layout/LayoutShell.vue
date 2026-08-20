@@ -2,6 +2,7 @@
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import AppSidebar from './AppSidebar.vue'
 import SiteHeader from './SiteHeader.vue'
+import LeadActivityDrawer from '@/components/leads/LeadActivityDrawer.vue'
 </script>
 
 <template>
@@ -22,5 +23,7 @@ import SiteHeader from './SiteHeader.vue'
         </RouterView>
       </div>
     </SidebarInset>
+    <!-- App-level lead drawer: opens over any page with full lead context. -->
+    <LeadActivityDrawer />
   </SidebarProvider>
 </template>

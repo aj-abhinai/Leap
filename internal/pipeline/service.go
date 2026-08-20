@@ -15,7 +15,36 @@ var (
 	// ErrInUse marks deletions blocked because leads or activities still
 	// reference the pipeline or stage.
 	ErrInUse = errors.New("resource is in use and cannot be deleted")
+	// ErrInvalidStageOutcome marks a requested outcome that a closing stage
+	// cannot take; it is client-input validation, surfaced as a 400.
+	ErrInvalidStageOutcome = errors.New("closing stages must have outcome 'won' or 'lost'")
 )
+
+// Stage outcome vocabulary (ADR 019 amendment). A stage's outcome is what
+// reaching it means for a lead: open (in play), won, or lost.
+const (
+	OutcomeOpen = "open"
+	OutcomeWon  = "won"
+	OutcomeLost = "lost"
+)
+
+// stageOutcome resolves a stage's outcome from its closing flag and the
+// requested value. Non-closing stages are always 'open'; closing stages must
+// be 'won' or 'lost' (defaulting to 'lost' when not specified). An explicit
+// 'open' on a closing stage is rejected — it is not a valid win/loss.
+func stageOutcome(isClosing bool, outcome string) (string, error) {
+	if !isClosing {
+		return OutcomeOpen, nil
+	}
+	switch outcome {
+	case "":
+		return OutcomeLost, nil
+	case OutcomeWon, OutcomeLost:
+		return outcome, nil
+	default:
+		return "", ErrInvalidStageOutcome
+	}
+}
 
 type Service struct {
 	db *sql.DB
@@ -49,7 +78,7 @@ func (s *Service) list() ([]Pipeline, error) {
 }
 
 func (s *Service) listAllStages(pipelineIDs []string) (map[string][]Stage, error) {
-	query := `SELECT id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, created_at, updated_at
+	query := `SELECT id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, outcome, created_at, updated_at
 		FROM lead_stages
 		WHERE pipeline_id = ANY($1)
 		ORDER BY "order"`
@@ -63,7 +92,7 @@ func (s *Service) listAllStages(pipelineIDs []string) (map[string][]Stage, error
 	for rows.Next() {
 		var st Stage
 		if err := rows.Scan(
-			&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.CreatedAt, &st.UpdatedAt,
+			&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.Outcome, &st.CreatedAt, &st.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("list all stages: scan: %w", err)
 		}
@@ -141,16 +170,21 @@ func (s *Service) deletePipeline(id string) error {
 }
 
 func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage, error) {
+	outcome, err := stageOutcome(req.IsClosing, req.Outcome)
+	if err != nil {
+		return nil, err
+	}
 	var st Stage
-	err := s.db.QueryRow(
-		`INSERT INTO lead_stages (pipeline_id, name, "order", color, is_closing) VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, created_at, updated_at`,
+	err = s.db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order", color, is_closing, outcome) VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, outcome, created_at, updated_at`,
 		pipelineID,
 		req.Name,
 		req.Order,
 		util.NullStr(req.Color),
 		req.IsClosing,
-	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.CreatedAt, &st.UpdatedAt)
+		outcome,
+	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.Outcome, &st.CreatedAt, &st.UpdatedAt)
 	if err != nil {
 		if respond.IsForeignKeyViolation(err) {
 			return nil, ErrNotFound
@@ -161,22 +195,58 @@ func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage
 }
 
 func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, error) {
+	// Resolve the resulting closing flag and outcome together: only one may be
+	// present in a partial update, and the outcome rules depend on the final
+	// closing state (non-closing is always 'open', closing must be won/lost).
+	curIsClosing := false
+	var curOutcome string
+	if err := s.db.QueryRow(
+		`SELECT is_closing, outcome FROM lead_stages WHERE id = $1`,
+		stageID,
+	).Scan(&curIsClosing, &curOutcome); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("load stage for update: %w", err)
+	}
+	isClosing := curIsClosing
+	if req.IsClosing != nil {
+		isClosing = *req.IsClosing
+	}
+	outcomeVal := curOutcome
+	if req.Outcome != nil {
+		outcomeVal = *req.Outcome
+	}
+	// Promoting a previously-open stage to closing without an explicit win/loss
+	// still carries outcome 'open' from the old row; treat that as unspecified
+	// so it defaults to 'lost'. An explicit 'open' on an already-closing stage
+	// is rejected by stageOutcome.
+	if isClosing && outcomeVal == OutcomeOpen && !curIsClosing {
+		outcomeVal = ""
+	}
+	outcome, err := stageOutcome(isClosing, outcomeVal)
+	if err != nil {
+		return nil, err
+	}
+
 	var st Stage
-	err := s.db.QueryRow(
+	err = s.db.QueryRow(
 		`UPDATE lead_stages SET
 			name = CASE WHEN NULLIF($2::text, '') IS NOT NULL THEN $2 ELSE name END,
 			"order" = COALESCE($3::integer, "order"),
 			color = CASE WHEN $4::text IS NOT NULL THEN NULLIF($4, '') ELSE color END,
-			is_closing = COALESCE($5::boolean, is_closing),
+			is_closing = $5,
+			outcome = $6,
 			updated_at = now()
 		WHERE id = $1
-		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, created_at, updated_at`,
+		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, outcome, created_at, updated_at`,
 		stageID,
 		req.Name,
 		req.Order,
 		req.Color,
-		req.IsClosing,
-	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.CreatedAt, &st.UpdatedAt)
+		isClosing,
+		outcome,
+	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.Outcome, &st.CreatedAt, &st.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

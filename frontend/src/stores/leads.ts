@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { ref } from 'vue'
 import { apiClient } from '@/composables/useApi'
 import { usePagination, totalOf } from '@/composables/usePagination'
 
@@ -28,18 +29,64 @@ export interface Lead {
   last_touch_at?: string
 }
 
-export const useLeadsStore = defineStore('leads', () => {
-  const { items: leads, total, loading, fetch: fetchPage, setTotal } = usePagination<Lead>()
+export interface LeadListQuery {
+  pipelineId?: string
+  stageId?: string
+  q?: string
+  outcome?: 'open' | 'won' | 'lost'
+  assignedTo?: string
+}
 
-  async function fetchLeads(pipelineId = '', stageId = '', page = 1, perPage = 50) {
-    await fetchPage(async (p, pp) => {
-      const params = new URLSearchParams()
-      params.set('page', String(p))
-      params.set('per_page', String(pp))
-      if (pipelineId) params.set('pipeline_id', pipelineId)
-      if (stageId) params.set('stage_id', stageId)
-      return apiClient.get(`/api/leads?${params}`)
-    }, page, perPage)
+export const useLeadsStore = defineStore('leads', () => {
+  const { items: leads, total, loading, setTotal } = usePagination<Lead>()
+  // capped is true when fetchAllLeads stopped early at the safety cap instead
+  // of loading the full result set.
+  const capped = ref(false)
+
+  // fetchAllLeads loads every matching lead across pages (200/page) so the
+  // kanban never silently drops leads beyond the first page. It stops at a
+  // safety cap (MAX_PAGES) and flags `capped` when the result set is larger.
+  const PAGE_SIZE = 200
+  const MAX_PAGES = 10
+  // fetchSeq discards stale responses: overlapping calls (debounced search,
+  // filter changes, pipeline switches) must not let an older request overwrite
+  // a newer one.
+  let fetchSeq = 0
+  async function fetchAllLeads(f: LeadListQuery = {}) {
+    const seq = ++fetchSeq
+    const all: Lead[] = []
+    let page = 1
+    let serverTotal = 0
+    capped.value = false
+    loading.value = true
+    try {
+      for (;;) {
+        const params = new URLSearchParams()
+        params.set('page', String(page))
+        params.set('per_page', String(PAGE_SIZE))
+        if (f.pipelineId) params.set('pipeline_id', f.pipelineId)
+        if (f.stageId) params.set('stage_id', f.stageId)
+        if (f.q) params.set('q', f.q)
+        if (f.outcome) params.set('outcome', f.outcome)
+        if (f.assignedTo) params.set('assigned_to', f.assignedTo)
+        const res = await apiClient.get<Lead[]>(`/api/leads?${params}`)
+        if (seq !== fetchSeq) return
+        const items = res.data ?? []
+        serverTotal = res.meta?.total ?? 0
+        all.push(...items)
+        if (items.length < PAGE_SIZE || all.length >= serverTotal) break
+        if (page >= MAX_PAGES) {
+          capped.value = true
+          break
+        }
+        page++
+      }
+      if (seq !== fetchSeq) return
+      leads.value = all
+      total.value = serverTotal
+    } finally {
+      if (seq === fetchSeq) loading.value = false
+    }
   }
 
   async function fetchTotal() {
@@ -51,5 +98,5 @@ export const useLeadsStore = defineStore('leads', () => {
     } catch {}
   }
 
-  return { leads, total, loading, fetchLeads, fetchTotal }
+  return { leads, total, loading, capped, fetchAllLeads, fetchTotal }
 })

@@ -7,6 +7,7 @@ import { usePipelineStore } from '@/stores/pipeline'
 import { useActivitiesStore } from '@/stores/activities'
 import { useRemindersStore } from '@/stores/reminders'
 import { useRBACStore } from '@/stores/rbac'
+import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,7 @@ const pipelineStore = usePipelineStore()
 const activitiesStore = useActivitiesStore()
 const remindersStore = useRemindersStore()
 const rbac = useRBACStore()
+const { openLeadDrawer } = useLeadDrawerGlobal()
 const loading = shallowRef(true)
 
 onMounted(async () => {
@@ -37,8 +39,10 @@ onMounted(async () => {
   try {
     await Promise.all(fetches)
     // Load the first pipeline's leads so the stage distribution has data.
+    // fetchAllLeads loops pages so the distribution is never silently
+    // truncated at one page.
     if (pipelineStore.pipelines.length > 0) {
-      await leadsStore.fetchLeads(pipelineStore.pipelines[0].id, '', 1, 200)
+      await leadsStore.fetchAllLeads({ pipelineId: pipelineStore.pipelines[0].id })
     }
   } finally {
     loading.value = false
@@ -272,16 +276,19 @@ function goToActivities() {
             <div
               v-for="r in reminders"
               :key="r.id"
-              class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted/50"
+              class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted/50 cursor-pointer"
+              @click="openLeadDrawer(r.lead_id)"
             >
               <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
                 <component :is="reminderIcon(r.type)" class="size-3.5 text-muted-foreground" />
               </div>
               <div class="min-w-0 flex-1">
-                <p class="truncate text-sm">{{ formatReminderText(r) }}</p>
-                <p class="mt-0.5 text-xs text-muted-foreground">
-                  {{ r.lead_id ? 'Lead reminder' : '' }}{{ r.stage_name ? ` · ${r.stage_name}` : '' }}
+                <p class="truncate text-sm">
+                  <span v-if="r.lead_display_name" class="font-medium">{{ r.lead_display_name }}</span>
+                  <span v-if="r.lead_display_name && formatReminderText(r)" class="text-muted-foreground"> · {{ formatReminderText(r) }}</span>
+                  <template v-else>{{ formatReminderText(r) }}</template>
                 </p>
+                <p v-if="r.stage_name" class="mt-0.5 text-xs text-muted-foreground">{{ r.stage_name }}</p>
               </div>
               <span class="shrink-0 text-xs text-muted-foreground tabular-nums">
                 {{ r.remind_at ? timeAgo(r.remind_at) : r.scheduled_at ? timeAgo(r.scheduled_at) : '' }}
@@ -321,7 +328,8 @@ function goToActivities() {
             <div
               v-for="entry in activitiesStore.recent"
               :key="entry.id"
-              class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted/50"
+              class="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted/50 cursor-pointer"
+              @click="openLeadDrawer(entry.lead_id)"
             >
               <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
                 <component :is="reminderIcon(entry.type)" class="size-3.5 text-muted-foreground" />
