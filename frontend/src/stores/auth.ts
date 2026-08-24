@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { apiClient } from '@/composables/useApi'
+import { useRBACStore } from '@/stores/rbac'
 
 interface User {
   id: string
@@ -112,6 +113,9 @@ export const useAuthStore = defineStore('auth', () => {
     // user flagged for a forced password change must still be redirected.
     mustChangePassword.value = json.data.must_change_password === true
     await fetchUser()
+    // Refresh permissions for the newly authenticated role; the boot-time
+    // fetch in App.vue ran before any user was signed in.
+    await useRBACStore().fetchPermissions()
     return json.data
   }
 
@@ -124,6 +128,7 @@ export const useAuthStore = defineStore('auth', () => {
       })
     } catch {}
     clear()
+    useRBACStore().clear()
   }
 
   async function bootstrap() {

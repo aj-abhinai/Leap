@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 )
 
@@ -40,17 +41,24 @@ func (s *Service) clearRefreshCookie(w http.ResponseWriter) {
 
 // setCSRFCookie issues the double-submit token as a readable cookie so the
 // client can echo it back in X-CSRF-Token on cookie-authenticated requests.
-// Its lifetime tracks the refresh session so both cookies expire together.
-func (s *Service) setCSRFCookie(w http.ResponseWriter) {
+// Its lifetime tracks the refresh session so both cookies expire together. A
+// token-generation failure is returned so the caller can refuse to establish
+// a session that could never pass CSRF checks.
+func (s *Service) setCSRFCookie(w http.ResponseWriter) error {
+	token, err := generateRandomToken()
+	if err != nil {
+		return fmt.Errorf("generate csrf token: %w", err)
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     CSRFCookieName,
-		Value:    randomHex(32),
+		Value:    token,
 		Path:     "/",
 		HttpOnly: false,
 		Secure:   s.cfg.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(s.cfg.RefreshTokenTTL.Seconds()),
 	})
+	return nil
 }
 
 func (s *Service) clearCSRFCookie(w http.ResponseWriter) {
@@ -65,10 +73,12 @@ func (s *Service) clearCSRFCookie(w http.ResponseWriter) {
 	})
 }
 
-func randomHex(size int) string {
-	b := make([]byte, size)
+// generateRandomToken returns 64 hex characters of cryptographic randomness,
+// used for refresh tokens and CSRF tokens alike.
+func generateRandomToken() (string, error) {
+	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return ""
+		return "", fmt.Errorf("read random bytes: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }

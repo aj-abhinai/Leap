@@ -20,9 +20,10 @@ func NewHandler(svc *Service, actLog *activity.Service) *Handler {
 	return &Handler{svc: svc, actLog: actLog}
 }
 
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+// decodeJSON decodes the request body into dst, writing a 400 on failure. It
+// reports whether the caller may proceed.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -30,6 +31,45 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
 			nil,
 		)
+		return false
+	}
+	return true
+}
+
+// writeAuthError writes an AuthError with the given status; other errors go
+// through respond.ServerError.
+func writeAuthError(w http.ResponseWriter, status int, err error) {
+	var ae *AuthError
+	if !errors.As(err, &ae) {
+		respond.ServerError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		status,
+		nil,
+		&respond.Error{Code: ae.Code, Message: ae.Message},
+		nil,
+	)
+}
+
+// establishSession writes the refresh and CSRF cookies for a fresh session.
+// If the CSRF token cannot be generated no usable session exists, so both
+// cookies are cleared again and a 500 is sent instead.
+func (h *Handler) establishSession(w http.ResponseWriter, refreshToken string) bool {
+	h.svc.setRefreshCookie(w, refreshToken)
+	if err := h.svc.setCSRFCookie(w); err != nil {
+		h.svc.clearRefreshCookie(w)
+		h.svc.clearCSRFCookie(w)
+		respond.ServerError(w, err)
+		return false
+	}
+	return true
+}
+
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	var req LoginRequest
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Email == "" || req.Password == "" {
@@ -44,25 +84,15 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	u, resp, mustChange, err := h.svc.login(req.Email, req.Password)
 	if err != nil {
-		var ae *AuthError
-		if errors.As(err, &ae) {
-			respond.JSON(
-				w,
-				http.StatusUnauthorized,
-				nil,
-				&respond.Error{Code: ae.Code, Message: ae.Message},
-				nil,
-			)
-			return
-		}
-		respond.ServerError(w, err)
+		writeAuthError(w, http.StatusUnauthorized, err)
 		return
 	}
 	if h.actLog != nil {
 		h.actLog.LogLogin(u.ID, u.Name, u.Email)
 	}
-	h.svc.setRefreshCookie(w, resp.RefreshToken)
-	h.svc.setCSRFCookie(w)
+	if !h.establishSession(w, resp.RefreshToken) {
+		return
+	}
 	respond.JSON(
 		w,
 		http.StatusOK,
@@ -92,22 +122,12 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.refresh(cookie.Value)
 	if err != nil {
 		h.svc.clearRefreshCookie(w)
-		var ae *AuthError
-		if errors.As(err, &ae) {
-			respond.JSON(
-				w,
-				http.StatusUnauthorized,
-				nil,
-				&respond.Error{Code: ae.Code, Message: ae.Message},
-				nil,
-			)
-			return
-		}
-		respond.ServerError(w, err)
+		writeAuthError(w, http.StatusUnauthorized, err)
 		return
 	}
-	h.svc.setRefreshCookie(w, resp.RefreshToken)
-	h.svc.setCSRFCookie(w)
+	if !h.establishSession(w, resp.RefreshToken) {
+		return
+	}
 	respond.JSON(
 		w,
 		http.StatusOK,
@@ -159,30 +179,12 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	userID := ctxutil.GetUserID(r)
 	var req UpdateProfileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.JSON(
-			w,
-			http.StatusBadRequest,
-			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
-			nil,
-		)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	u, err := h.svc.updateProfile(userID, req)
 	if err != nil {
-		var ae *AuthError
-		if errors.As(err, &ae) {
-			respond.JSON(
-				w,
-				http.StatusBadRequest,
-				nil,
-				&respond.Error{Code: ae.Code, Message: ae.Message},
-				nil,
-			)
-			return
-		}
-		respond.ServerError(w, err)
+		writeAuthError(w, http.StatusBadRequest, err)
 		return
 	}
 	respond.JSON(
@@ -197,14 +199,7 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	userID := ctxutil.GetUserID(r)
 	var req ChangePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.JSON(
-			w,
-			http.StatusBadRequest,
-			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
-			nil,
-		)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.CurrentPassword == "" || req.NewPassword == "" {
@@ -218,18 +213,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.changePassword(userID, req.CurrentPassword, req.NewPassword); err != nil {
-		var ae *AuthError
-		if errors.As(err, &ae) {
-			respond.JSON(
-				w,
-				http.StatusBadRequest,
-				nil,
-				&respond.Error{Code: ae.Code, Message: ae.Message},
-				nil,
-			)
-			return
-		}
-		respond.ServerError(w, err)
+		writeAuthError(w, http.StatusBadRequest, err)
 		return
 	}
 	respond.JSON(

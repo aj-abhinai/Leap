@@ -51,7 +51,7 @@ func TestSetRefreshCookieAttributes(t *testing.T) {
 		t.Errorf("path = %q, want %q", c.Path, "/api/auth")
 	}
 	if c.MaxAge != int((7 * 24 * time.Hour).Seconds()) {
-		t.Errorf("MaxAge = %d, want %d", c.MaxAge, int((7*24*time.Hour).Seconds()))
+		t.Errorf("MaxAge = %d, want %d", c.MaxAge, int((7 * 24 * time.Hour).Seconds()))
 	}
 }
 
@@ -76,7 +76,9 @@ func TestClearRefreshCookieExpiresImmediately(t *testing.T) {
 
 func TestSetCSRFCookieIsReadableByJavaScript(t *testing.T) {
 	rec := httptest.NewRecorder()
-	csrfService().setCSRFCookie(rec)
+	if err := csrfService().setCSRFCookie(rec); err != nil {
+		t.Fatalf("setCSRFCookie failed: %v", err)
+	}
 
 	res := rec.Result()
 	defer res.Body.Close()

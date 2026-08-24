@@ -116,25 +116,6 @@ func TestHashToken(t *testing.T) {
 	}
 }
 
-func TestNormalizeEmail(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{name: "lowercases", input: "Alice@Example.COM", want: "alice@example.com"},
-		{name: "trims whitespace", input: "  alice@example.com  ", want: "alice@example.com"},
-		{name: "already normalized", input: "alice@example.com", want: "alice@example.com"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeEmail(tt.input); got != tt.want {
-				t.Errorf("normalizeEmail(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestValidateJWTRejectsTamperedToken(t *testing.T) {
 	svc := &Service{cfg: authTestConfig()}
 	token, err := svc.createJWT("user-1", time.Now().Add(time.Minute))

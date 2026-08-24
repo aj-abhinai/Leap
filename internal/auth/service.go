@@ -3,7 +3,6 @@ package auth
 import (
 	"crm/internal/config"
 	"crm/internal/util"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -80,12 +79,6 @@ func (s *Service) recordLogin(userID string) {
 	if _, err := s.db.Exec(`UPDATE users SET last_login_at = now() WHERE id = $1`, userID); err != nil {
 		slog.Error("record last login", "error", err, "user_id", userID)
 	}
-}
-
-// normalizeEmail trims and lowercases so case and whitespace differences in
-// stored or submitted addresses never lock a user out of their account.
-func normalizeEmail(email string) string {
-	return util.NormalizeEmail(email)
 }
 
 func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {
@@ -347,14 +340,6 @@ func dummyHashForCost(cost int) string {
 	}
 	dummyHashCache[cost] = string(h)
 	return string(h)
-}
-
-func generateRandomToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }
 
 func hashToken(token string) string {

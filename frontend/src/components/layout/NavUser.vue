@@ -20,18 +20,15 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
 import { useAuthStore } from '@/stores/auth'
-import { useRBACStore } from '@/stores/rbac'
 import { useRouter } from 'vue-router'
 
 const auth = useAuthStore()
-const rbac = useRBACStore()
 const router = useRouter()
 
 const avatarInitial = computed(() => auth.user?.name?.charAt(0)?.toUpperCase() || 'U')
 
 async function handleLogout() {
   await auth.logout()
-  rbac.clear()
   router.push('/login')
 }
 </script>
