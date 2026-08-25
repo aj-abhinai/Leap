@@ -40,6 +40,8 @@ watch(
   { immediate: true },
 )
 
+// loadContact fetches the contact for id; a newer request supersedes this
+// one, so out-of-order responses are discarded.
 async function loadContact(id: string) {
   const seq = ++loadSeq
   loading.value = true
@@ -63,10 +65,15 @@ function goBack() {
 }
 
 async function handleSave(body: ContactSaveBody) {
-  if (!contact.value) return
+  const saved = contact.value
+  if (!saved) return
   saving.value = true
+  // Capture the id and the seq before awaiting the patch: navigating to
+  // another contact mid-save bumps loadSeq, and this refetch of the saved
+  // contact must then be discarded instead of overwriting the new contact.
+  const seq = loadSeq
   try {
-    await apiClient.patch(`/api/contacts/${contact.value.id}`, body)
+    await apiClient.patch(`/api/contacts/${saved.id}`, body)
     toast.success('Contact updated')
     drawerOpen.value = false
   } catch (e) {
@@ -75,8 +82,11 @@ async function handleSave(body: ContactSaveBody) {
   } finally {
     saving.value = false
   }
+  // The refetch is gated on loadSeq like loadContact so a route change that
+  // starts a new load cannot be overwritten by this stale refresh.
   try {
-    contact.value = await store.fetchContact(contact.value.id)
+    const loaded = await store.fetchContact(saved.id)
+    if (seq === loadSeq) contact.value = loaded
   } catch {
     // Update succeeded; keep showing the previous data rather than blanking the page.
   }

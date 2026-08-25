@@ -20,6 +20,9 @@ const visible = computed(() => {
 
 const now = () => Date.now()
 
+// Buckets: overdue = past remind_at not yet reminded; upcoming = future
+// remind_at, or scheduled_at when no remind_at; dismissed = reminded but
+// open; done = done or cancelled.
 const overdue = computed(() =>
   visible.value.filter(
     (r) =>
@@ -40,6 +43,8 @@ const dismissed = computed(() =>
 )
 const done = computed(() => visible.value.filter((r) => r.is_done || r.is_cancelled))
 
+// snooze pushes the reminder forward by minutes; failures are swallowed so a
+// failed snooze leaves the card in place.
 async function snooze(reminder: Reminder, minutes: number) {
   try {
     await store.snoozeReminder(reminder, snoozeRemindAt(minutes))

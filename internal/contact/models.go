@@ -16,6 +16,8 @@ type EmailValue struct {
 	IsPrimary bool   `json:"is_primary"`
 }
 
+// Contact is the identity source of truth for leads. It carries the primary
+// phone/email scalars for compact views plus the full multi-valued lists.
 type Contact struct {
 	ID        string       `json:"id"`
 	Name      string       `json:"name"`
@@ -34,12 +36,15 @@ type Contact struct {
 	DeletedAt *time.Time   `json:"deleted_at,omitempty"`
 }
 
+// TagRef is a compact tag reference (id, name, color) used on contacts.
 type TagRef struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Color string `json:"color,omitempty"`
 }
 
+// CreateRequest is the contact creation payload. A contact must carry at
+// least one phone or one email.
 type CreateRequest struct {
 	Name     string       `json:"name"`
 	Nickname string       `json:"nickname,omitempty"`
@@ -53,6 +58,9 @@ type CreateRequest struct {
 	StatusID *string      `json:"status_id,omitempty"`
 }
 
+// UpdateRequest is the partial-update payload. Scalar phone/email fields
+// mirror into the child tables; the list fields replace their whole type and
+// are only applied when sent.
 type UpdateRequest struct {
 	Name     *string       `json:"name,omitempty"`
 	Nickname *string       `json:"nickname,omitempty"`
@@ -71,6 +79,7 @@ type ListResponse struct {
 	Total    int       `json:"total"`
 }
 
+// Note is a free-text note on a contact, attributed to its author.
 type Note struct {
 	ID        string    `json:"id"`
 	ContactID string    `json:"contact_id"`
@@ -86,7 +95,7 @@ type CreateNoteRequest struct {
 }
 
 // ResolveMatch is a compact contact result for the lead-entry phone resolve
-// endpoint (ADR 012): id, name, and the primary phone/email for display.
+// endpoint: id, name, and the primary phone/email for display.
 type ResolveMatch struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`

@@ -18,6 +18,8 @@ const formPhone = shallowRef(auth.user?.phone || '')
 const error = shallowRef('')
 const saving = shallowRef(false)
 
+// handleSave validates name/phone against the profile schema, then updates
+// the profile and toasts on success; failures surface as an inline error.
 async function handleSave() {
   error.value = ''
   const result = profileSchema.safeParse({

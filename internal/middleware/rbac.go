@@ -53,6 +53,8 @@ func authorize(rbacSvc PermissionChecker, w http.ResponseWriter, r *http.Request
 	return false
 }
 
+// RequirePermission wraps next so it runs only when the user holds the
+// permission; unauthorized requests get a 403.
 func RequirePermission(rbacSvc PermissionChecker, permission string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !authorize(rbacSvc, w, r, permission) {
@@ -64,7 +66,7 @@ func RequirePermission(rbacSvc PermissionChecker, permission string, next http.H
 
 // RequireAny allows the request when the user holds any one of the given
 // permissions — the sanctioned pattern for reference reads consumed by more
-// than one module (ADR 012).
+// than one module.
 func RequireAny(rbacSvc PermissionChecker, permissions []string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !authorize(rbacSvc, w, r, permissions...) {

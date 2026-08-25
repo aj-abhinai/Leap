@@ -19,18 +19,24 @@ export function usePagination<T>() {
   const total = ref(0)
   const loading = ref(false)
 
+  // fetchSeq discards out-of-order responses: only the latest request's
+  // result may land, so rapid page/search changes never show stale data.
+  let fetchSeq = 0
+
   async function fetch(
     buildRequest: (page: number, perPage: number) => Promise<PaginatedResponse<T[]>>,
     page = 1,
     perPage = 20,
   ) {
+    const seq = ++fetchSeq
     loading.value = true
     try {
       const res = await buildRequest(page, perPage)
+      if (seq !== fetchSeq) return
       items.value = res.data
       total.value = totalOf(res)
     } finally {
-      loading.value = false
+      if (seq === fetchSeq) loading.value = false
     }
   }
 

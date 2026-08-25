@@ -19,6 +19,8 @@ const password = shallowRef('')
 const error = shallowRef('')
 const loading = shallowRef(false)
 
+// handleSubmit logs in, then routes to Change Password when the server
+// requires it, otherwise to the Dashboard; failures surface as an inline error.
 async function handleSubmit() {
   error.value = ''
   if (!email.value || !password.value) {

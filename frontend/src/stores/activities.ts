@@ -61,14 +61,20 @@ export const useActivitiesStore = defineStore('activities', () => {
     return params.toString()
   }
 
+  // fetchSeq discards out-of-order responses: only the latest request's
+  // result may land, so fast filter changes never show stale data.
+  let fetchSeq = 0
+
   async function fetchItems(f: ActivityListFilters) {
+    const seq = ++fetchSeq
     loading.value = true
     try {
       const res = await apiClient.get(`/api/activities?${buildQuery(f, page.value, perPage.value)}`)
+      if (seq !== fetchSeq) return
       items.value = res.data
       total.value = res.meta?.total ?? 0
     } finally {
-      loading.value = false
+      if (seq === fetchSeq) loading.value = false
     }
   }
 

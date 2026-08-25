@@ -34,10 +34,13 @@ const (
 	maxValueLength   = 255
 )
 
+// Service provides database-backed contact operations: list/create/update/
+// delete, notes, bulk import, and phone resolution for lead entry.
 type Service struct {
 	db *sql.DB
 }
 
+// NewService creates a contact Service backed by db.
 func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
@@ -99,6 +102,9 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 		contacts = append(contacts, c)
 		contactIDs = append(contactIDs, c.ID)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("list contacts: iterate: %w", err)
+	}
 
 	if len(contacts) > 0 {
 		contacts, err = s.populateTagsAndStatus(contacts, contactIDs)
@@ -145,6 +151,9 @@ func (s *Service) populatePhonesEmails(contacts []Contact) ([]Contact, error) {
 		}
 		phoneByContact[cid] = PhoneValue{ID: id, Value: value, IsPrimary: true}
 	}
+	if err := phoneRows.Err(); err != nil {
+		return contacts, fmt.Errorf("load primary phones: iterate: %w", err)
+	}
 
 	// primary email per contact
 	emailRows, err := s.db.Query(
@@ -165,6 +174,9 @@ func (s *Service) populatePhonesEmails(contacts []Contact) ([]Contact, error) {
 			return contacts, fmt.Errorf("scan primary email: %w", err)
 		}
 		emailByContact[cid] = EmailValue{ID: id, Value: value, IsPrimary: true}
+	}
+	if err := emailRows.Err(); err != nil {
+		return contacts, fmt.Errorf("load primary emails: iterate: %w", err)
 	}
 
 	for i := range contacts {
@@ -253,6 +265,9 @@ func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string)
 		}
 		tagsByContact[contactID] = append(tagsByContact[contactID], ref)
 	}
+	if err := tagRows.Err(); err != nil {
+		return contacts, fmt.Errorf("load contact tags: iterate: %w", err)
+	}
 
 	statusRows, err := s.db.Query(
 		`SELECT c.id, COALESCE(t.id::text, ''), COALESCE(t.name, ''), COALESCE(t.color, '')
@@ -275,6 +290,9 @@ func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string)
 			statusByContact[contactID] = &ref
 		}
 	}
+	if err := statusRows.Err(); err != nil {
+		return contacts, fmt.Errorf("load contact statuses: iterate: %w", err)
+	}
 
 	for i := range contacts {
 		contacts[i].Tags = tagsByContact[contacts[i].ID]
@@ -285,7 +303,7 @@ func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string)
 
 // resolveByPhone returns the contacts whose stored phone matches the given
 // number after normalization (digits only). Used by lead entry to ask the
-// user whether to link or create (ADR 012) — phone is the duplicate signal.
+// user whether to link or create — phone is the duplicate signal.
 func (s *Service) resolveByPhone(phone string) ([]ResolveMatch, error) {
 	key := util.NormalizePhone(phone)
 	if key == "" {
@@ -579,15 +597,19 @@ func syncPhonesEmailsTx(q queryer, contactID string, phones []PhoneValue, emails
 }
 
 func insertPhoneRows(q queryer, contactID string, phones []PhoneValue) error {
-	// ensure exactly one primary
-	hasPrimary := false
+	// Ensure exactly one primary: the first marked entry wins, later ones are
+	// demoted so the invariant holds even for client-supplied duplicates.
+	primarySeen := false
 	for i := range phones {
 		if phones[i].IsPrimary {
-			hasPrimary = true
-			break
+			if primarySeen {
+				phones[i].IsPrimary = false
+				continue
+			}
+			primarySeen = true
 		}
 	}
-	if !hasPrimary && len(phones) > 0 {
+	if !primarySeen && len(phones) > 0 {
 		phones[0].IsPrimary = true
 	}
 	for _, p := range phones {
@@ -602,14 +624,19 @@ func insertPhoneRows(q queryer, contactID string, phones []PhoneValue) error {
 }
 
 func insertEmailRows(q queryer, contactID string, emails []EmailValue) error {
-	hasPrimary := false
+	// Ensure exactly one primary: the first marked entry wins, later ones are
+	// demoted so the invariant holds even for client-supplied duplicates.
+	primarySeen := false
 	for i := range emails {
 		if emails[i].IsPrimary {
-			hasPrimary = true
-			break
+			if primarySeen {
+				emails[i].IsPrimary = false
+				continue
+			}
+			primarySeen = true
 		}
 	}
-	if !hasPrimary && len(emails) > 0 {
+	if !primarySeen && len(emails) > 0 {
 		emails[0].IsPrimary = true
 	}
 	for _, e := range emails {
@@ -700,11 +727,11 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 	// Sync the phone/email child rows when the client sends a list. Each type is
 	// replaced only when sent, so a partial update never wipes the other.
 	if req.Phones != nil || req.Emails != nil {
-		phones := []PhoneValue{}
+		var phones []PhoneValue
 		if req.Phones != nil {
 			phones = *req.Phones
 		}
-		emails := []EmailValue{}
+		var emails []EmailValue
 		if req.Emails != nil {
 			emails = *req.Emails
 		}

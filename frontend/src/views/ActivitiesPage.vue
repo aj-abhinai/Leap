@@ -67,6 +67,8 @@ const views: ViewDef[] = [
 
 const activeView = shallowRef<ViewDef>(views[0])
 
+// todayBounds returns the current day as a [start, end) window in UTC ISO,
+// used by the Today views.
 function todayBounds(): { from: string; to: string } {
   const start = new Date()
   start.setHours(0, 0, 0, 0)
@@ -75,6 +77,8 @@ function todayBounds(): { from: string; to: string } {
   return { from: start.toISOString(), to: end.toISOString() }
 }
 
+// viewFilter maps the active view and filter controls to the store's query
+// filters; Today views add the day window.
 const viewFilter = computed<ActivityListFilters>(() => {
   const v = activeView.value
   const f: ActivityListFilters = { status: v.status === 'all' ? '' : v.status }
@@ -103,10 +107,15 @@ onMounted(() => {
   load()
 })
 
-watch([search, typeFilter, sortBy, sortOrder, activeView], load)
+watch([search, typeFilter, sortBy, sortOrder, activeView], () => {
+  // Any filter or view change restarts from page one.
+  store.page = 1
+  load()
+})
 
 function selectView(v: ViewDef) {
   activeView.value = v
+  store.page = 1
   selected.value = new Set()
 }
 
@@ -145,17 +154,23 @@ function confirmDeleteSelected() {
   deleting.value = true
 }
 
+// doDelete removes the selected activities via their lead-scoped endpoints,
+// clears the selection, and reloads; failures surface as a toast.
 async function doDelete() {
   const ids = deletingIds.value
   deleting.value = false
   deletingIds.value = []
+  let deleted = 0
   try {
     for (const id of ids) {
       const item = store.items.find((i) => i.id === id)
-      if (item) await store.deleteItem(item.lead_id, id)
+      if (item) {
+        await store.deleteItem(item.lead_id, id)
+        deleted++
+      }
     }
     selected.value = new Set()
-    toast.success(ids.length > 1 ? `Deleted ${ids.length} activities` : 'Activity deleted')
+    toast.success(deleted > 1 ? `Deleted ${deleted} activities` : 'Activity deleted')
     load()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to delete'))
@@ -189,6 +204,8 @@ function isOverdue(item: { is_done: boolean; is_cancelled: boolean; remind_at?: 
   )
 }
 
+// statusLabel returns the display status by precedence: cancelled, done,
+// reminded, overdue, else open.
 function statusLabel(item: {
   is_done: boolean
   is_cancelled: boolean
@@ -210,6 +227,7 @@ function statusVariant(label: string): 'default' | 'destructive' | 'secondary' |
   return 'default'
 }
 
+// due returns the effective due time: remind_at, else scheduled_at, else created_at.
 function due(item: { scheduled_at?: string; remind_at?: string; created_at: string }): string {
   if (item.remind_at) return item.remind_at
   if (item.scheduled_at) return item.scheduled_at
@@ -224,6 +242,8 @@ function dueLabel(item: { scheduled_at?: string; remind_at?: string; created_at:
 function nextPage() {
   if (store.page < totalPages.value) {
     store.page++
+    // Selection is page-scoped; leaving the page drops it.
+    selected.value = new Set()
     load()
   }
 }
@@ -231,6 +251,7 @@ function nextPage() {
 function prevPage() {
   if (store.page > 1) {
     store.page--
+    selected.value = new Set()
     load()
   }
 }

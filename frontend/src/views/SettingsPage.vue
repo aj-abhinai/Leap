@@ -35,11 +35,17 @@ const permissionsLoaded = shallowRef(false)
 const activityTotalPages = computed(() => Math.ceil(activity.total / activityPerPage) || 1)
 
 onMounted(async () => {
-  await rbac.fetchPermissions()
-  permissionsLoaded.value = true
-  loadActivity()
+  try {
+    await rbac.fetchPermissions()
+  } finally {
+    // Permissions resolve in every path so tabs never stay stuck visible.
+    permissionsLoaded.value = true
+    if (rbac.can('activity:read')) loadActivity()
+  }
 })
 
+// canOrLoading keeps tabs visible while permissions are still loading, then
+// gates them by the user's permissions.
 function canOrLoading(permission: string): boolean {
   if (!permissionsLoaded.value) return true
   return rbac.can(permission)

@@ -20,7 +20,7 @@ var (
 	ErrInvalidStageOutcome = errors.New("closing stages must have outcome 'won' or 'lost'")
 )
 
-// Stage outcome vocabulary (ADR 019 amendment). A stage's outcome is what
+// Stage outcome vocabulary. A stage's outcome is what
 // reaching it means for a lead: open (in play), won, or lost.
 const (
 	OutcomeOpen = "open"
@@ -46,10 +46,13 @@ func stageOutcome(isClosing bool, outcome string) (string, error) {
 	}
 }
 
+// Service provides database-backed pipeline and stage operations, including
+// stage outcome metadata used for lead win/loss resolution.
 type Service struct {
 	db *sql.DB
 }
 
+// NewService creates a pipeline Service backed by db.
 func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
@@ -119,6 +122,9 @@ func (s *Service) listPipelines() ([]Pipeline, error) {
 			return nil, fmt.Errorf("list pipelines: scan: %w", err)
 		}
 		pipelines = append(pipelines, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list pipelines: iterate: %w", err)
 	}
 	return pipelines, nil
 }

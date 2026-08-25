@@ -18,14 +18,12 @@ default:
 
 # === Dev ===
 
-# Start Postgres in Docker and run the Go server. Ctrl+C stops Postgres.
-backend:
+# Start Postgres in Docker, wait until ready, and free port :9000 (used by `backend` and `dev`).
+[private]
+_pg-up:
     #!/usr/bin/env sh
     set -e
-    CLEANED_UP=""
-    cleanup() { [ -n "$CLEANED_UP" ] && return; CLEANED_UP=1; echo " Stopping Postgres..."; {{compose}} rm -sf db; }
-    trap cleanup EXIT INT TERM
-    {{compose}} up -d db
+    {{ compose }} up -d db
     echo "Waiting for Postgres..."
     for i in $(seq 1 30); do
       if docker exec crm_db pg_isready -U crm -d crm >/dev/null 2>&1; then
@@ -36,14 +34,23 @@ backend:
     done
     if ! docker exec crm_db pg_isready -U crm -d crm >/dev/null 2>&1; then
       echo "ERROR: Postgres did not become ready in 30s"
+      {{ compose }} rm -sf db
       exit 1
     fi
     # Free port :9000 if the docker app container is running (avoids bind collision with `just docker-up`).
-    {{compose}} stop app >/dev/null 2>&1 || true
-    go run ./cmd/server/ -config {{config}}
+    {{ compose }} stop app >/dev/null 2>&1 || true
+
+# Start Postgres in Docker and run the Go server. Ctrl+C stops Postgres.
+backend: _pg-up
+    #!/usr/bin/env sh
+    set -e
+    CLEANED_UP=""
+    cleanup() { [ -n "$CLEANED_UP" ] && return; CLEANED_UP=1; echo " Stopping Postgres..."; {{ compose }} rm -sf db; }
+    trap cleanup EXIT INT TERM
+    go run ./cmd/server/ -config {{ config }}
 
 # Start Postgres, then the backend and frontend dev servers in one command. Ctrl+C stops everything.
-dev:
+dev: _pg-up
     #!/usr/bin/env sh
     set -e
     BACKEND_PID=""
@@ -55,26 +62,11 @@ dev:
       if [ -n "$FRONTEND_PID" ]; then kill "$FRONTEND_PID" 2>/dev/null || true; fi
       if [ -n "$BACKEND_PID" ]; then kill "$BACKEND_PID" 2>/dev/null || true; fi
       echo " Stopping Postgres..."
-      {{compose}} rm -sf db
+      {{ compose }} rm -sf db
     }
     trap cleanup EXIT INT TERM
-    {{compose}} up -d db
-    echo "Waiting for Postgres..."
-    for i in $(seq 1 30); do
-      if docker exec crm_db pg_isready -U crm -d crm >/dev/null 2>&1; then
-        echo "Postgres ready"
-        break
-      fi
-      sleep 1
-    done
-    if ! docker exec crm_db pg_isready -U crm -d crm >/dev/null 2>&1; then
-      echo "ERROR: Postgres did not become ready in 30s"
-      exit 1
-    fi
-    # Free port :9000 if the docker app container is running (avoids bind collision with `just docker-up`).
-    {{compose}} stop app >/dev/null 2>&1 || true
     echo "Starting backend on :9000..."
-    go run ./cmd/server/ -config {{config}} &
+    go run ./cmd/server/ -config {{ config }} &
     BACKEND_PID=$!
     echo "Starting frontend on :5173..."
     (cd frontend && ([ -d "node_modules" ] || pnpm install --frozen-lockfile) && pnpm dev) &
@@ -89,7 +81,7 @@ frontend:
 
 # Start only Postgres in Docker, detached (with the dev override for loopback publish)
 dev-db:
-    {{compose}} up -d db
+    {{ compose }} up -d db
 
 # === Build ===
 
@@ -99,10 +91,10 @@ build: build-ui build-backend
 # Build Go binary with stuffbin-packed frontend
 build-backend:
     @echo "Building backend..."
-    CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=dev' -X 'main.versionString=v0.1.0'" -o {{bin}} ./cmd/server/
+    CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=dev' -X 'main.versionString=v0.1.0'" -o {{ bin }} ./cmd/server/
     @echo "Packing frontend into binary..."
-    MSYS_NO_PATHCONV=1 stuffbin -a stuff -in {{bin}} -out {{bin}}.stuffed frontend/dist:/frontend/dist migrations:/migrations
-    mv {{bin}}.stuffed {{bin}}
+    MSYS_NO_PATHCONV=1 stuffbin -a stuff -in {{ bin }} -out {{ bin }}.stuffed frontend/dist:/frontend/dist migrations:/migrations
+    mv {{ bin }}.stuffed {{ bin }}
 
 # Build frontend production bundle
 build-ui:
@@ -115,25 +107,25 @@ build-ui:
 
 # Development stack: loopback binds + committed config.dev.toml (admin/admin).
 docker-up:
-    {{compose}} up -d
+    {{ compose }} up -d
 
 # Production stack: bare compose, fails fast until docker/.env secrets are set.
 docker-up-prod:
-    {{compose_prod}} up -d
+    {{ compose_prod }} up -d
 
 # Build (or rebuild) the app image without starting containers
 docker-build:
-    {{compose}} build
+    {{ compose }} build
 
 # Rebuild the image and start the dev stack
 docker-rebuild:
-    {{compose}} up --build -d
+    {{ compose }} up --build -d
 
 docker-down:
-    {{compose}} down
+    {{ compose }} down
 
 docker-reset:
-    {{compose}} down -v
+    {{ compose }} down -v
 
 # === Tests / lint ===
 

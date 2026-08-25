@@ -43,7 +43,7 @@ const error = ref('')
 const activityTypes = computed(() => settings.activityTypes)
 
 // Quick-reply chips are a dedicated catalog (settings.quickReplies), separate
-// from contact statuses (ADR 020). Each quick reply carries a behavior that
+// from contact statuses. Each quick reply carries a behavior that
 // decides the follow-up when tapped.
 const chips = computed(() => settings.quickReplies)
 
@@ -112,9 +112,14 @@ watch([scheduledDate, scheduledTime], () => {
 
 function setChip(id: string) {
   quickReplyId.value = id
-  // Switching behaviors resets stale next/schedule state.
+  // Switching behaviors resets stale next/schedule state so a schedule entered
+  // under one behavior is never silently submitted under another.
   nextDate.value = ''
   nextTime.value = ''
+  scheduledDate.value = ''
+  scheduledTime.value = ''
+  remindDate.value = ''
+  remindTime.value = ''
 }
 
 function applyLastType() {
@@ -138,6 +143,8 @@ function clearForm() {
   applyLastType()
 }
 
+// mergeDateTime combines a local wall-clock date and time into a UTC ISO
+// instant, or null when either part is empty.
 function mergeDateTime(date: string, time: string): string | null {
   if (!date || !time) return null
   return new Date(`${date}T${time}`).toISOString()

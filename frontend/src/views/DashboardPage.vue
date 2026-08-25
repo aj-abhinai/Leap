@@ -27,23 +27,29 @@ const { openLeadDrawer } = useLeadDrawerGlobal()
 const loading = shallowRef(true)
 
 onMounted(async () => {
+  // App.vue fetches permissions fire-and-forget, which races this mount on a
+  // hard refresh; awaiting them here means can() gates the fetches on the
+  // real permission set instead of an empty one. fetchPermissions swallows
+  // its own errors, so the dashboard still loads when it fails.
+  await rbac.fetchPermissions()
   const fetches = [
     contactsStore.fetchTotal(),
     leadsStore.fetchTotal(),
     remindersStore.fetchReminders(),
-    pipelineStore.fetchPipelines(),
   ]
   if (rbac.can('lead:read')) {
-    fetches.push(activitiesStore.fetchRecent(10))
+    fetches.push(pipelineStore.fetchPipelines(), activitiesStore.fetchRecent(10))
   }
   try {
     await Promise.all(fetches)
     // Load the first pipeline's leads so the stage distribution has data.
     // fetchAllLeads loops pages so the distribution is never silently
     // truncated at one page.
-    if (pipelineStore.pipelines.length > 0) {
+    if (rbac.can('lead:read') && pipelineStore.pipelines.length > 0) {
       await leadsStore.fetchAllLeads({ pipelineId: pipelineStore.pipelines[0].id })
     }
+  } catch {
+    // Best-effort dashboard: one failed fetch must not blank the rest.
   } finally {
     loading.value = false
   }
@@ -52,6 +58,8 @@ onMounted(async () => {
 const pipeline = computed(() => pipelineStore.pipelines[0] ?? null)
 const pipelineLeads = computed(() => leadsStore.leads)
 
+// stageRows aggregates the first pipeline's leads into per-stage counts and
+// summed lead values for the health bars.
 const stageRows = computed(() => {
   if (!pipeline.value?.stages) return []
   return pipeline.value.stages.map((stage) => {

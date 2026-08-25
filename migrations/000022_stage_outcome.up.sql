@@ -1,7 +1,7 @@
--- Stage outcome metadata (ADR 019 amendment): every stage declares what
--- reaching it means for a lead — open (in play), won, or lost. Closing stages
--- must be won or lost; a lead's outcome is read from its stage's metadata
--- instead of matching stage names by text.
+-- Stage outcome metadata: every stage declares what reaching it means for a
+-- lead — open (in play), won, or lost. Closing stages must be won or lost; a
+-- lead's outcome is read from its stage's metadata instead of matching stage
+-- names by text.
 
 ALTER TABLE lead_stages ADD COLUMN outcome TEXT NOT NULL DEFAULT 'open'
     CHECK (outcome IN ('open', 'won', 'lost'));

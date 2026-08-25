@@ -1,10 +1,10 @@
--- Remap drifted ADR 004 permissions onto the ADR 012 module-scoped set.
+-- Remap the drifted field-level permissions onto the module-scoped set.
 -- Folds: lead:move_stage, lead:delete -> lead:write;
 --        contact:delete -> contact:write;
 --        pipeline:manage, program:manage, rbac:manage -> settings:manage.
 --
 -- The seed (seedPermissions) runs after migrations, so this migration is
--- self-contained: it inserts the seven ADR 012 permissions first, then
+-- self-contained: it inserts the seven module-scoped permissions first, then
 -- remaps existing role_permissions rows onto them and deletes the six
 -- superseded permission rows.
 

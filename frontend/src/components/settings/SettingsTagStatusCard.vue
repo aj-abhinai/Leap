@@ -37,7 +37,7 @@ const props = defineProps<{
 }>()
 
 // Quick replies are the only catalog with group/behavior config;
-// plain statuses are general contact identifiers (ADR 020).
+// plain statuses are general contact identifiers.
 const isQuickReply = computed(() => props.kind === 'quick_reply')
 
 const store = useSettingsStore()

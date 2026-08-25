@@ -70,6 +70,8 @@ watch(viewMode, (v) => localStorage.setItem('crm-contact-view', v))
 
 const importOpen = shallowRef(false)
 
+// loadContacts fetches the current page, clamping back to the last page when
+// it falls past the end (e.g. after a delete).
 async function loadContacts() {
   await store.fetchContacts(page.value, perPage, search.value)
   if (store.contacts.length === 0 && page.value > 1 && store.total > 0) {
@@ -103,6 +105,8 @@ function openEdit(contact: Contact) {
   drawerOpen.value = true
 }
 
+// handleSave creates or updates the edited contact and closes the drawer;
+// duplicate-phone warnings from create are toasted.
 async function handleSave(body: ContactSaveBody) {
   saving.value = true
   try {

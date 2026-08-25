@@ -176,7 +176,7 @@ func main() {
 			r.Post("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Create))
 			r.Post("/api/contacts/bulk", middleware.RequirePermission(rbacSvc, "contact:write", contactH.BulkCreate))
 			// Registered before /api/contacts/{id} so the literal path wins over
-			// the param route (ADR 012 lead-entry resolve).
+			// the param route (lead-entry phone resolve).
 			r.Get("/api/contacts/resolve", middleware.RequirePermission(rbacSvc, "lead:write", contactH.Resolve))
 			r.Get("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:read", contactH.Get))
 			r.Patch("/api/contacts/{id}", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Update))

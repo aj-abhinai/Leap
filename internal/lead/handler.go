@@ -15,10 +15,13 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// Handler serves the lead HTTP endpoints: leads, activities, reminders, and
+// the global activities list.
 type Handler struct {
 	svc *Service
 }
 
+// NewHandler creates a lead Handler for the given service.
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
@@ -197,7 +200,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	// Stage moves are a lead-module write capability (ADR 012); the route
+	// Stage moves are a lead-module write capability; the route
 	// gate already enforces lead:write, so Update proceeds directly.
 	l, err := h.svc.update(id, req, userID)
 	if err != nil {
@@ -378,13 +381,25 @@ func (h *Handler) ListAllActivities(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	var from, to *time.Time
-	if v := q.Get("from"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			from = &t
+	for _, name := range []string{"from", "to"} {
+		v := q.Get(name)
+		if v == "" {
+			continue
 		}
-	}
-	if v := q.Get("to"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: name + " must be an RFC3339 timestamp"},
+				nil,
+			)
+			return
+		}
+		if name == "from" {
+			from = &t
+		} else {
 			to = &t
 		}
 	}

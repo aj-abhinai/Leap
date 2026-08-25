@@ -1,4 +1,4 @@
--- contact is the single source of truth for leads (ADR 011):
+-- Contacts are the single source of truth for leads:
 -- * contacts gain nickname and multi-valued phones/emails (child tables, is_primary)
 -- * leads drop their own name/email/phone; contact_id becomes required
 
@@ -20,7 +20,8 @@ CREATE TABLE contact_emails (
 
 CREATE INDEX idx_contact_phones_contact ON contact_phones(contact_id);
 CREATE INDEX idx_contact_emails_contact ON contact_emails(contact_id);
--- support the phone-primary duplicate lookup used by contact/lead resolve-or-create
+-- Plain-value indexes; the resolve-or-create lookup normalizes the column
+-- with regexp_replace/lower, so these do not serve that query.
 CREATE INDEX idx_contact_phones_value ON contact_phones(value);
 CREATE INDEX idx_contact_emails_value ON contact_emails(value);
 

@@ -26,6 +26,8 @@ const banner = computed(() =>
     : '',
 )
 
+// handleSubmit validates the form, changes the password, and routes to the
+// Dashboard on success; validation failures surface as an inline error.
 async function handleSubmit() {
   error.value = ''
   if (!currentPassword.value || !newPassword.value || !confirmPassword.value) {

@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// Lead is an opportunity moving through a pipeline. Identity comes from its
+// linked contact; the display name prefers the lead nickname.
 type Lead struct {
 	ID           string     `json:"id"`
 	Nickname     string     `json:"nickname,omitempty"`
@@ -42,6 +44,9 @@ type NewContact struct {
 	Email string `json:"email,omitempty"`
 }
 
+// CreateRequest is the lead creation payload. It takes either an existing
+// contact_id or a new_contact to resolve-or-create; stage_id must belong to
+// pipeline_id and cannot be a closing stage.
 type CreateRequest struct {
 	Nickname   string      `json:"nickname,omitempty"`
 	ContactID  *string     `json:"contact_id,omitempty"`
@@ -54,6 +59,8 @@ type CreateRequest struct {
 	AssignedTo *string     `json:"assigned_to,omitempty"`
 }
 
+// UpdateRequest is the lead partial-update payload. Stage moves resolve the
+// outcome from the target stage's metadata and record stage history.
 type UpdateRequest struct {
 	Nickname   *string  `json:"nickname,omitempty"`
 	ContactID  *string  `json:"contact_id,omitempty"`
@@ -79,6 +86,8 @@ type ListFilters struct {
 	AssignedTo string
 }
 
+// Activity is a task on a lead with a lifecycle: scheduled, done, cancelled,
+// or responded via a quick reply.
 type Activity struct {
 	ID             string     `json:"id"`
 	LeadID         string     `json:"lead_id"`
@@ -196,6 +205,8 @@ type ActivityListItem struct {
 	ContactID       string `json:"contact_id"`
 }
 
+// StageHistory records a lead's stage move with the from/to stage names
+// snapshotted at move time and the actor who performed it.
 type StageHistory struct {
 	ID            string    `json:"id"`
 	LeadID        string    `json:"lead_id"`

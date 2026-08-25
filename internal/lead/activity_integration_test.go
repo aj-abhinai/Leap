@@ -753,3 +753,44 @@ func TestListAllActivitiesFiltersIntegration(t *testing.T) {
 	}
 	_ = searched
 }
+
+func TestListAllActivitiesMultiFilterArgBindingIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"}); err != nil {
+		t.Fatalf("create open task: %v", err)
+	}
+	done := true
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 2", IsDone: &done}); err != nil {
+		t.Fatalf("create done task: %v", err)
+	}
+
+	// Two predicates that both carry arguments: a per-condition numbering
+	// restart would bind la.type to the is_done flag's value and return nothing.
+	doneList, total, err := svc.listAllActivities(ActivityListFilters{Status: "done", Type: "Call 2", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list done+type: %v", err)
+	}
+	if total != 1 || len(doneList) != 1 || doneList[0].Type != "Call 2" {
+		t.Errorf("done+type: total = %d, got %d rows; want the one done 'Call 2'", total, len(doneList))
+	}
+
+	// Search binds three arguments; the type predicate must continue after them.
+	searched, total, err := svc.listAllActivities(ActivityListFilters{Search: "alice", Type: "Call 1", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list search+type: %v", err)
+	}
+	if total != 1 || len(searched) != 1 || searched[0].Type != "Call 1" {
+		t.Errorf("search+type: total = %d, got %d rows; want the open 'Call 1'", total, len(searched))
+	}
+}

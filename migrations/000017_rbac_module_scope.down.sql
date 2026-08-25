@@ -1,7 +1,7 @@
 -- Best-effort reverse of 000017_rbac_module_scope: recreate the six deleted
--- ADR 004 permissions. Remapping role_permissions rows back to the old caps
--- is not guaranteed (the app is pre-alpha; down is for schema rollback, not
--- data round-trip).
+-- field-level permissions. Remapping role_permissions rows back to the old
+-- caps is not guaranteed (the app is pre-alpha; down is for schema rollback,
+-- not data round-trip).
 
 INSERT INTO permissions (name, description) VALUES
     ('contact:delete',  'Delete contacts'),

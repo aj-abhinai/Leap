@@ -87,7 +87,19 @@ const formNickname = shallowRef(props.editingLead?.nickname || '')
 const formNotes = shallowRef(props.editingLead?.notes || '')
 const formLostReason = shallowRef(props.editingLead?.lost_reason || '')
 const formAssignedTo = shallowRef(props.editingLead?.assigned_to || UNASSIGNED)
-const formStageId = shallowRef(props.editingLead?.stage_id || props.initialStageId || props.stages[0]?.id || '')
+// defaultStageId picks the form's starting stage. In create mode a closing
+// stage is unreachable (ErrClosingStageAtCreate), so the kanban "+" column's
+// stage is only honored when it is open — otherwise the first open stage.
+function defaultStageId(): string {
+  if (props.editingLead?.stage_id) return props.editingLead.stage_id
+  if (props.initialStageId) {
+    const s = props.stages.find((x) => x.id === props.initialStageId)
+    if (s && (props.editingLead || !s.is_closing)) return s.id
+  }
+  return props.stages.find((s) => props.editingLead || !s.is_closing)?.id || props.stages[0]?.id || ''
+}
+
+const formStageId = shallowRef(defaultStageId())
 const formError = shallowRef('')
 
 // Contact picker state
@@ -99,7 +111,7 @@ const newContactMode = shallowRef(false)
 const newContactName = shallowRef('')
 const newContactPhone = shallowRef('')
 const newContactEmail = shallowRef('')
-// phone resolve picker (ADR 012): matches are offered before the lead submits
+// phone resolve picker: matches are offered before the lead submits
 const resolveMatches = shallowRef<ResolveMatch[]>([])
 const resolvedOnce = shallowRef(false)
 
@@ -109,11 +121,17 @@ const rbac = useRBACStore()
 const hasLinkedContact = computed(() => !!linkedContactId.value)
 const isEditing = computed(() => !!props.editingLead)
 
-// Closing stages are unreachable at create (ADR 012): the form hides them in
+// Closing stages are unreachable at create: the form hides them in
 // create mode, and the backend rejects them (ErrClosingStageAtCreate).
 const createStages = computed(() =>
   isEditing.value ? props.stages : props.stages.filter(s => !s.is_closing),
 )
+
+// A "+" click on a different column while the create drawer is open re-seeds
+// the stage default (the form instance is reused for create mode).
+watch(() => props.initialStageId, () => {
+  if (!isEditing.value) formStageId.value = defaultStageId()
+})
 
 const selectedStage = computed(() => props.stages.find(s => s.id === formStageId.value))
 const isClosingStage = computed(() => !!selectedStage.value?.is_closing)
@@ -137,6 +155,8 @@ watch(
   },
 )
 
+// snapshotValue returns the lead's saved value while the program is unchanged,
+// else the newly selected program's price — the price snapshot contract.
 const snapshotValue = computed(() => {
   if (props.editingLead?.program_id === formProgramId.value) {
     return props.editingLead.value
@@ -159,20 +179,32 @@ function displayName(): string {
   return ''
 }
 
-async function searchContacts() {
+// searchContacts debounces the contact picker search (300ms) and discards
+// out-of-order responses so a slow reply can never overwrite a newer query.
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let searchSeq = 0
+function searchContacts() {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(runContactSearch, 300)
+}
+
+async function runContactSearch() {
   const q = contactSearch.value.trim()
   if (!q) {
     contactResults.value = []
     return
   }
+  const seq = ++searchSeq
   searchingContacts.value = true
   try {
     const res = await apiClient.get(`/api/contacts?q=${encodeURIComponent(q)}&per_page=10`)
+    if (seq !== searchSeq) return
     contactResults.value = res.data
   } catch {
+    if (seq !== searchSeq) return
     contactResults.value = []
   } finally {
-    searchingContacts.value = false
+    if (seq === searchSeq) searchingContacts.value = false
   }
 }
 
@@ -225,7 +257,7 @@ async function handleSave() {
       body.contact_id = linkedContactId.value
     }
   } else if (newContactMode.value) {
-    // Resolve-or-create: ask on phone match (ADR 012), then submit.
+    // Resolve-or-create: ask on phone match, then submit.
     if (!newContactName.value.trim()) {
       formError.value = 'Contact name is required'
       return
@@ -347,7 +379,7 @@ function createNewPersonInstead() {
           A phone or email is required. If the phone matches an existing contact, the lead links to it.
         </p>
 
-        <!-- Phone-match picker: ask before linking (ADR 012) -->
+        <!-- Phone-match picker: ask before linking -->
         <div v-if="resolveMatches.length" class="space-y-2">
           <Label class="text-sm font-medium">Matching contacts</Label>
           <div class="max-h-48 overflow-y-auto rounded-md border">

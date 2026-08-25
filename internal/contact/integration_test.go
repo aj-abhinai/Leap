@@ -943,3 +943,93 @@ func TestResolveHandlerReturnsMatchesIntegration(t *testing.T) {
 		t.Errorf("data = %+v, want one Alice Example match", body.Data)
 	}
 }
+
+func TestPartialUpdateKeepsUnsentPhoneEmailTypeIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{
+		Name:  "Alice",
+		Phone: "1111111111",
+		Email: "alice@example.com",
+	})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	// A phones-only update must leave the email rows untouched.
+	phones := []PhoneValue{{Value: "2222222222", IsPrimary: true}}
+	updated, err := svc.update(created.ID, UpdateRequest{Phones: &phones}, "")
+	if err != nil {
+		t.Fatalf("phones-only update: %v", err)
+	}
+	if len(updated.Emails) != 1 || updated.Emails[0].Value != "alice@example.com" {
+		t.Errorf("phones-only update wiped emails: %+v", updated.Emails)
+	}
+	if len(updated.Phones) != 1 || updated.Phones[0].Value != "2222222222" || !updated.Phones[0].IsPrimary {
+		t.Errorf("phones not replaced by update: %+v", updated.Phones)
+	}
+
+	// An emails-only update must leave the phone rows untouched.
+	emails := []EmailValue{{Value: "bob@example.com", IsPrimary: true}}
+	updated, err = svc.update(created.ID, UpdateRequest{Emails: &emails}, "")
+	if err != nil {
+		t.Fatalf("emails-only update: %v", err)
+	}
+	if len(updated.Phones) != 1 || updated.Phones[0].Value != "2222222222" {
+		t.Errorf("emails-only update wiped phones: %+v", updated.Phones)
+	}
+	if len(updated.Emails) != 1 || updated.Emails[0].Value != "bob@example.com" {
+		t.Errorf("emails not replaced by update: %+v", updated.Emails)
+	}
+}
+
+func TestExactlyOnePrimaryEnforcedOnInsertIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{
+		Name: "Alice",
+		Phones: []PhoneValue{
+			{Value: "1111111111", IsPrimary: true},
+			{Value: "2222222222", IsPrimary: true},
+			{Value: "3333333333"},
+		},
+		Emails: []EmailValue{
+			{Value: "a@example.com", IsPrimary: true},
+			{Value: "b@example.com", IsPrimary: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	var phonePrimaries int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM contact_phones WHERE contact_id = $1 AND is_primary`, created.ID,
+	).Scan(&phonePrimaries); err != nil {
+		t.Fatalf("count phone primaries: %v", err)
+	}
+	if phonePrimaries != 1 {
+		t.Errorf("phone primaries = %d, want 1", phonePrimaries)
+	}
+	var firstPrimary string
+	if err := db.QueryRow(
+		`SELECT value FROM contact_phones WHERE contact_id = $1 AND is_primary`, created.ID,
+	).Scan(&firstPrimary); err != nil {
+		t.Fatalf("read primary phone: %v", err)
+	}
+	if firstPrimary != "1111111111" {
+		t.Errorf("primary phone = %q, want the first marked entry", firstPrimary)
+	}
+
+	var emailPrimaries int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM contact_emails WHERE contact_id = $1 AND is_primary`, created.ID,
+	).Scan(&emailPrimaries); err != nil {
+		t.Fatalf("count email primaries: %v", err)
+	}
+	if emailPrimaries != 1 {
+		t.Errorf("email primaries = %d, want 1", emailPrimaries)
+	}
+}

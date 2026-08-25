@@ -11,7 +11,7 @@ import (
 )
 
 // ErrInvalidQuickReply marks a quick_reply_id that does not reference a
-// quick-reply tag (type 'quick_reply', ADR 020).
+// quick-reply tag (type 'quick_reply').
 var ErrInvalidQuickReply = errors.New("quick_reply_id must reference a quick_reply tag")
 
 // ErrSnoozePast marks a snooze whose remind_at is not in the future.
@@ -58,7 +58,7 @@ func (s *Service) validateQuickReplyTx(q interface {
 }
 
 // ErrEmptyType marks an activity request with a blank type. Descriptions are
-// optional (ADR 018) — a quick "Call 1 / Busy, reschedule" entry needs no prose.
+// optional — a quick "Call 1 / Busy, reschedule" entry needs no prose.
 var ErrEmptyType = errors.New("activity type cannot be empty")
 
 // ErrNothingToUpdate marks an activity update request with no fields set.
@@ -119,6 +119,9 @@ func (s *Service) listActivities(leadID string, page, perPage int) ([]Activity, 
 			return nil, 0, err
 		}
 		activities = append(activities, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("list activities: iterate: %w", err)
 	}
 	return activities, total, nil
 }
@@ -196,7 +199,7 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 // time; occurred_at is stamped on completion unless supplied explicitly.
 // Editing remind_at re-opens the reminder (is_reminded = false).
 //
-// The "log attempt + next" reschedule flow (ADR 018): when is_done=true and a
+// The "log attempt + next" reschedule flow: when is_done=true and a
 // reschedule_at is supplied, the completed attempt is logged and a new task of
 // the same type is created for reschedule_at, defaulting its reminder to the
 // same time.
@@ -348,7 +351,7 @@ func (s *Service) dismissReminder(leadID, activityID string) (bool, error) {
 // snoozeReminder pushes an activity's reminder forward and re-opens it
 // (is_reminded = false) so it re-enters the pending pool. The task's scheduled
 // time shifts by the same delta as the reminder, so snooze behaves as a quick
-// reschedule of an open task (ADR 018). The new time must be future-only and
+// reschedule of an open task. The new time must be future-only and
 // within the snooze horizon. Only open, non-cancelled activities that carry a
 // reminder or schedule are eligible — matching dismissReminder — so a missing
 // or reminder-less id is a clean (false, nil) instead of an error.
@@ -457,15 +460,17 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 
 	// Conditions use a "$?" placeholder; renumber() assigns real $n after all
 	// args are collected so multi-arg predicates (search) stay consistent.
+	// One counter is shared across all conditions — each condition continues
+	// from the previous one's last number.
 	where := []string{"l.deleted_at IS NULL"}
 	args := []any{}
 	add := func(cond string, a ...any) {
 		where = append(where, cond)
 		args = append(args, a...)
 	}
+	argIdx := 0
 	renumber := func(cond string) string {
 		var b strings.Builder
-		idx := 0
 		for {
 			i := strings.Index(cond, "$?")
 			if i < 0 {
@@ -473,8 +478,8 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 				break
 			}
 			b.WriteString(cond[:i])
-			idx++
-			b.WriteString(fmt.Sprintf("$%d", idx))
+			argIdx++
+			b.WriteString(fmt.Sprintf("$%d", argIdx))
 			cond = cond[i+2:]
 		}
 		return b.String()

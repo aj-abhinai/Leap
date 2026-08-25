@@ -1,6 +1,7 @@
 package lead
 
 import (
+	"crm/internal/audit"
 	"crm/internal/util"
 	"database/sql"
 	"errors"
@@ -10,7 +11,11 @@ import (
 )
 
 var (
+	// ErrCustomValueRejected marks lead create/update requests that try to set
+	// value directly; the value always comes from the program catalog price.
 	ErrCustomValueRejected = errors.New("lead value is set from the program catalog price")
+	// ErrProgramNotActive marks program_id values that do not reference a
+	// live (non-archived) program.
 	ErrProgramNotActive    = errors.New("program not found or archived")
 	// ErrNotFound marks mutations targeting a lead that does not exist or
 	// has been deleted.
@@ -24,7 +29,7 @@ var (
 	// ErrNoContactDetail marks a new_contact with neither a phone nor an email.
 	ErrNoContactDetail = errors.New("new contact must have at least one phone or one email")
 	// ErrClosingStageAtCreate marks lead creation into a closing stage; closing
-	// is reachable only by moving an existing lead (ADR 012).
+	// is reachable only by moving an existing lead.
 	ErrClosingStageAtCreate = errors.New("a lead cannot be created in a closing stage")
 	// ErrContactNotActive marks a contact_id that does not exist or has been
 	// deleted; leads must not link to soft-deleted contacts.
@@ -39,10 +44,14 @@ var (
 	ErrInvalidAssignee = errors.New("assigned_to must reference an active user")
 )
 
+// Service provides database-backed lead operations: list/get/create/update/
+// delete, stage moves with history, activities, reminders, and the
+// resolve-or-create contact flow for lead entry.
 type Service struct {
 	db *sql.DB
 }
 
+// NewService creates a lead Service backed by db.
 func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
@@ -182,6 +191,9 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 		l.DisplayName = l.displayName()
 		leads = append(leads, l)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("list leads: iterate: %w", err)
+	}
 	return leads, total, nil
 }
 
@@ -286,7 +298,7 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 		return nil, err
 	}
 	// Closing stages are unreachable at create: a lead must be moved into them
-	// so the stage history records the move (ADR 012).
+	// so the stage history records the move.
 	info, err := s.stageInfoTx(tx, req.StageID)
 	if err != nil {
 		return nil, err
@@ -337,7 +349,7 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *NewContact, userID string) (string, error) {
 	if contactID != nil && *contactID != "" {
 		// Reject deleted or unknown contacts so a lead can never be attached
-		// to a soft-deleted contact's row (ADR 009 identity rules). Malformed
+		// to a soft-deleted contact's row. Malformed
 		// ids are rejected up front so a non-UUID value cannot surface as a
 		// Postgres cast error.
 		if !util.IsUUID(*contactID) {
@@ -364,7 +376,7 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	}
 
 	// Serialize concurrent lead entries that could create a duplicate contact
-	// for the same phone/email. The lock is namespaced (ADR 012, plan 042) and
+	// for the same phone/email. The lock is namespaced by the lookup key and
 	// released automatically at commit/rollback.
 	key := util.NormalizePhone(nc.Phone)
 	if key == "" {
@@ -376,7 +388,7 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 		}
 	}
 
-	// Phone primary, email secondary (ADR 009). The child tables store the raw
+	// Phone primary, email secondary. The child tables store the raw
 	// value for display, so the lookup normalizes both sides: the incoming value
 	// is stripped to digits and matched against the stored value with the same
 	// transformation. Any phone/email on a contact counts as a match (not just
@@ -439,7 +451,7 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	}
 
 	// Audit the contact creation inside the same transaction. Best-effort: a
-	// failed audit must never roll back the business mutation (ADR 009).
+	// failed audit must never roll back the business mutation.
 	userName := ""
 	if userID != "" {
 		_ = tx.QueryRow(`SELECT name FROM users WHERE id = $1`, userID).Scan(&userName)
@@ -480,11 +492,12 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		}
 	}
 	if req.PipelineID != nil && req.StageID == nil {
-		var stageID string
+		// The lead keeps its current stage; verify it still belongs to the
+		// pipeline the client is switching the lead into.
 		if err := tx.QueryRow(
 			`SELECT id FROM lead_stages WHERE pipeline_id = $1 AND id = $2`,
 			*req.PipelineID, old.StageID,
-		).Scan(&stageID); err != nil {
+		).Scan(new(string)); err != nil {
 			return nil, ErrStageNotInPipeline
 		}
 	}
@@ -509,8 +522,8 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	}
 
 	// Resolve the outcome when the lead moves into or out of a closing stage.
-	// outcome is set from the target stage's declared outcome (ADR 019
-	// amendment), so 'won' and 'lost' come from stage metadata rather than
+	// outcome is set from the target stage's declared outcome, so 'won' and
+	// 'lost' come from stage metadata rather than
 	// matching stage names by text; lost_reason may be supplied by the caller
 	// when the lead is marked lost.
 	var outcome *string
@@ -601,7 +614,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 			return nil, fmt.Errorf("record stage history: %w", err)
 		}
 		// Reaching a closing stage resolves the deal: cancel every open task so
-		// reminders stop nagging on won/lost leads (ADR 018).
+		// reminders stop nagging on won/lost leads.
 		if targetStage.IsClosing {
 			if _, err := tx.Exec(
 				`UPDATE lead_activities SET is_cancelled = true
@@ -762,7 +775,7 @@ type stageInfo struct {
 	Name      string
 	IsClosing bool
 	// Outcome is the stage's declared outcome ('open' | 'won' | 'lost'),
-	// authoritative for lead outcome resolution (ADR 019 amendment).
+	// authoritative for lead outcome resolution.
 	Outcome string
 }
 
@@ -814,17 +827,5 @@ func (s *Service) listHistory(leadID string) ([]StageHistory, error) {
 }
 
 func (s *Service) logActivity(resourceID, resourceType, action, desc, userID string) {
-	userName := ""
-	if userID != "" {
-		if err := s.db.QueryRow(`SELECT name FROM users WHERE id = $1`, userID).Scan(&userName); err != nil {
-			slog.Error("resolve audit actor name", "error", err, "user_id", userID)
-		}
-	}
-	if _, err := s.db.Exec(
-		`INSERT INTO audit_logs (description, resource_type, resource_id, action, user_id, user_name)
-		VALUES ($1, $2, $3, $4, NULLIF($5, '')::uuid, NULLIF($6, ''))`,
-		desc, resourceType, resourceID, action, userID, userName,
-	); err != nil {
-		slog.Error("log activity", "error", err, "resource_type", resourceType, "resource_id", resourceID)
-	}
+	audit.LogCustom(s.db, desc, resourceType, resourceID, action, "", userID)
 }

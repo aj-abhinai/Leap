@@ -12,15 +12,19 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// Handler serves the contact HTTP endpoints, enforcing permissions through
+// the injected PermissionChecker.
 type Handler struct {
 	svc   *Service
 	perms PermissionChecker
 }
 
+// PermissionChecker reports whether a user holds a given permission.
 type PermissionChecker interface {
 	UserCan(userID, permission string) (bool, error)
 }
 
+// NewHandler creates a contact Handler for the given service and checker.
 func NewHandler(svc *Service, perms PermissionChecker) *Handler {
 	return &Handler{svc: svc, perms: perms}
 }
@@ -162,7 +166,7 @@ func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // Resolve returns the contacts matching a phone number (normalized digits)
-// so lead entry can ask the user whether to link or create (ADR 012).
+// so lead entry can ask the user whether to link or create.
 func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 	phone := r.URL.Query().Get("phone")
 	if phone == "" {

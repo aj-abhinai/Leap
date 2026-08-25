@@ -16,6 +16,10 @@ type querier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
+// Seed bootstraps a fresh database with the superadmin user, the permission
+// set, the default pipeline, and the tag/status/quick-reply catalog. It runs
+// on every boot and is idempotent: the superadmin is created only on an empty
+// users table, and every other seed is upsert-style.
 func Seed(db *sql.DB, authCfg config.Auth, superadmin config.Superadmin) error {
 	if _, err := seedSuperadmin(db, authCfg, superadmin); err != nil {
 		return fmt.Errorf("seed superadmin: %w", err)
@@ -212,7 +216,7 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		{"VIP", "tag", "tag"},
 		{"Student", "tag", "tag"},
 		{"Influencer", "tag", "tag"},
-		// Contact statuses (a separate tag type, ADR 020).
+		// Contact statuses (a separate tag type).
 		{"New", "status", "status"},
 		{"Active", "status", "status"},
 		{"Cold", "status", "status"},
@@ -223,7 +227,7 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		{"Email", "activity_type", "activity type"},
 		{"Meeting", "activity_type", "activity type"},
 		// Loss-reason presets for the "Closed Lost" stage (free text plus presets).
-		{"Not intrested", "loss_reason", "loss reason"},
+		{"Not interested", "loss_reason", "loss reason"},
 		{"Fake", "loss_reason", "loss reason"},
 	}
 	for _, t := range catalog {
@@ -237,7 +241,7 @@ func seedTagsAndStatuses(db *sql.DB) error {
 	}
 
 	// Activity quick replies (the "what happened" chips in the activity form).
-	// These are a separate catalog from contact statuses (ADR 020): each carries
+	// These are a separate catalog from contact statuses: each carries
 	// a group (ordered palette section) and a behavior that drives the follow-up
 	// when the quick reply is picked:
 	//   log        — record the reply only (e.g. Interested)

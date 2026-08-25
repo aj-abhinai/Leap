@@ -1,4 +1,4 @@
--- Decouple activity quick replies from contact statuses (ADR 020).
+-- Decouple activity quick replies from contact statuses.
 --
 -- Status tags were doing double duty: contact status identifiers (contacts.
 -- status_id) AND the "What happened?" quick replies in the activity form.
