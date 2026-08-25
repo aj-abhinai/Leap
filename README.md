@@ -128,11 +128,12 @@ instance to run the app without the bundled `db` service.
 # Start Postgres in Docker (one-time, stays running)
 just dev-db
 
-# Backend (in one terminal)
-just dev-backend
+# Everything in one command (Postgres + backend + frontend; Ctrl+C stops all)
+just dev
 
-# Frontend (in a separate terminal — proxies /api to localhost:9000)
-just dev-frontend
+# Or individually:
+just backend        # Postgres + backend (in one terminal)
+just frontend       # Vite dev server (in a separate terminal — proxies /api to localhost:9000)
 
 # Run tests
 just test            # with coverage, no race detector (CGO-free)

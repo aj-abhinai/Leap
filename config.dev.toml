@@ -2,7 +2,7 @@
 # bootstrap credentials (admin@admin.com / admin) and the burned dev JWT
 # secret so every developer gets an identical, zero-setup environment.
 # It is reachable only through dev-only startup paths:
-#   - `just dev-backend`        (local binary)
+#   - `just backend`            (local binary)
 #   - `just docker-up`          (docker-compose.dev.yml override)
 # It must never be used in production — `Validate` rejects these values
 # whenever environment is not development.

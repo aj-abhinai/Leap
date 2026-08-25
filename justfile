@@ -19,7 +19,7 @@ default:
 # === Dev ===
 
 # Start Postgres in Docker and run the Go server. Ctrl+C stops Postgres.
-dev-backend:
+backend:
     #!/usr/bin/env sh
     set -e
     CLEANED_UP=""
@@ -42,11 +42,47 @@ dev-backend:
     {{compose}} stop app >/dev/null 2>&1 || true
     go run ./cmd/server/ -config {{config}}
 
-# Same as dev-backend
-dev: dev-backend
+# Start Postgres, then the backend and frontend dev servers in one command. Ctrl+C stops everything.
+dev:
+    #!/usr/bin/env sh
+    set -e
+    BACKEND_PID=""
+    FRONTEND_PID=""
+    CLEANED_UP=""
+    cleanup() {
+      [ -n "$CLEANED_UP" ] && return
+      CLEANED_UP=1
+      if [ -n "$FRONTEND_PID" ]; then kill "$FRONTEND_PID" 2>/dev/null || true; fi
+      if [ -n "$BACKEND_PID" ]; then kill "$BACKEND_PID" 2>/dev/null || true; fi
+      echo " Stopping Postgres..."
+      {{compose}} rm -sf db
+    }
+    trap cleanup EXIT INT TERM
+    {{compose}} up -d db
+    echo "Waiting for Postgres..."
+    for i in $(seq 1 30); do
+      if docker exec crm_db pg_isready -U crm -d crm >/dev/null 2>&1; then
+        echo "Postgres ready"
+        break
+      fi
+      sleep 1
+    done
+    if ! docker exec crm_db pg_isready -U crm -d crm >/dev/null 2>&1; then
+      echo "ERROR: Postgres did not become ready in 30s"
+      exit 1
+    fi
+    # Free port :9000 if the docker app container is running (avoids bind collision with `just docker-up`).
+    {{compose}} stop app >/dev/null 2>&1 || true
+    echo "Starting backend on :9000..."
+    go run ./cmd/server/ -config {{config}} &
+    BACKEND_PID=$!
+    echo "Starting frontend on :5173..."
+    (cd frontend && ([ -d "node_modules" ] || pnpm install --frozen-lockfile) && pnpm dev) &
+    FRONTEND_PID=$!
+    wait
 
 # Vite dev server with HMR on :5173 (proxies /api to :9000)
-dev-frontend:
+frontend:
     cd frontend && \
     [ -d "node_modules" ] || pnpm install --frozen-lockfile && \
     pnpm dev
