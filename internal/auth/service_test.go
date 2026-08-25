@@ -52,9 +52,12 @@ func TestDummyHashSurvivesInvalidCost(t *testing.T) {
 }
 
 func TestHashPasswordEmpty(t *testing.T) {
-	_, err := HashPassword("", bcrypt.MinCost)
+	hash, err := HashPassword("", bcrypt.MinCost)
 	if err != nil {
-		t.Error("hashing empty password should not fail")
+		t.Fatalf("HashPassword failed: %v", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte("")); err != nil {
+		t.Error("password verification failed")
 	}
 }
 

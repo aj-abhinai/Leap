@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,28 +10,40 @@ import (
 )
 
 func TestBodyLimit(t *testing.T) {
-	r := http.NewServeMux()
-	r.Handle("/", BodyLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
+	var readErr error
+	readAll := func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		readErr = err
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(body)
-	})))
+	}
+	r := http.NewServeMux()
+	r.Handle("/", BodyLimit(http.HandlerFunc(readAll)))
 
-	// Under the limit: body is read normally.
+	// Under the limit: the body is read in full.
 	small := strings.Repeat("a", MaxBodyBytes-1)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(small))
 	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("under-limit request: status = %d, want 200", rec.Code)
+	if readErr != nil {
+		t.Fatalf("under-limit read failed: %v", readErr)
+	}
+	if rec.Body.Len() != len(small) {
+		t.Errorf("under-limit body length = %d, want %d", rec.Body.Len(), len(small))
 	}
 
-	// Over the limit: the read fails and the handler sees an error.
-	big := strings.Repeat("a", MaxBodyBytes+1)
+	// Over the limit: the read fails and the handler only ever sees a
+	// truncated body.
+	big := strings.Repeat("a", MaxBodyBytes*2)
+	readErr = nil
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(big))
 	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("over-limit request: status = %d, want 200 (handler decides)", rec.Code)
+	var mbe *http.MaxBytesError
+	if !errors.As(readErr, &mbe) {
+		t.Fatalf("over-limit read err = %v, want *http.MaxBytesError", readErr)
+	}
+	if rec.Body.Len() >= len(big) {
+		t.Errorf("over-limit body length = %d, want truncated below %d", rec.Body.Len(), len(big))
 	}
 }
