@@ -5,7 +5,7 @@ RUN npm install -g pnpm@11.10.0 && pnpm install --frozen-lockfile --config.dange
 COPY frontend/ .
 RUN pnpm build
 
-FROM golang:1.25-alpine AS backend
+FROM golang:1.26.6-alpine AS backend
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
