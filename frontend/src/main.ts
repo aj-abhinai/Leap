@@ -1,6 +1,5 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { VueQueryPlugin } from '@tanstack/vue-query'
 import App from './App.vue'
 import router from './router'
 import './style.css'
@@ -13,7 +12,6 @@ await auth.bootstrap()
 const app = createApp(App)
 app.use(pinia)
 app.use(router)
-app.use(VueQueryPlugin)
 app.mount('#app')
 
 // The app is ready: fade out the static splash from index.html. The Vue

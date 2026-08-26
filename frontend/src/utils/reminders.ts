@@ -1,4 +1,5 @@
 import { Phone, MessageCircle, Mail, NotepadText, CalendarClock, CheckCheck } from '@lucide/vue'
+import { toLocalDateInput, toLocalTimeInput } from './time'
 
 export interface ReminderLike {
   type: string
@@ -74,3 +75,38 @@ export const nextPresets: NextPreset[] = [
   { label: 'In 3 days', at: () => inDays(3) },
   { label: 'Next week', at: () => inDays(7) },
 ]
+
+// groupQuickReplies buckets quick-reply chips by group (defaulting to
+// "Quick reply") and sorts each bucket by sort_order, for the ordered
+// palette rendered in task forms.
+export interface QuickReplyGroup<T> {
+  group: string
+  items: T[]
+}
+
+export function groupQuickReplies<T extends { group_name?: string | null; sort_order: number }>(
+  chips: T[],
+): QuickReplyGroup<T>[] {
+  const groups = new Map<string, T[]>()
+  for (const chip of chips) {
+    const key = chip.group_name || 'Quick reply'
+    const bucket = groups.get(key) ?? []
+    bucket.push(chip)
+    groups.set(key, bucket)
+  }
+  return [...groups.entries()].map(([group, items]) => ({
+    group,
+    items: items.slice().sort((a, b) => a.sort_order - b.sort_order),
+  }))
+}
+
+// findSelectedPreset highlights the preset that produced the current
+// date/time inputs, or '' when none matches.
+export function findSelectedPreset(date: string, time: string, presets: NextPreset[]): string {
+  if (!date || !time) return ''
+  const preset = presets.find((p) => {
+    const at = p.at().toISOString()
+    return toLocalDateInput(at) === date && toLocalTimeInput(at) === time
+  })
+  return preset?.label ?? ''
+}

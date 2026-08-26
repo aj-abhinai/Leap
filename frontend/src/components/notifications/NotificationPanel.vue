@@ -2,11 +2,14 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useRemindersStore } from '@/stores/reminders'
+import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { BellOff, X } from '@lucide/vue'
 import { formatReminderText, formatReminderTime, reminderIcon } from '@/utils/reminders'
 import { timeAgo } from '@/utils/time'
+import { errorMessage } from '@/utils/errors'
+import type { Reminder } from '@/api/reminders'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
 const emit = defineEmits<{ close: [] }>()
@@ -22,6 +25,19 @@ const openRows = computed(() =>
     reminderTime: formatReminderTime(r),
   })),
 )
+
+// dismiss removes the reminder and refetches so the row and the bell badge
+// (pendingCount) update immediately; failures surface as a toast instead of
+// an unhandled rejection.
+async function dismiss(reminder: Reminder) {
+  try {
+    await store.dismissReminder(reminder.lead_id, reminder.id)
+    toast.success('Reminder dismissed')
+    await store.fetchReminders()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to dismiss reminder'))
+  }
+}
 </script>
 
 <template>
@@ -61,7 +77,7 @@ const openRows = computed(() =>
               <p class="text-xs text-muted-foreground/70 mt-0.5">{{ timeAgo(reminder.created_at) }}</p>
             </div>
             <div class="flex items-start">
-              <Button variant="ghost" size="sm" class="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" @click.stop="store.dismissReminder(reminder)" aria-label="Dismiss reminder">
+              <Button variant="ghost" size="sm" class="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" @click.stop="dismiss(reminder)" aria-label="Dismiss reminder">
                 <X class="h-2.5 w-2.5" />
               </Button>
             </div>

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
 import { useRBACStore } from '@/stores/rbac'
 import { usePipelineStore } from '@/stores/pipeline'
 import { useLeadPipeline } from '@/composables/useLeadPipeline'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
-import type { Lead } from '@/stores/leads'
+import { useLeadsStore } from '@/stores/leads'
+import { getLead, type Lead } from '@/api/leads'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ import LeadStageHistory from './LeadStageHistory.vue'
 const router = useRouter()
 const rbac = useRBACStore()
 const pipelineStore = usePipelineStore()
+const leadsStore = useLeadsStore()
 const pipeline = useLeadPipeline()
 const { drawerOpen, drawerLeadId, drawerLead, closeLeadDrawer } = useLeadDrawerGlobal()
 
@@ -41,7 +42,7 @@ watch(
     }
     loading.value = true
     try {
-      const res = await apiClient.get<Lead>(`/api/leads/${id}`)
+      const res = await getLead(id)
       lead.value = res.data
       if (pipelineStore.pipelines.length === 0) pipelineStore.fetchPipelines()
     } catch (e) {
@@ -54,30 +55,20 @@ watch(
   { immediate: true },
 )
 
+// A lead is closed when it sits in a closing stage; the stage's outcome is
+// authoritative rather than the possibly-stale leads.outcome.
 function isClosed() {
-  return !!lead.value?.outcome
+  return lead.value?.stage_outcome === 'won' || lead.value?.stage_outcome === 'lost'
 }
 
-// A close_lost quick reply on an activity logs the reply then moves the lead to
-// its pipeline's lost closing stage (declared via stage outcome metadata, so no
-// name guessing). Reaching a closing stage resolves the deal and cancels open
-// tasks, so the flow "ends there" for the lead.
+// A close_lost quick reply is executed by the backend in the same transaction
+// as the activity save (log + stage move + task cancellation); the drawer
+// only needs to refresh so the kanban card lands in the lost column.
 async function handleCloseLost() {
-  const l = lead.value
-  if (!l?.id) return
-  if (pipelineStore.pipelines.length === 0) await pipelineStore.fetchPipelines()
-  const pl = pipelineStore.pipelines.find((p) => p.id === l.pipeline_id)
-  const stages = pl?.stages || []
-  const target = stages.find((s) => s.is_closing && s.outcome === 'lost')
-  if (!target) {
-    toast.error('No closing "lost" stage configured in this pipeline')
-    return
+  pipeline.loadLeads()
+  if (!pipeline.selectedPipelineId.value && pipelineStore.pipelines.length > 0) {
+    await leadsStore.fetchAllLeads({ pipelineId: pipelineStore.pipelines[0].id })
   }
-  if (l.stage_id === target.id) {
-    closeLeadDrawer()
-    return
-  }
-  await pipeline.moveStage(l.id, target.id, l.stage_id)
   closeLeadDrawer()
 }
 
@@ -118,8 +109,8 @@ function newLeadForContact() {
             <Badge v-if="lead.stage_name" variant="secondary" class="text-xs">
               {{ lead.stage_name }}
             </Badge>
-            <Badge v-if="lead.outcome === 'won'" class="text-xs">Won</Badge>
-            <Badge v-if="lead.outcome === 'lost'" variant="destructive" class="text-xs">Lost</Badge>
+            <Badge v-if="lead.stage_outcome === 'won'" class="text-xs">Won</Badge>
+            <Badge v-if="lead.stage_outcome === 'lost'" variant="destructive" class="text-xs">Lost</Badge>
             <span v-if="lead.program_name" class="flex items-center gap-1">
               <BookOpen class="size-3" /> {{ lead.program_name }}
             </span>

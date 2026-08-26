@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { shallowRef, watch } from 'vue'
-import { apiClient } from '@/composables/useApi'
+import { listLeadsByContact, type Lead } from '@/api/leads'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -9,18 +9,7 @@ import { formatCurrency } from '@/utils/format'
 import { formatDate } from '@/utils/time'
 import { errorMessage } from '@/utils/errors'
 
-interface LeadInfo {
-  id: string
-  display_name: string
-  pipeline_id: string
-  stage_name?: string
-  outcome?: string
-  lost_reason?: string
-  program_name?: string
-  value?: number
-  assigned_to?: string
-  created_at: string
-}
+interface LeadInfo extends Lead {}
 
 const props = defineProps<{
   contactId: string
@@ -40,7 +29,7 @@ async function fetchLeads() {
   loading.value = true
   loadError.value = ''
   try {
-    const res = await apiClient.get(`/api/leads?contact_id=${props.contactId}`)
+    const res = await listLeadsByContact(props.contactId)
     if (seq !== fetchSeq) return
     leads.value = res.data
   } catch (e) {
@@ -83,14 +72,14 @@ async function fetchLeads() {
               <span>Pipeline</span>
               <ChevronRight class="size-3" />
               <Badge variant="outline" class="text-xs px-1.5">{{ lead.stage_name || '–' }}</Badge>
-              <span v-if="lead.outcome === 'won'" class="inline-flex items-center gap-1 text-success font-medium">
+              <span v-if="lead.stage_outcome === 'won'" class="inline-flex items-center gap-1 text-success font-medium">
                 <Trophy class="size-3" /> Won
               </span>
-              <span v-else-if="lead.outcome === 'lost'" class="inline-flex items-center gap-1 text-destructive font-medium">
+              <span v-else-if="lead.stage_outcome === 'lost'" class="inline-flex items-center gap-1 text-destructive font-medium">
                 <XCircle class="size-3" /> Lost
               </span>
             </div>
-            <div v-if="lead.outcome === 'lost' && lead.lost_reason" class="mt-1 text-xs text-muted-foreground">
+            <div v-if="lead.stage_outcome === 'lost' && lead.lost_reason" class="mt-1 text-xs text-muted-foreground">
               Reason: {{ lead.lost_reason }}
             </div>
             <div v-if="lead.program_name" class="mt-1 text-xs text-muted-foreground">

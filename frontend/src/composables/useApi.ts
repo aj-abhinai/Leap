@@ -1,9 +1,14 @@
 import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 
-interface ApiResponse<T = any> {
+interface ApiErrorPayload {
+  code: string
+  message: string
+}
+
+export interface ApiResponse<T = any> {
   data: T
-  error?: { code: string; message: string }
+  error?: ApiErrorPayload | null
   meta?: { page: number; per_page: number; total: number }
 }
 
@@ -16,12 +21,26 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T = any>(method: string, url: string, body?: any): Promise<ApiResponse<T>> {
+export interface RequestOptions {
+  headers?: Record<string, string>
+  // skipAuth disables the 401-refresh-retry loop for requests that carry
+  // their own auth semantics (login, refresh, logout): a failed refresh must
+  // not trigger another refresh.
+  skipAuth?: boolean
+}
+
+async function request<T = any>(
+  method: string,
+  url: string,
+  body?: any,
+  options: RequestOptions = {},
+): Promise<ApiResponse<T>> {
   const auth = useAuthStore()
   const router = useRouter()
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...options.headers,
   }
   if (auth.accessToken) {
     headers['Authorization'] = `Bearer ${auth.accessToken}`
@@ -33,7 +52,7 @@ async function request<T = any>(method: string, url: string, body?: any): Promis
     body: body ? JSON.stringify(body) : undefined,
   })
 
-  if (res.status === 401) {
+  if (res.status === 401 && !options.skipAuth) {
     try {
       await auth.refresh()
       headers['Authorization'] = `Bearer ${auth.accessToken}`
@@ -94,9 +113,9 @@ export async function apiDownload(url: string): Promise<Blob> {
 }
 
 export const apiClient = {
-  get: <T = any>(url: string) => request<T>('GET', url),
-  post: <T = any>(url: string, body?: any) => request<T>('POST', url, body),
-  patch: <T = any>(url: string, body?: any) => request<T>('PATCH', url, body),
-  put: <T = any>(url: string, body?: any) => request<T>('PUT', url, body),
-  delete: <T = any>(url: string) => request<T>('DELETE', url),
+  get: <T = any>(url: string, options?: RequestOptions) => request<T>('GET', url, undefined, options),
+  post: <T = any>(url: string, body?: any, options?: RequestOptions) => request<T>('POST', url, body, options),
+  patch: <T = any>(url: string, body?: any, options?: RequestOptions) => request<T>('PATCH', url, body, options),
+  put: <T = any>(url: string, body?: any, options?: RequestOptions) => request<T>('PUT', url, body, options),
+  delete: <T = any>(url: string, options?: RequestOptions) => request<T>('DELETE', url, undefined, options),
 }

@@ -1,30 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { apiClient } from '@/composables/useApi'
-import { toast } from 'vue-sonner'
-import { errorMessage } from '@/utils/errors'
+import * as api from '@/api/reminders'
 
-export interface Reminder {
-  id: string
-  lead_id: string
-  contact_id?: string
-  lead_display_name?: string
-  stage_id: string
-  stage_name?: string
-  user_id?: string
-  user_name?: string
-  type: string
-  description: string
-  scheduled_at?: string
-  remind_at?: string
-  is_done: boolean
-  is_cancelled: boolean
-  is_reminded: boolean
-  created_at: string
-}
+export type { Reminder } from '@/api/reminders'
 
 export const useRemindersStore = defineStore('reminders', () => {
-  const reminders = ref<Reminder[]>([])
+  const reminders = ref<api.Reminder[]>([])
   const loading = ref(false)
 
   // Open tasks = not done, not cancelled, not yet reminded. Reminders surface
@@ -40,35 +21,21 @@ export const useRemindersStore = defineStore('reminders', () => {
   async function fetchReminders() {
     loading.value = true
     try {
-      const res = await apiClient.get('/api/reminders')
+      const res = await api.listReminders()
       reminders.value = res.data
     } finally {
       loading.value = false
     }
   }
 
-  async function dismissReminder(reminder: Reminder) {
-    try {
-      await apiClient.patch(`/api/leads/${reminder.lead_id}/reminders/${reminder.id}`)
-      toast.success('Reminder dismissed')
-    } catch (e) {
-      toast.error(errorMessage(e, 'Failed to dismiss reminder'))
-    } finally {
-      await fetchReminders()
-    }
+  // Pure mutation actions: they hit the API and leave toasts/refetches to
+  // the calling view so the store stays UI-free.
+  async function dismissReminder(leadId: string, reminderId: string) {
+    await api.dismissReminder(leadId, reminderId)
   }
 
-  async function snoozeReminder(reminder: Reminder, remindAt: string) {
-    try {
-      await apiClient.post(`/api/leads/${reminder.lead_id}/reminders/${reminder.id}/snooze`, {
-        remind_at: remindAt,
-      })
-      toast.success('Reminder snoozed')
-    } catch (e) {
-      toast.error(errorMessage(e, 'Failed to snooze reminder'))
-    } finally {
-      await fetchReminders()
-    }
+  async function snoozeReminder(leadId: string, reminderId: string, remindAt: string) {
+    await api.snoozeReminder(leadId, reminderId, remindAt)
   }
 
   return { reminders, loading, pendingCount, openReminders, fetchReminders, dismissReminder, snoozeReminder }

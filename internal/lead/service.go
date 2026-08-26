@@ -31,6 +31,9 @@ var (
 	// ErrClosingStageAtCreate marks lead creation into a closing stage; closing
 	// is reachable only by moving an existing lead.
 	ErrClosingStageAtCreate = errors.New("a lead cannot be created in a closing stage")
+	// ErrNoLostStage marks a close_lost quick reply whose pipeline has no lost
+	// closing stage; there is no target to move the lead to.
+	ErrNoLostStage = errors.New("no lost closing stage configured in this pipeline")
 	// ErrContactNotActive marks a contact_id that does not exist or has been
 	// deleted; leads must not link to soft-deleted contacts.
 	ErrContactNotActive = errors.New("contact not found or deleted")
@@ -140,7 +143,8 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 	selectQuery := fmt.Sprintf(
 		`SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
 			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
-			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(l.outcome, ''),
+			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
+			COALESCE(l.outcome, ''),
 			COALESCE(l.lost_reason, ''), l.value,
 			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at,
 			COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
@@ -182,7 +186,7 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 		var l Lead
 		if err := rows.Scan(
 			&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
-			&l.PipelineID, &l.StageID, &l.StageName, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
+			&l.PipelineID, &l.StageID, &l.StageName, &l.StageOutcome, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
 			&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 			&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
 		); err != nil {
@@ -202,7 +206,8 @@ func (s *Service) get(id string) (*Lead, error) {
 	err := s.db.QueryRow(
 		`SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
 			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
-			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(l.outcome, ''),
+			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
+			COALESCE(l.outcome, ''),
 			COALESCE(l.lost_reason, ''), l.value,
 			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at,
 			COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
@@ -229,7 +234,7 @@ func (s *Service) get(id string) (*Lead, error) {
 		WHERE l.id = $1 AND l.deleted_at IS NULL`, id,
 	).Scan(
 		&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
-		&l.PipelineID, &l.StageID, &l.StageName, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
+		&l.PipelineID, &l.StageID, &l.StageName, &l.StageOutcome, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
 		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 		&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
 	)
@@ -315,6 +320,7 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 		`INSERT INTO leads (nickname, contact_id, pipeline_id, stage_id, program_id, value, notes, assigned_to)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, COALESCE(nickname, ''), contact_id, pipeline_id, stage_id,
+			(SELECT COALESCE(outcome, 'open') FROM lead_stages WHERE id = leads.stage_id),
 			program_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
 		util.NullStr(req.Nickname),
 		contactID,
@@ -325,7 +331,7 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 		util.NullStr(req.Notes),
 		util.NullPtr(req.AssignedTo),
 	).Scan(
-		&l.ID, &l.Nickname, &l.ContactID, &l.PipelineID, &l.StageID, &l.ProgramID,
+		&l.ID, &l.Nickname, &l.ContactID, &l.PipelineID, &l.StageID, &l.StageOutcome, &l.ProgramID,
 		&l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
@@ -583,6 +589,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING id, COALESCE(nickname, ''), contact_id, pipeline_id, stage_id,
+			(SELECT COALESCE(outcome, 'open') FROM lead_stages WHERE id = leads.stage_id),
 			COALESCE(outcome, ''), COALESCE(lost_reason, ''),
 			program_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
 		id,
@@ -597,7 +604,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		req.Notes,
 		req.AssignedTo,
 	).Scan(
-		&l.ID, &l.Nickname, &l.ContactID, &l.PipelineID, &l.StageID, &l.Outcome, &l.LostReason,
+		&l.ID, &l.Nickname, &l.ContactID, &l.PipelineID, &l.StageID, &l.StageOutcome, &l.Outcome, &l.LostReason,
 		&l.ProgramID, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 	)
 	if err != nil {
@@ -792,6 +799,79 @@ func (s *Service) stageInfoTx(tx *sql.Tx, stageID string) (*stageInfo, error) {
 		return nil, fmt.Errorf("load stage info: %w", err)
 	}
 	return &info, nil
+}
+
+// closeLostTx executes a close_lost quick reply inside a transaction: the
+// lead moves to its pipeline's lost closing stage, outcome resolves to
+// 'lost', open tasks are cancelled, and the move is recorded in stage
+// history. It returns false (no move) when the lead already sits in the
+// target stage, and ErrNoLostStage when the pipeline has no lost closing
+// stage. The outcome rule mirrors update()'s: closing stages that carry the
+// column default 'open' count as lost.
+func (s *Service) closeLostTx(tx *sql.Tx, leadID, userID string) (bool, error) {
+	var pipelineID, currentStageID string
+	if err := tx.QueryRow(
+		`SELECT pipeline_id, stage_id FROM leads WHERE id = $1 AND deleted_at IS NULL`,
+		leadID,
+	).Scan(&pipelineID, &currentStageID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, fmt.Errorf("close lost: load lead: %w", err)
+	}
+
+	var target stageInfo
+	err := tx.QueryRow(
+		`SELECT id, name, is_closing, outcome FROM lead_stages
+		WHERE pipeline_id = $1 AND is_closing AND outcome <> 'won'
+		ORDER BY "order" ASC, created_at ASC
+		LIMIT 1`,
+		pipelineID,
+	).Scan(&target.ID, &target.Name, &target.IsClosing, &target.Outcome)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNoLostStage
+	}
+	if err != nil {
+		return false, fmt.Errorf("close lost: find lost stage: %w", err)
+	}
+	if target.ID == currentStageID {
+		return false, nil
+	}
+
+	outcome := target.Outcome
+	if outcome == "" || outcome == "open" {
+		outcome = "lost"
+	}
+	if _, err := tx.Exec(
+		`UPDATE leads SET stage_id = $2, outcome = $3, updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL`,
+		leadID, target.ID, outcome,
+	); err != nil {
+		return false, fmt.Errorf("close lost: move lead: %w", err)
+	}
+
+	var fromStageName string
+	if err := tx.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, currentStageID).Scan(&fromStageName); err != nil {
+		return false, fmt.Errorf("close lost: load current stage name: %w", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO lead_stage_history (lead_id, from_stage_id, to_stage_id, from_stage_name, to_stage_name, user_id)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid)`,
+		leadID, currentStageID, target.ID, fromStageName, target.Name, userID,
+	); err != nil {
+		return false, fmt.Errorf("close lost: record stage history: %w", err)
+	}
+
+	// Reaching a closing stage resolves the deal: cancel every open task so
+	// reminders stop nagging on lost leads.
+	if _, err := tx.Exec(
+		`UPDATE lead_activities SET is_cancelled = true
+		WHERE lead_id = $1 AND NOT is_done AND NOT is_cancelled`,
+		leadID,
+	); err != nil {
+		return false, fmt.Errorf("close lost: cancel open tasks: %w", err)
+	}
+	return true, nil
 }
 
 // listHistory returns the chronological stage moves for a lead, oldest first.

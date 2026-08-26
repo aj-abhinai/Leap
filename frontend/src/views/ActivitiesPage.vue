@@ -2,6 +2,7 @@
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useActivitiesStore, type ActivityListFilters } from '@/stores/activities'
 import { useSettingsStore } from '@/stores/settings'
+import { useRemindersStore } from '@/stores/reminders'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -14,8 +15,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import ContactsPagination from '@/components/contacts/ContactsPagination.vue'
+import PageState from '@/components/PageState.vue'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +28,7 @@ import {
   DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
 import { reminderIcon, snoozePresets, snoozeRemindAt } from '@/utils/reminders'
+import { isOverdue, statusLabel, statusVariant, dueLabel, typeLabel } from '@/utils/activity'
 import { toast } from 'vue-sonner'
 import { CheckCircle2, Trash2, MoreHorizontal, AlarmClockPlus, ClipboardList } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
@@ -33,6 +36,7 @@ import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
 const store = useActivitiesStore()
 const settings = useSettingsStore()
+const remindersStore = useRemindersStore()
 const { openLeadDrawer } = useLeadDrawerGlobal()
 
 const search = shallowRef('')
@@ -189,54 +193,12 @@ async function doMarkDone(item: { id: string; lead_id: string }) {
 
 async function doSnooze(item: { id: string; lead_id: string }, minutes: number) {
   try {
-    await store.snooze(item.lead_id, item.id, snoozeRemindAt(minutes))
+    await remindersStore.snoozeReminder(item.lead_id, item.id, snoozeRemindAt(minutes))
     toast.success('Reminder snoozed')
     load()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to snooze'))
   }
-}
-
-function isOverdue(item: { is_done: boolean; is_cancelled: boolean; remind_at?: string }): boolean {
-  return (
-    !item.is_done && !item.is_cancelled &&
-    !!item.remind_at && new Date(item.remind_at).getTime() < Date.now()
-  )
-}
-
-// statusLabel returns the display status by precedence: cancelled, done,
-// reminded, overdue, else open.
-function statusLabel(item: {
-  is_done: boolean
-  is_cancelled: boolean
-  is_reminded: boolean
-  remind_at?: string
-}): string {
-  if (item.is_cancelled) return 'Canceled'
-  if (item.is_done) return 'Done'
-  if (item.is_reminded) return 'Reminded'
-  if (isOverdue(item)) return 'Overdue'
-  return 'Open'
-}
-
-function statusVariant(label: string): 'default' | 'destructive' | 'secondary' | 'success' {
-  if (label === 'Overdue') return 'destructive'
-  if (label === 'Canceled') return 'secondary'
-  if (label === 'Done') return 'success'
-  if (label === 'Reminded') return 'secondary'
-  return 'default'
-}
-
-// due returns the effective due time: remind_at, else scheduled_at, else created_at.
-function due(item: { scheduled_at?: string; remind_at?: string; created_at: string }): string {
-  if (item.remind_at) return item.remind_at
-  if (item.scheduled_at) return item.scheduled_at
-  return item.created_at
-}
-
-function dueLabel(item: { scheduled_at?: string; remind_at?: string; created_at: string }): string {
-  const t = due(item)
-  return new Date(t).toLocaleString()
 }
 
 function nextPage() {
@@ -254,10 +216,6 @@ function prevPage() {
     selected.value = new Set()
     load()
   }
-}
-
-function typeClass(type: string): string {
-  return type || 'Task'
 }
 </script>
 
@@ -332,20 +290,18 @@ function typeClass(type: string): string {
         </div>
 
         <!-- Table -->
-        <div v-if="store.loading" class="space-y-3">
-          <Skeleton v-for="i in 6" :key="i" class="h-12 w-full" />
-        </div>
-
-        <div
-          v-else-if="store.items.length === 0"
-          class="flex flex-col items-center justify-center py-16 text-center"
+        <PageState
+          :loading="store.loading"
+          :empty="store.items.length === 0"
+          empty-title="No activities here"
+          empty-hint="Try a different view or clear the filters"
+          :skeleton-count="6"
+          skeleton-class="h-12 w-full"
         >
-          <ClipboardList class="size-10 text-muted-foreground/40 mb-3" />
-          <p class="text-sm font-medium text-muted-foreground">No activities here</p>
-          <p class="text-xs text-muted-foreground/60 mt-1">Try a different view or clear the filters</p>
-        </div>
-
-        <Card v-else>
+          <template #empty-icon>
+            <ClipboardList class="mb-3 size-10 text-muted-foreground/40" />
+          </template>
+          <Card>
           <CardContent class="p-0">
             <Table>
               <TableHeader>
@@ -389,7 +345,7 @@ function typeClass(type: string): string {
                   <TableCell>
                     <span class="inline-flex items-center gap-1.5 text-sm">
                       <component :is="reminderIcon(item.type)" class="size-4 text-muted-foreground" />
-                      {{ typeClass(item.type) }}
+                      {{ typeLabel(item.type) }}
                     </span>
                   </TableCell>
                   <TableCell class="text-xs" :class="isOverdue(item) ? 'text-destructive' : 'text-muted-foreground'">
@@ -448,21 +404,17 @@ function typeClass(type: string): string {
             </Table>
           </CardContent>
         </Card>
+        </PageState>
 
         <!-- Pagination -->
-        <div v-if="store.total > 0" class="flex items-center justify-between">
-          <span class="text-sm text-muted-foreground">
-            Page {{ store.page }} of {{ totalPages }} &middot; {{ store.total }} total
-          </span>
-          <div class="flex items-center gap-1">
-            <Button variant="outline" size="sm" :disabled="store.page <= 1" @click="prevPage()">
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" :disabled="store.page >= totalPages" @click="nextPage()">
-              Next
-            </Button>
-          </div>
-        </div>
+        <ContactsPagination
+          v-if="store.total > 0"
+          :page="store.page"
+          :total-pages="totalPages"
+          :total="store.total"
+          @prev="prevPage()"
+          @next="nextPage()"
+        />
       </div>
     </div>
 

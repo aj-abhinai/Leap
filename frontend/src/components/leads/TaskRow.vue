@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
-import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -21,27 +20,12 @@ import {
 import {
   MoreHorizontal, Trash2, CheckCircle2, Pencil, AlarmClockPlus, CalendarClock, Check,
 } from '@lucide/vue'
-import { nextPresets, reminderIcon, snoozePresets, type NextPreset } from '@/utils/reminders'
-import { formatDateTime, toLocalDateInput, toLocalTimeInput } from '@/utils/time'
+import { nextPresets, reminderIcon, snoozePresets, groupQuickReplies, findSelectedPreset, type NextPreset } from '@/utils/reminders'
+import { formatDateTime, toLocalDateInput, toLocalTimeInput, mergeDateTime } from '@/utils/time'
+import { typeLabel } from '@/utils/activity'
 import { Badge } from '@/components/ui/badge'
+import { updateLeadActivity, type LeadActivity } from '@/api/leads'
 import { errorMessage } from '@/utils/errors'
-
-export interface ActivityRowActivity {
-  id: string
-  lead_id: string
-  type: string
-  description: string
-  quick_reply_name?: string
-  scheduled_at?: string
-  remind_at?: string
-  occurred_at?: string
-  responded_at?: string
-  is_done: boolean
-  is_cancelled: boolean
-  is_reminded: boolean
-  user_name?: string
-  created_at: string
-}
 
 export interface QuickReplyChip {
   id: string
@@ -58,7 +42,7 @@ export interface ActivityTypeOption {
 
 const props = defineProps<{
   leadId: string
-  activity: ActivityRowActivity
+  activity: LeadActivity
   overdue?: boolean
   quickReplies: QuickReplyChip[]
   activityTypes: ActivityTypeOption[]
@@ -96,11 +80,6 @@ function cancelEdit() {
   editing.value = false
 }
 
-function mergeDateTime(date: string, time: string): string | null {
-  if (!date || !time) return null
-  return new Date(`${date}T${time}`).toISOString()
-}
-
 async function saveEdit() {
   if (!editType.value) {
     toast.error('Type is required')
@@ -108,7 +87,7 @@ async function saveEdit() {
   }
   savingEdit.value = true
   try {
-    await apiClient.patch(`/api/leads/${props.leadId}/activities/${props.activity.id}`, {
+    await updateLeadActivity(props.leadId, props.activity.id, {
       type: editType.value,
       description: editDescription.value.trim(),
       scheduled_at: mergeDateTime(editScheduledDate.value, editScheduledTime.value),
@@ -133,19 +112,7 @@ const savingReschedule = shallowRef(false)
 
 // Group the quick-reply chips into the ordered palette; a picked chip's
 // behavior decides the follow-up (log only / schedule next / close lost).
-const groupedQuickReplies = computed(() => {
-  const groups = new Map<string, QuickReplyChip[]>()
-  for (const s of props.quickReplies) {
-    const key = s.group_name || 'Quick reply'
-    const bucket = groups.get(key) ?? []
-    bucket.push(s)
-    groups.set(key, bucket)
-  }
-  return [...groups.entries()].map(([group, items]) => ({
-    group,
-    items: items.slice().sort((a, b) => a.sort_order - b.sort_order),
-  }))
-})
+const groupedQuickReplies = computed(() => groupQuickReplies(props.quickReplies))
 
 const selectedRescheduleChip = computed(() =>
   props.quickReplies.find((s) => s.id === rescheduleQuickReply.value),
@@ -192,7 +159,7 @@ async function saveReschedule() {
       }
       const next = mergeDateTime(rescheduleDate.value, rescheduleTime.value)
       if (next) body.reschedule_at = next
-      await apiClient.patch(`/api/leads/${props.leadId}/activities/${props.activity.id}`, body)
+      await updateLeadActivity(props.leadId, props.activity.id, body)
       toast.success(next ? 'Attempt logged, next task created' : 'Attempt logged')
       cancelReschedule()
       emit('changed')
@@ -200,7 +167,7 @@ async function saveReschedule() {
     }
 
     // log / close_lost: complete without a next task.
-    await apiClient.patch(`/api/leads/${props.leadId}/activities/${props.activity.id}`, {
+    await updateLeadActivity(props.leadId, props.activity.id, {
       is_done: true,
       quick_reply_id: rescheduleQuickReply.value || null,
     })
@@ -224,19 +191,9 @@ function statusChipClass(id: string): string {
 }
 
 // Highlights the preset that produced the current reschedule date/time.
-const selectedReschedulePreset = computed(() => {
-  const hasTime = !!mergeDateTime(rescheduleDate.value, rescheduleTime.value)
-  if (!hasTime) return ''
-  const preset = nextPresets.find((p) => {
-    const at = p.at().toISOString()
-    return toLocalDateInput(at) === rescheduleDate.value && toLocalTimeInput(at) === rescheduleTime.value
-  })
-  return preset?.label ?? ''
-})
-
-function typeLabel(type: string): string {
-  return type || 'Task'
-}
+const selectedReschedulePreset = computed(() =>
+  findSelectedPreset(rescheduleDate.value, rescheduleTime.value, nextPresets),
+)
 </script>
 
 <template>

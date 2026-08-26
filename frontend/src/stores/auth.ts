@@ -1,42 +1,16 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { apiClient } from '@/composables/useApi'
+import * as authApi from '@/api/auth'
 import { useRBACStore } from '@/stores/rbac'
 
-interface User {
-  id: string
-  name: string
-  email: string
-  phone?: string
-  avatar_url?: string
-}
-
-interface LoginResponse {
-  access_token: string
-  expires_at: number
-  must_change_password?: boolean
-}
-
-const CSRF_COOKIE = 'crm_csrf'
-
-function getCookie(name: string): string {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))
-  return match ? decodeURIComponent(match[1]) : ''
-}
-
-function csrfHeaders(): Record<string, string> {
-  const token = getCookie(CSRF_COOKIE)
-  return token ? { 'X-CSRF-Token': token } : {}
-}
-
 export const useAuthStore = defineStore('auth', () => {
-  const user = ref<User | null>(null)
+  const user = ref<authApi.AuthUser | null>(null)
   const accessToken = ref<string | null>(null)
   const mustChangePassword = ref(false)
 
   const isAuthenticated = computed(() => !!accessToken.value)
 
-  function setAccess(tokens: LoginResponse) {
+  function setAccess(tokens: authApi.LoginResponse) {
     accessToken.value = tokens.access_token
   }
 
@@ -49,20 +23,15 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchUser() {
     if (!accessToken.value) return
     try {
-      const res = await fetch('/api/auth/me', {
-        headers: { 'Authorization': `Bearer ${accessToken.value}` },
-      })
-      if (res.ok) {
-        const json = await res.json()
-        user.value = json.data
-        if ('must_change_password' in json.data) {
-          mustChangePassword.value = json.data.must_change_password === true
-        }
+      const res = await authApi.getMe()
+      user.value = res.data
+      if ('must_change_password' in res.data) {
+        mustChangePassword.value = res.data.must_change_password === true
       }
     } catch {}
   }
 
-  let refreshPromise: Promise<LoginResponse> | null = null
+  let refreshPromise: Promise<authApi.LoginResponse> | null = null
 
   // Bumped on every login and logout. A refresh that started in a previous
   // session must not resurrect it after logout completed: the server rotates
@@ -70,7 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
   // re-arm a logged-out session and trap the UI on an authenticated page.
   let sessionEpoch = 0
 
-  async function refresh(): Promise<LoginResponse> {
+  async function refresh(): Promise<authApi.LoginResponse> {
     if (!refreshPromise) {
       refreshPromise = doRefresh().finally(() => {
         refreshPromise = null
@@ -79,53 +48,43 @@ export const useAuthStore = defineStore('auth', () => {
     return refreshPromise
   }
 
-  async function doRefresh(): Promise<LoginResponse> {
+  async function doRefresh(): Promise<authApi.LoginResponse> {
     const epochAtStart = sessionEpoch
-    const res = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { ...csrfHeaders() },
-    })
-    const json = await res.json()
-    if (!res.ok || json.error) {
+    let tokens: authApi.LoginResponse
+    try {
+      const res = await authApi.refresh()
+      tokens = res.data
+    } catch {
       clear()
-      throw new Error(json.error?.message ?? 'Session expired')
+      throw new Error('Session expired')
     }
     if (epochAtStart !== sessionEpoch) {
       // The session this refresh belonged to is gone; discard the rotated
       // tokens instead of overwriting the current state.
       throw new Error('Session expired')
     }
-    setAccess(json.data)
-    return json.data
+    setAccess(tokens)
+    return tokens
   }
 
   async function login(email: string, password: string) {
     sessionEpoch++
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
-    const json = await res.json()
-    if (json.error) throw new Error(json.error.message)
-    setAccess(json.data)
+    const res = await authApi.login(email, password)
+    setAccess(res.data)
     // The login response is the authoritative source: if /me fails below, a
     // user flagged for a forced password change must still be redirected.
-    mustChangePassword.value = json.data.must_change_password === true
+    mustChangePassword.value = res.data.must_change_password === true
     await fetchUser()
     // Refresh permissions for the newly authenticated role; the boot-time
     // fetch in App.vue ran before any user was signed in.
     await useRBACStore().fetchPermissions()
-    return json.data
+    return res.data
   }
 
   async function logout() {
     sessionEpoch++
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { ...csrfHeaders() },
-      })
+      await authApi.logout()
     } catch {}
     clear()
     useRBACStore().clear()
@@ -134,7 +93,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function bootstrap() {
     // The refresh token is HttpOnly and cannot be inspected from JavaScript.
     // The CSRF cookie is readable and is required for the refresh request.
-    if (!getCookie(CSRF_COOKIE)) {
+    if (!authApi.hasCsrfCookie()) {
       clear()
       return
     }
@@ -147,16 +106,13 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function updateProfile(name: string, phone: string) {
-    const res = await apiClient.patch('/api/auth/me', { name, phone })
+    const res = await authApi.updateProfile({ name, phone })
     user.value = res.data
     return res.data
   }
 
   async function changePassword(currentPassword: string, newPassword: string) {
-    const res = await apiClient.patch('/api/auth/me/password', {
-      current_password: currentPassword,
-      new_password: newPassword,
-    })
+    const res = await authApi.changePassword({ current_password: currentPassword, new_password: newPassword })
     mustChangePassword.value = false
     return res.data
   }

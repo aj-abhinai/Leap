@@ -1,7 +1,7 @@
 import { computed, shallowRef } from 'vue'
 import { usePipelineStore } from '@/stores/pipeline'
 import { useLeadsStore } from '@/stores/leads'
-import { apiClient } from '@/composables/useApi'
+import { updateLead } from '@/api/leads'
 import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
 
@@ -56,13 +56,13 @@ export function useLeadPipeline() {
 
   async function moveStage(leadId: string, newStageId: string, previousStageId?: string) {
     try {
-      await apiClient.patch(`/api/leads/${leadId}`, { stage_id: newStageId })
+      await updateLead(leadId, { stage_id: newStageId })
       toast.success('Lead moved', {
         action: previousStageId
           ? {
               label: 'Undo',
               onClick: async () => {
-                await apiClient.patch(`/api/leads/${leadId}`, { stage_id: previousStageId })
+                await updateLead(leadId, { stage_id: previousStageId })
                 await loadLeads()
               },
             }
@@ -85,7 +85,7 @@ export function useLeadPipeline() {
     for (let i = 0; i < leadIds.length; i += BATCH) {
       const chunk = leadIds.slice(i, i + BATCH)
       const results = await Promise.allSettled(
-        chunk.map((id) => apiClient.patch(`/api/leads/${id}`, { stage_id: newStageId })),
+        chunk.map((id) => updateLead(id, { stage_id: newStageId })),
       )
       moved += results.filter((r) => r.status === 'fulfilled').length
     }

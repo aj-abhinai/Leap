@@ -75,8 +75,8 @@ const stageRows = computed(() => {
 
 const stageMax = computed(() => Math.max(1, ...stageRows.value.map((r) => r.count)))
 
-const wonCount = computed(() => pipelineLeads.value.filter((l) => l.outcome === 'won').length)
-const lostCount = computed(() => pipelineLeads.value.filter((l) => l.outcome === 'lost').length)
+const wonCount = computed(() => pipelineLeads.value.filter((l) => l.stage_outcome === 'won').length)
+const lostCount = computed(() => pipelineLeads.value.filter((l) => l.stage_outcome === 'lost').length)
 const openCount = computed(() => Math.max(0, pipelineLeads.value.length - wonCount.value - lostCount.value))
 const totalCount = computed(() => Math.max(1, pipelineLeads.value.length))
 

@@ -13,7 +13,8 @@ CREATE TABLE pipelines (
 );
 
 -- outcome is authoritative for what reaching a stage means for the lead:
--- open (in play), won, or lost. Closing stages must be won or lost.
+-- open (in play), won, or lost. Closing stages must be won or lost — the
+-- table constraint makes the column default 'open' invalid on a closing stage.
 CREATE TABLE lead_stages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     pipeline_id UUID NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
@@ -23,7 +24,8 @@ CREATE TABLE lead_stages (
     is_closing BOOLEAN NOT NULL DEFAULT false,
     outcome TEXT NOT NULL DEFAULT 'open' CHECK (outcome IN ('open', 'won', 'lost')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT lead_stages_closing_outcome_check CHECK (NOT is_closing OR outcome IN ('won', 'lost'))
 );
 
 -- Fixed-price program catalog. Lead values are price snapshots taken at lead

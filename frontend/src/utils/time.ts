@@ -38,3 +38,10 @@ export function toLocalTimeInput(iso: string): string {
   const min = String(d.getMinutes()).padStart(2, '0')
   return `${h}:${min}`
 }
+
+// mergeDateTime combines a local wall-clock date and time into a UTC ISO
+// instant, or null when either part is empty.
+export function mergeDateTime(date: string, time: string): string | null {
+  if (!date || !time) return null
+  return new Date(`${date}T${time}`).toISOString()
+}

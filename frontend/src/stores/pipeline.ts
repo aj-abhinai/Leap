@@ -1,32 +1,17 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiClient } from '@/composables/useApi'
+import * as api from '@/api/pipelines'
 
-export interface Stage {
-  id: string
-  pipeline_id: string
-  name: string
-  order: number
-  color?: string
-  is_closing: boolean
-  outcome?: 'open' | 'won' | 'lost'
-}
-
-export interface Pipeline {
-  id: string
-  name: string
-  description?: string
-  stages?: Stage[]
-}
+export type { Stage, Pipeline } from '@/api/pipelines'
 
 export const usePipelineStore = defineStore('pipeline', () => {
-  const pipelines = ref<Pipeline[]>([])
+  const pipelines = ref<api.Pipeline[]>([])
   const loading = ref(false)
 
   async function fetchPipelines() {
     loading.value = true
     try {
-      const res = await apiClient.get('/api/pipelines')
+      const res = await api.listPipelines()
       pipelines.value = res.data
     } finally {
       loading.value = false

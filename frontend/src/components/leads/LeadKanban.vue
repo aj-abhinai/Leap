@@ -4,7 +4,7 @@ import { type Lead } from '@/stores/leads'
 import { type Stage } from '@/stores/pipeline'
 import { useRBACStore } from '@/stores/rbac'
 import { useUsersStore } from '@/stores/users'
-import { apiClient } from '@/composables/useApi'
+import { addStage as apiAddStage } from '@/api/pipelines'
 import { toast } from 'vue-sonner'
 import draggable from 'vuedraggable'
 import { Button } from '@/components/ui/button'
@@ -166,7 +166,7 @@ async function addStage() {
   }
   try {
     const maxOrder = props.stages.reduce((m, s) => Math.max(m, s.order), -1)
-    await apiClient.post(`/api/pipelines/${props.pipelineId}/stages`, { name, order: maxOrder + 1 })
+    await apiAddStage(props.pipelineId, { name, order: maxOrder + 1 })
     toast.success('Stage added')
     newStageName.value = ''
     addingStage.value = false
@@ -273,6 +273,14 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
 }
 function isNextTaskOverdue(lead: Lead): boolean {
   return !!lead.next_task_at && new Date(lead.next_task_at).getTime() < Date.now()
+}
+
+// stage_outcome is the authoritative won/lost signal for a lead; 'open'
+// means the lead is in play, so no outcome badge is shown.
+function cardOutcome(lead: Lead): string {
+  return lead.stage_outcome === 'won' || lead.stage_outcome === 'lost'
+    ? lead.stage_outcome
+    : ''
 }
 
 function formatNextTaskAt(lead: Lead): string {
@@ -426,14 +434,14 @@ function showField(key: string): boolean {
                   <User class="size-3" />
                   <span class="truncate">{{ assigneeName(lead.assigned_to) }}</span>
                 </div>
-                <div v-if="showField('outcome') && lead.outcome" class="mt-1.5 flex items-center gap-1.5">
+                <div v-if="showField('outcome') && cardOutcome(lead)" class="mt-1.5 flex items-center gap-1.5">
                   <Badge
-                    :variant="lead.outcome === 'won' ? 'default' : 'destructive'"
+                    :variant="cardOutcome(lead) === 'won' ? 'default' : 'destructive'"
                     class="text-xs px-1.5"
                   >
-                    {{ lead.outcome === 'won' ? 'Won' : 'Lost' }}
+                    {{ cardOutcome(lead) === 'won' ? 'Won' : 'Lost' }}
                   </Badge>
-                  <span v-if="lead.outcome === 'lost' && lead.lost_reason" class="text-xs text-muted-foreground truncate">
+                  <span v-if="cardOutcome(lead) === 'lost' && lead.lost_reason" class="text-xs text-muted-foreground truncate">
                     {{ lead.lost_reason }}
                   </span>
                 </div>

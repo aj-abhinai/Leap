@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { onMounted, shallowRef, computed } from 'vue'
-import { apiClient } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
 import { useRBACStore } from '@/stores/rbac'
+import { listUsers, createUser as apiCreateUser, deleteUser as apiDeleteUser, setUserRole as apiSetRole, type User } from '@/api/users'
+import { listRoles, type Role } from '@/api/roles'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,23 +17,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Plus, ShieldCheck, Trash2, User } from '@lucide/vue'
+import { Plus, ShieldCheck, Trash2, User as UserIcon } from '@lucide/vue'
 import { PASSWORD_POLICY_HINT, isStrongPassword } from '@/lib/validation'
 import { errorMessage } from '@/utils/errors'
-
-interface Role {
-  id: string
-  name: string
-}
-
-interface User {
-  id: string
-  name: string
-  email: string
-  role?: Role | null
-  protected?: boolean
-  created_at: string
-}
 
 const users = shallowRef<User[]>([])
 const roles = shallowRef<Role[]>([])
@@ -69,7 +56,7 @@ onMounted(() => {
 
 async function loadUsers() {
   try {
-    const res = await apiClient.get('/api/users')
+    const res = await listUsers()
     users.value = res.data
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load users'))
@@ -78,7 +65,7 @@ async function loadUsers() {
 
 async function loadRoles() {
   try {
-    const res = await apiClient.get('/api/roles')
+    const res = await listRoles()
     roles.value = res.data
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load roles'))
@@ -97,7 +84,7 @@ async function createUser() {
   }
   creatingUser.value = true
   try {
-    await apiClient.post('/api/users', {
+    await apiCreateUser({
       name: newUserName.value,
       email: newUserEmail.value,
       password: newUserPassword.value,
@@ -116,7 +103,7 @@ async function createUser() {
 
 async function deleteUser(userId: string) {
   try {
-    await apiClient.delete(`/api/users/${userId}`)
+    await apiDeleteUser(userId)
     toast.success('User deleted')
     loadUsers()
   } catch (e) {
@@ -126,7 +113,7 @@ async function deleteUser(userId: string) {
 
 async function setRole(userId: string, roleId: string) {
   try {
-    await apiClient.put(`/api/users/${userId}/role`, { role_id: roleId })
+    await apiSetRole(userId, roleId)
     toast.success('Role updated')
     loadUsers()
   } catch (e) {
@@ -171,7 +158,7 @@ function onRoleChange(u: User, event: Event) {
       </CardHeader>
       <CardContent>
         <div v-if="users.length === 0" class="flex flex-col items-center justify-center py-10 text-center">
-          <User class="size-10 text-muted-foreground/40 mb-3" />
+          <UserIcon class="size-10 text-muted-foreground/40 mb-3" />
           <p class="text-sm text-muted-foreground">No users found</p>
         </div>
         <Table v-else>

@@ -1,44 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiClient } from '@/composables/useApi'
 import { usePagination, totalOf } from '@/composables/usePagination'
+import * as api from '@/api/leads'
 
-export interface Lead {
-  id: string
-  nickname?: string
-  display_name: string
-  contact_id: string
-  contact_name?: string
-  contact_phone?: string
-  contact_email?: string
-  pipeline_id: string
-  stage_id: string
-  stage_name?: string
-  outcome?: string
-  lost_reason?: string
-  program_id?: string
-  program_name?: string
-  value?: number
-  notes?: string
-  assigned_to?: string
-  created_at: string
-  updated_at: string
-  next_task_type?: string
-  next_task_at?: string
-  last_touch_type?: string
-  last_touch_at?: string
-}
-
-export interface LeadListQuery {
-  pipelineId?: string
-  stageId?: string
-  q?: string
-  outcome?: 'open' | 'won' | 'lost'
-  assignedTo?: string
-}
+export type { Lead, LeadListQuery } from '@/api/leads'
 
 export const useLeadsStore = defineStore('leads', () => {
-  const { items: leads, total, loading, setTotal } = usePagination<Lead>()
+  const { items: leads, total, loading, setTotal } = usePagination<api.Lead>()
   // capped is true when fetchAllLeads stopped early at the safety cap instead
   // of loading the full result set.
   const capped = ref(false)
@@ -52,24 +20,16 @@ export const useLeadsStore = defineStore('leads', () => {
   // filter changes, pipeline switches) must not let an older request overwrite
   // a newer one.
   let fetchSeq = 0
-  async function fetchAllLeads(f: LeadListQuery = {}) {
+  async function fetchAllLeads(f: api.LeadListQuery = {}) {
     const seq = ++fetchSeq
-    const all: Lead[] = []
+    const all: api.Lead[] = []
     let page = 1
     let serverTotal = 0
     capped.value = false
     loading.value = true
     try {
       for (;;) {
-        const params = new URLSearchParams()
-        params.set('page', String(page))
-        params.set('per_page', String(PAGE_SIZE))
-        if (f.pipelineId) params.set('pipeline_id', f.pipelineId)
-        if (f.stageId) params.set('stage_id', f.stageId)
-        if (f.q) params.set('q', f.q)
-        if (f.outcome) params.set('outcome', f.outcome)
-        if (f.assignedTo) params.set('assigned_to', f.assignedTo)
-        const res = await apiClient.get<Lead[]>(`/api/leads?${params}`)
+        const res = await api.listLeads({ page, perPage: PAGE_SIZE, query: f })
         if (seq !== fetchSeq) return
         const items = res.data ?? []
         serverTotal = res.meta?.total ?? 0
@@ -91,9 +51,7 @@ export const useLeadsStore = defineStore('leads', () => {
 
   async function fetchTotal() {
     try {
-      const params = new URLSearchParams()
-      params.set('per_page', '1')
-      const res = await apiClient.get(`/api/leads?${params}`)
+      const res = await api.listLeads({ page: 1, perPage: 1 })
       setTotal(totalOf(res))
     } catch {}
   }

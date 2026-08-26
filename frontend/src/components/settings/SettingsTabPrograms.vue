@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref, shallowRef } from 'vue'
-import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,14 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Plus, Archive, RotateCcw, BookOpen } from '@lucide/vue'
 import { formatCurrency } from '@/utils/format'
 import { errorMessage } from '@/utils/errors'
-
-interface Program {
-  id: string
-  name: string
-  description?: string
-  price: number
-  archived: boolean
-}
+import { listProgramsManage, createProgram as apiCreateProgram, updateProgram, archiveProgram as apiArchiveProgram, restoreProgram as apiRestoreProgram, type Program } from '@/api/programs'
 
 const programs = shallowRef<Program[]>([])
 const newName = shallowRef('')
@@ -32,7 +24,7 @@ onMounted(() => loadPrograms())
 
 async function loadPrograms() {
   try {
-    const res = await apiClient.get('/api/programs/manage')
+    const res = await listProgramsManage()
     programs.value = res.data
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load programs'))
@@ -51,7 +43,7 @@ async function createProgram() {
   }
   creating.value = true
   try {
-    await apiClient.post('/api/programs', {
+    await apiCreateProgram({
       name: newName.value,
       description: newDesc.value,
       price: newPrice.value,
@@ -79,7 +71,7 @@ async function saveEdit() {
     return
   }
   try {
-    await apiClient.patch(`/api/programs/${editing.value.id}`, {
+    await updateProgram(editing.value.id, {
       name: editing.value.name,
       description: editing.value.desc,
       price: editing.value.price,
@@ -94,7 +86,7 @@ async function saveEdit() {
 
 async function archiveProgram(id: string) {
   try {
-    await apiClient.delete(`/api/programs/${id}`)
+    await apiArchiveProgram(id)
     toast.success('Program archived')
     loadPrograms()
   } catch (e) {
@@ -104,7 +96,7 @@ async function archiveProgram(id: string) {
 
 async function restoreProgram(id: string) {
   try {
-    await apiClient.post(`/api/programs/${id}/restore`)
+    await apiRestoreProgram(id)
     toast.success('Program restored')
     loadPrograms()
   } catch (e) {

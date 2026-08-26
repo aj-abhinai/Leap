@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { shallowRef, useTemplateRef } from 'vue'
-import { apiClient } from '@/composables/useApi'
+import { bulkImportContacts } from '@/api/contacts'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -101,7 +101,7 @@ async function doImport() {
         tags,
       }
     })
-    const res = await apiClient.post('/api/contacts/bulk', { contacts })
+    const res = await bulkImportContacts(contacts)
     result.value = res.data
     step.value = 'result'
     if (res.data.imported > 0) {

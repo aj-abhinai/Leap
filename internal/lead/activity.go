@@ -14,6 +14,10 @@ import (
 // quick-reply tag (type 'quick_reply').
 var ErrInvalidQuickReply = errors.New("quick_reply_id must reference a quick_reply tag")
 
+// closeLostBehavior is the quick-reply behavior that ends the deal: the reply
+// is logged and the lead moves to its pipeline's lost closing stage.
+const closeLostBehavior = "close_lost"
+
 // ErrSnoozePast marks a snooze whose remind_at is not in the future.
 var ErrSnoozePast = errors.New("remind_at must be in the future")
 
@@ -55,6 +59,25 @@ func (s *Service) validateQuickReplyTx(q interface {
 		return ErrInvalidQuickReply
 	}
 	return nil
+}
+
+// quickReplyBehaviorTx returns a quick-reply tag's behavior, or "" when no
+// quick reply id is given. The behavior decides what the reply does to the
+// lead: log only, schedule the next task, or close lost.
+func (s *Service) quickReplyBehaviorTx(q interface {
+	QueryRow(query string, args ...any) *sql.Row
+}, quickReplyID *string) (string, error) {
+	if quickReplyID == nil || *quickReplyID == "" {
+		return "", nil
+	}
+	var behavior string
+	if err := q.QueryRow(
+		`SELECT behavior FROM tags WHERE id = $1 AND type = 'quick_reply'`,
+		*quickReplyID,
+	).Scan(&behavior); err != nil {
+		return "", fmt.Errorf("load quick reply behavior: %w", err)
+	}
+	return behavior, nil
 }
 
 // ErrEmptyType marks an activity request with a blank type. Descriptions are
@@ -126,31 +149,12 @@ func (s *Service) listActivities(leadID string, page, perPage int) ([]Activity, 
 	return activities, total, nil
 }
 
-func (s *Service) createActivity(leadID, stageID, userID string, req CreateActivityRequest) (*Activity, error) {
-	if err := validateActivityFields(req.Type); err != nil {
-		return nil, err
-	}
-	if err := s.validateQuickReplyTx(s.db, req.QuickReplyID); err != nil {
-		return nil, err
-	}
-	// An activity created with a quick reply is already "responded" — log the time.
-	// A reschedule_at also implies the attempt happened, so it is done too.
-	// IsDone completes an activity created in one shot (close_lost from the
-	// create form), stamping occurred_at so it survives the closing-stage move.
-	var respondedAt any
-	if (req.QuickReplyID != nil && *req.QuickReplyID != "") || req.RescheduleAt != nil {
-		respondedAt = time.Now()
-	}
-	isDone := req.RescheduleAt != nil || (req.IsDone != nil && *req.IsDone)
-	var occurredAt any
-	if isDone {
-		occurredAt = time.Now()
-	}
-	desc := strings.TrimSpace(req.Description)
+// insertActivityTx inserts one activity row inside a transaction and returns
+// it joined with the stage, user, and quick-reply names.
+func (s *Service) insertActivityTx(tx *sql.Tx, leadID, stageID, userID, typeValue, desc string, quickReplyID *string, scheduledAt, remindAt *time.Time, respondedAt, occurredAt any, isDone bool) (*Activity, error) {
 	var a Activity
-	var quickReplyID sql.NullString
-	var quickReplyName sql.NullString
-	err := s.db.QueryRow(`
+	var quickReplyIDOut, quickReplyName sql.NullString
+	err := tx.QueryRow(`
 		WITH ins AS (
 			INSERT INTO lead_activities (lead_id, stage_id, user_id, type, description, quick_reply_id, scheduled_at, remind_at, responded_at, occurred_at, is_done)
 			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, NULLIF($6, '')::uuid, $7, $8, $9, $10, $11)
@@ -165,31 +169,91 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 		LEFT JOIN users u ON u.id = ins.user_id
 		LEFT JOIN lead_stages ls ON ls.id = ins.stage_id
 		LEFT JOIN tags t ON t.id = ins.quick_reply_id`,
-		leadID, stageID, userID, req.Type, desc, req.QuickReplyID, req.ScheduledAt, req.RemindAt, respondedAt, occurredAt, isDone,
+		leadID, stageID, userID, typeValue, desc, quickReplyID, scheduledAt, remindAt, respondedAt, occurredAt, isDone,
 	).Scan(
 		&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
-		&a.Type, &a.Description, &quickReplyID, &quickReplyName,
+		&a.Type, &a.Description, &quickReplyIDOut, &quickReplyName,
 		&a.ScheduledAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
 		&a.IsDone, &a.IsCancelled, &a.IsReminded, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
+		return nil, fmt.Errorf("insert activity: %w", err)
+	}
+	a.QuickReplyID = quickReplyIDOut.String
+	a.QuickReplyName = quickReplyName.String
+	return &a, nil
+}
+
+// createActivity logs an activity on a lead inside one transaction. A
+// close_lost quick reply also moves the lead to its pipeline's lost closing
+// stage in the same transaction, so the log and the stage move cannot
+// diverge; ErrNoLostStage is returned when the pipeline has no such stage.
+// The move happens only when the activity is created completed (is_done or
+// reschedule_at) — a scheduled close_lost task does not close the lead.
+func (s *Service) createActivity(leadID, stageID, userID string, req CreateActivityRequest) (*Activity, error) {
+	if err := validateActivityFields(req.Type); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
 		return nil, fmt.Errorf("create activity: %w", err)
 	}
-	a.QuickReplyID = quickReplyID.String
-	a.QuickReplyName = quickReplyName.String
+	defer tx.Rollback()
+
+	if err := s.validateQuickReplyTx(tx, req.QuickReplyID); err != nil {
+		return nil, err
+	}
+	behavior, err := s.quickReplyBehaviorTx(tx, req.QuickReplyID)
+	if err != nil {
+		return nil, err
+	}
+
+	// An activity created with a quick reply is already "responded" — log the time.
+	// A reschedule_at also implies the attempt happened, so it is done too.
+	// IsDone completes an activity created in one shot (close_lost from the
+	// create form), stamping occurred_at so it survives the closing-stage move.
+	var respondedAt any
+	if (req.QuickReplyID != nil && *req.QuickReplyID != "") || req.RescheduleAt != nil {
+		respondedAt = time.Now()
+	}
+	isDone := req.RescheduleAt != nil || (req.IsDone != nil && *req.IsDone)
+	var occurredAt any
+	if isDone {
+		occurredAt = time.Now()
+	}
+	desc := strings.TrimSpace(req.Description)
+
+	a, err := s.insertActivityTx(tx, leadID, stageID, userID, req.Type, desc, req.QuickReplyID, req.ScheduledAt, req.RemindAt, respondedAt, occurredAt, isDone)
+	if err != nil {
+		return nil, err
+	}
 
 	// "Log attempt + next": a created-and-completed activity with a reschedule
-	// time spawns the next occurrence of the same type at the new time.
-	if req.RescheduleAt != nil {
-		if _, err := s.createActivity(leadID, a.StageID, userID, CreateActivityRequest{
-			Type:        req.Type,
-			ScheduledAt: req.RescheduleAt,
-			RemindAt:    req.RescheduleAt,
-		}); err != nil {
+	// time spawns the next occurrence of the same type at the new time. A
+	// close_lost reply never spawns a next task — the deal ends here.
+	if req.RescheduleAt != nil && behavior != closeLostBehavior {
+		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, req.Type, "", nil, req.RescheduleAt, req.RescheduleAt, nil, nil, false); err != nil {
 			return nil, fmt.Errorf("create next activity: %w", err)
 		}
 	}
-	return &a, nil
+
+	closeLostMoved := false
+	if behavior == closeLostBehavior && isDone {
+		moved, err := s.closeLostTx(tx, leadID, userID)
+		if err != nil {
+			return nil, err
+		}
+		closeLostMoved = moved
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit create activity: %w", err)
+	}
+	if closeLostMoved {
+		s.logActivity(leadID, "lead", "move_stage", "Closed lost via quick reply", userID)
+	}
+	return a, nil
 }
 
 // updateActivity updates an activity's task fields (type, description,
@@ -203,20 +267,34 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 // reschedule_at is supplied, the completed attempt is logged and a new task of
 // the same type is created for reschedule_at, defaulting its reminder to the
 // same time.
+//
+// A quick reply whose behavior is close_lost also moves the lead to its
+// pipeline's lost closing stage in the same transaction, so the logged reply
+// and the stage move cannot diverge; ErrNoLostStage is returned when the
+// pipeline has no such stage. The move happens only when the update completes
+// the task (is_done=true) — editing an already-closed task never re-closes
+// the lead.
 func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateActivityRequest) (*Activity, error) {
-	if err := s.validateQuickReplyTx(s.db, req.QuickReplyID); err != nil {
-		return nil, err
-	}
 	if req.QuickReplyID == nil && req.IsDone == nil && req.Type == nil && req.Description == nil &&
 		!req.ScheduledAt.Set && !req.RemindAt.Set && req.OccurredAt == nil &&
 		req.IsCancelled == nil && req.RescheduleAt == nil {
 		return nil, ErrNothingToUpdate
 	}
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("update activity: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := s.validateQuickReplyTx(tx, req.QuickReplyID); err != nil {
+		return nil, err
+	}
+
 	// Load the current row so we only stamp response times on the null->set edge.
 	var cur Activity
 	var curQuickReplyID sql.NullString
-	err := s.db.QueryRow(`
+	err = tx.QueryRow(`
 		SELECT id, quick_reply_id, responded_at, is_done, type, description FROM lead_activities WHERE id = $1 AND lead_id = $2`,
 		activityID, leadID,
 	).Scan(&cur.ID, &curQuickReplyID, &cur.RespondedAt, &cur.IsDone, &cur.Type, &cur.Description)
@@ -263,7 +341,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	var a Activity
 	var quickReplyID sql.NullString
 	var quickReplyName sql.NullString
-	err = s.db.QueryRow(`
+	err = tx.QueryRow(`
 		UPDATE lead_activities SET
 			quick_reply_id = COALESCE($3, quick_reply_id),
 			is_done = COALESCE($4, is_done),
@@ -294,16 +372,38 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	a.QuickReplyID = quickReplyID.String
 	a.QuickReplyName = quickReplyName.String
 
+	// The final quick reply decides the follow-up. A close_lost behavior moves
+	// the lead to the lost closing stage in the same transaction — but only
+	// when this update completes the task: editing a done close_lost task
+	// (description, schedule, cancel) must never re-close a reopened lead.
+	behavior, err := s.quickReplyBehaviorTx(tx, &newQuickReply)
+	if err != nil {
+		return nil, err
+	}
+
 	// "Log attempt + next": a completed activity with a reschedule time spawns
-	// the next occurrence of the same type at the new time.
-	if req.RescheduleAt != nil && (req.IsDone != nil && *req.IsDone) && !a.IsCancelled {
-		if _, err := s.createActivity(leadID, a.StageID, userID, CreateActivityRequest{
-			Type:        mergedType,
-			ScheduledAt: req.RescheduleAt,
-			RemindAt:    req.RescheduleAt,
-		}); err != nil {
+	// the next occurrence of the same type at the new time. A close_lost reply
+	// never spawns a next task — the deal ends here.
+	if req.RescheduleAt != nil && (req.IsDone != nil && *req.IsDone) && !a.IsCancelled && behavior != closeLostBehavior {
+		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, mergedType, "", nil, req.RescheduleAt, req.RescheduleAt, nil, nil, false); err != nil {
 			return nil, fmt.Errorf("create next activity: %w", err)
 		}
+	}
+
+	closeLostMoved := false
+	if behavior == closeLostBehavior && markDone {
+		moved, err := s.closeLostTx(tx, leadID, userID)
+		if err != nil {
+			return nil, err
+		}
+		closeLostMoved = moved
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit update activity: %w", err)
+	}
+	if closeLostMoved {
+		s.logActivity(leadID, "lead", "move_stage", "Closed lost via quick reply", userID)
 	}
 	return &a, nil
 }

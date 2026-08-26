@@ -1,17 +1,10 @@
 <script setup lang="ts">
 import { onMounted, shallowRef } from 'vue'
-import { apiClient } from '@/composables/useApi'
+import { listLeadHistory, type StageHistoryEntry } from '@/api/leads'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Route } from '@lucide/vue'
 import { formatDateTime } from '@/utils/time'
 import { errorMessage } from '@/utils/errors'
-
-interface StageHistoryEntry {
-  id: string
-  from_stage_name?: string
-  to_stage_name?: string
-  moved_at: string
-}
 
 const props = defineProps<{ leadId: string }>()
 
@@ -25,7 +18,7 @@ async function fetchHistory() {
   loading.value = true
   loadError.value = ''
   try {
-    const res = await apiClient.get<StageHistoryEntry[]>(`/api/leads/${props.leadId}/history`)
+    const res = await listLeadHistory(props.leadId)
     history.value = res.data ?? []
   } catch (e) {
     loadError.value = errorMessage(e, 'Failed to load stage history')

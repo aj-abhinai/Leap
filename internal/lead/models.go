@@ -18,6 +18,11 @@ type Lead struct {
 	PipelineID   string     `json:"pipeline_id"`
 	StageID      string     `json:"stage_id"`
 	StageName    string     `json:"stage_name,omitempty"`
+	// StageOutcome is the linked stage's declared outcome ('open'|'won'|'lost'),
+	// the authoritative source for what reaching the stage means.
+	StageOutcome string     `json:"stage_outcome,omitempty"`
+	// Outcome is a denormalized snapshot resolved on stage moves, kept for
+	// lost_reason and the close-lost flow; display should use StageOutcome.
 	Outcome      string     `json:"outcome,omitempty"`
 	LostReason   string     `json:"lost_reason,omitempty"`
 	ProgramID    *string    `json:"program_id,omitempty"`

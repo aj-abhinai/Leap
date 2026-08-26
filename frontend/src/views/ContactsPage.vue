@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, ref, shallowRef } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
 import { useRouter } from 'vue-router'
-import { apiClient } from '@/composables/useApi'
 import { useContactsStore, type Contact } from '@/stores/contacts'
 import { useRBACStore } from '@/stores/rbac'
 import { toast } from 'vue-sonner'
@@ -31,6 +31,7 @@ import CsvImport from '@/components/contacts/CsvImport.vue'
 import ContactsToolbar, { type ContactViewMode } from '@/components/contacts/ContactsToolbar.vue'
 import ContactsPagination from '@/components/contacts/ContactsPagination.vue'
 import ContactDeleteDialog from '@/components/contacts/ContactDeleteDialog.vue'
+import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import { getAvatarColor, getInitials } from '@/utils/avatar'
 import { errorMessage } from '@/utils/errors'
 
@@ -47,6 +48,7 @@ const saving = shallowRef(false)
 
 const deletingId = shallowRef<string | null>(null)
 const deleteDialogOpen = shallowRef(false)
+const loadError = shallowRef('')
 
 const totalPages = computed(() => Math.ceil(store.total / perPage) || 1)
 
@@ -56,43 +58,47 @@ const deletingContactName = computed(() => {
   return contact?.name || ''
 })
 
-const viewMode = shallowRef<ContactViewMode>('table')
+const viewMode = useLocalStorage<ContactViewMode>('crm-contact-view', 'table')
+// Corrupt or legacy values fall back to the table view.
+if (!['table', 'compact', 'spreadsheet'].includes(viewMode.value)) {
+  viewMode.value = 'table'
+}
 
 onMounted(() => {
-  const saved = localStorage.getItem('crm-contact-view')
-  if (saved === 'table' || saved === 'compact' || saved === 'spreadsheet') {
-    viewMode.value = saved
-  }
-  loadContacts().catch(() => {})
+  loadContacts()
 })
-
-watch(viewMode, (v) => localStorage.setItem('crm-contact-view', v))
 
 const importOpen = shallowRef(false)
 
 // loadContacts fetches the current page, clamping back to the last page when
-// it falls past the end (e.g. after a delete).
+// it falls past the end (e.g. after a delete). Failures surface as a banner
+// instead of being swallowed.
 async function loadContacts() {
-  await store.fetchContacts(page.value, perPage, search.value)
-  if (store.contacts.length === 0 && page.value > 1 && store.total > 0) {
-    page.value = Math.max(1, Math.ceil(store.total / perPage))
+  loadError.value = ''
+  try {
     await store.fetchContacts(page.value, perPage, search.value)
+    if (store.contacts.length === 0 && page.value > 1 && store.total > 0) {
+      page.value = Math.max(1, Math.ceil(store.total / perPage))
+      await store.fetchContacts(page.value, perPage, search.value)
+    }
+  } catch (e) {
+    loadError.value = errorMessage(e, 'Failed to load contacts')
   }
 }
 
 function onSearch() {
   page.value = 1
-  loadContacts().catch(() => {})
+  loadContacts()
 }
 
 function nextPage() {
   page.value++
-  loadContacts().catch(() => {})
+  loadContacts()
 }
 
 function prevPage() {
   page.value--
-  loadContacts().catch(() => {})
+  loadContacts()
 }
 
 function openCreate() {
@@ -111,17 +117,17 @@ async function handleSave(body: ContactSaveBody) {
   saving.value = true
   try {
     if (editingContact.value) {
-      await apiClient.patch(`/api/contacts/${editingContact.value.id}`, body)
+      await store.update(editingContact.value.id, body)
       toast.success('Contact updated')
     } else {
-      const res = await apiClient.post('/api/contacts', body)
+      const saved = await store.create(body)
       toast.success('Contact created')
-      if (res.data?.warnings?.length) {
-        toast.warning(res.data.warnings.join('; '))
+      if (saved.warnings?.length) {
+        toast.warning(saved.warnings.join('; '))
       }
     }
     drawerOpen.value = false
-    loadContacts().catch(() => {})
+    loadContacts()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to save contact'))
   } finally {
@@ -137,11 +143,11 @@ function confirmDelete(id: string) {
 async function handleDelete() {
   if (!deletingId.value) return
   try {
-    await apiClient.delete(`/api/contacts/${deletingId.value}`)
+    await store.remove(deletingId.value)
     toast.success('Contact deleted')
     deletingId.value = null
     deleteDialogOpen.value = false
-    loadContacts().catch(() => {})
+    loadContacts()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to delete contact'))
   }
@@ -166,6 +172,8 @@ async function handleDelete() {
       @import="importOpen = true"
       @create="openCreate"
     />
+
+    <ErrorAlert v-if="loadError" :error="loadError" title="Failed to load contacts" @retry="loadContacts()" />
 
     <template v-if="viewMode === 'table'">
       <div class="w-full min-w-0 overflow-x-auto rounded-lg border">

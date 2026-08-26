@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref, shallowRef } from 'vue'
-import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,21 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ArrowDown, ArrowUp, Check, Layers, Plus, Trash2, Pencil, X } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
-
-interface Stage {
-  id: string
-  name: string
-  order: number
-  is_closing?: boolean
-  outcome?: string
-}
-
-interface Pipeline {
-  id: string
-  name: string
-  description?: string
-  stages?: Stage[]
-}
+import { listPipelines, createPipeline as apiCreatePipeline, deletePipeline as apiDeletePipeline, addStage, updateStage, deleteStage as apiDeleteStage, type Stage, type Pipeline } from '@/api/pipelines'
 
 const pipelines = shallowRef<Pipeline[]>([])
 const newPipelineName = shallowRef('')
@@ -50,7 +35,7 @@ onMounted(() => loadPipelines())
 
 async function loadPipelines() {
   try {
-    const res = await apiClient.get('/api/pipelines')
+    const res = await listPipelines()
     pipelines.value = res.data
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load pipelines'))
@@ -65,7 +50,7 @@ async function createPipeline() {
   }
   creatingPipeline.value = true
   try {
-    await apiClient.post('/api/pipelines', { name: newPipelineName.value, description: newPipelineDesc.value })
+    await apiCreatePipeline({ name: newPipelineName.value, description: newPipelineDesc.value })
     toast.success('Pipeline created')
     newPipelineName.value = ''
     newPipelineDesc.value = ''
@@ -79,7 +64,7 @@ async function createPipeline() {
 
 async function deletePipeline(pipelineId: string) {
   try {
-    await apiClient.delete(`/api/pipelines/${pipelineId}`)
+    await apiDeletePipeline(pipelineId)
     toast.success('Pipeline deleted')
     loadPipelines()
   } catch (e) {
@@ -91,7 +76,7 @@ async function createStage(pipelineId: string) {
   const name = newStageNames.value[pipelineId]?.trim()
   if (!name) return
   try {
-    await apiClient.post(`/api/pipelines/${pipelineId}/stages`, { name })
+    await addStage(pipelineId, { name })
     toast.success('Stage added')
     newStageNames.value[pipelineId] = ''
     loadPipelines()
@@ -117,7 +102,7 @@ async function renameStage(stageId: string) {
     return
   }
   try {
-    await apiClient.patch(`/api/stages/${stageId}`, { name })
+    await updateStage(stageId, { name })
     toast.success('Stage renamed')
     cancelEditStage()
     loadPipelines()
@@ -128,7 +113,7 @@ async function renameStage(stageId: string) {
 
 async function reorderStage(stageId: string, order: number) {
   try {
-    await apiClient.patch(`/api/stages/${stageId}`, { order })
+    await updateStage(stageId, { order })
     loadPipelines()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to reorder stage'))
@@ -137,7 +122,7 @@ async function reorderStage(stageId: string, order: number) {
 
 async function deleteStage(stageId: string) {
   try {
-    await apiClient.delete(`/api/stages/${stageId}`)
+    await apiDeleteStage(stageId)
     toast.success('Stage deleted')
     loadPipelines()
   } catch (e) {
@@ -154,11 +139,11 @@ async function setClosing(stage: Stage, isClosing: boolean) {
     if (isClosing) {
       const outcome = rememberedOutcome.value[stage.id] || current || 'lost'
       delete rememberedOutcome.value[stage.id]
-      await apiClient.patch(`/api/stages/${stage.id}`, { is_closing: true, outcome })
+      await updateStage(stage.id, { is_closing: true, outcome })
       toast.success('Stage marked as closing')
     } else {
       if (current) rememberedOutcome.value[stage.id] = current
-      await apiClient.patch(`/api/stages/${stage.id}`, { is_closing: false, outcome: 'open' })
+      await updateStage(stage.id, { is_closing: false, outcome: 'open' })
       toast.success('Stage is now open')
     }
     loadPipelines()
@@ -170,7 +155,7 @@ async function setClosing(stage: Stage, isClosing: boolean) {
 async function setStageOutcome(stage: Stage, outcome: string) {
   delete rememberedOutcome.value[stage.id]
   try {
-    await apiClient.patch(`/api/stages/${stage.id}`, { outcome })
+    await updateStage(stage.id, { outcome })
     toast.success('Stage outcome updated')
     loadPipelines()
   } catch (e) {

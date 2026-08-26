@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { shallowRef } from 'vue'
 import { useRBACStore } from '@/stores/rbac'
-import { apiDownload } from '@/composables/useApi'
+import { downloadCsv } from '@/api/export'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -19,7 +19,7 @@ function fileName(entity: 'contacts' | 'leads'): string {
 }
 
 async function download(entity: 'contacts' | 'leads') {
-  const blob = await apiDownload(`/api/export/csv?entity=${entity}`)
+  const blob = await downloadCsv(entity)
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url

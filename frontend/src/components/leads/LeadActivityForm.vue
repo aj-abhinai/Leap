@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { apiClient } from '@/composables/useApi'
+import { useLocalStorage } from '@vueuse/core'
 import { useSettingsStore } from '@/stores/settings'
+import { createLeadActivity } from '@/api/leads'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -15,8 +16,8 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { ChevronDown, ChevronUp, Check } from '@lucide/vue'
-import { nextPresets, type NextPreset } from '@/utils/reminders'
-import { toLocalDateInput, toLocalTimeInput } from '@/utils/time'
+import { nextPresets, groupQuickReplies, findSelectedPreset, type NextPreset } from '@/utils/reminders'
+import { toLocalDateInput, toLocalTimeInput, mergeDateTime } from '@/utils/time'
 import { errorMessage } from '@/utils/errors'
 
 const props = defineProps<{ leadId: string }>()
@@ -49,19 +50,7 @@ const chips = computed(() => settings.quickReplies)
 
 const selectedChip = computed(() => chips.value.find((c) => c.id === quickReplyId.value))
 
-const groupedChips = computed(() => {
-  const groups = new Map<string, typeof chips.value>()
-  for (const chip of chips.value) {
-    const key = chip.group_name || 'Quick reply'
-    const bucket = groups.get(key) ?? []
-    bucket.push(chip)
-    groups.set(key, bucket)
-  }
-  return [...groups.entries()].map(([group, items]) => ({
-    group,
-    items: items.slice().sort((a, b) => a.sort_order - b.sort_order),
-  }))
-})
+const groupedChips = computed(() => groupQuickReplies(chips.value))
 
 const selectedBehavior = computed(() => selectedChip.value?.behavior || 'log')
 
@@ -78,11 +67,13 @@ onMounted(() => {
 // Pre-fill the type with the last successfully logged one (per browser) so a
 // follow-up log usually needs no type selection. clearForm() re-applies it
 // after saves; this watcher covers the async tags load on first mount.
+const lastActivityType = useLocalStorage('crm:lastActivityType', '')
+
 watch(
   () => settings.activityTypes,
   (types) => {
     if (activityType.value) return
-    const last = localStorage.getItem('crm:lastActivityType')
+    const last = lastActivityType.value
     if (last && types.some((t) => t.name === last)) {
       activityType.value = last
     }
@@ -123,7 +114,7 @@ function setChip(id: string) {
 }
 
 function applyLastType() {
-  const last = localStorage.getItem('crm:lastActivityType')
+  const last = lastActivityType.value
   if (last && settings.activityTypes.some((t) => t.name === last)) {
     activityType.value = last
   }
@@ -143,13 +134,6 @@ function clearForm() {
   applyLastType()
 }
 
-// mergeDateTime combines a local wall-clock date and time into a UTC ISO
-// instant, or null when either part is empty.
-function mergeDateTime(date: string, time: string): string | null {
-  if (!date || !time) return null
-  return new Date(`${date}T${time}`).toISOString()
-}
-
 function pickNextPreset(preset: NextPreset) {
   const at = preset.at().toISOString()
   nextDate.value = toLocalDateInput(at)
@@ -158,14 +142,9 @@ function pickNextPreset(preset: NextPreset) {
 
 // Highlights the preset that produced the current next date/time so a tap has
 // visible feedback (the date/time inputs themselves live under More options).
-const selectedPreset = computed(() => {
-  if (!hasNextTime.value) return ''
-  const preset = nextPresets.find((p) => {
-    const at = p.at().toISOString()
-    return toLocalDateInput(at) === nextDate.value && toLocalTimeInput(at) === nextTime.value
-  })
-  return preset?.label ?? ''
-})
+const selectedPreset = computed(() =>
+  findSelectedPreset(nextDate.value, nextTime.value, nextPresets),
+)
 
 function formatNextAt(): string {
   const next = mergeDateTime(nextDate.value, nextTime.value)
@@ -220,9 +199,9 @@ async function handleSave() {
 
   saving.value = true
   try {
-    await apiClient.post(`/api/leads/${props.leadId}/activities`, payload)
+    await createLeadActivity(props.leadId, payload)
     toast.success(hasNext ? 'Attempt logged, next task created' : showNextFields.value ? 'Attempt logged' : 'Activity logged')
-    localStorage.setItem('crm:lastActivityType', activityType.value)
+    lastActivityType.value = activityType.value
     clearForm()
     emit('saved')
     if (wasCloseLost) {

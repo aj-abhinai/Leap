@@ -1,35 +1,26 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { apiClient } from '@/composables/useApi'
+import * as api from '@/api/tags'
 
-export interface Tag {
-  id: string
-  name: string
-  type: 'tag' | 'status' | 'quick_reply' | 'activity_type' | 'loss_reason'
-  color?: string
-  group_name?: string
-  sort_order: number
-  behavior: 'log' | 'next' | 'close_lost'
-  created_at: string
-}
+export type { Tag } from '@/api/tags'
 
 export const useSettingsStore = defineStore('settings', () => {
-  const tags = ref<Tag[]>([])
-  const statuses = ref<Tag[]>([])
-  const quickReplies = ref<Tag[]>([])
-  const activityTypes = ref<Tag[]>([])
-  const lossReasons = ref<Tag[]>([])
+  const tags = ref<api.Tag[]>([])
+  const statuses = ref<api.Tag[]>([])
+  const quickReplies = ref<api.Tag[]>([])
+  const activityTypes = ref<api.Tag[]>([])
+  const lossReasons = ref<api.Tag[]>([])
   const loading = ref(false)
 
   async function fetchTags() {
     loading.value = true
     try {
       const [tagsRes, statusesRes, quickRepliesRes, activityTypesRes, lossReasonsRes] = await Promise.all([
-        apiClient.get('/api/tags?type=tag'),
-        apiClient.get('/api/tags?type=status'),
-        apiClient.get('/api/tags?type=quick_reply'),
-        apiClient.get('/api/tags?type=activity_type'),
-        apiClient.get('/api/tags?type=loss_reason'),
+        api.listTags('tag'),
+        api.listTags('status'),
+        api.listTags('quick_reply'),
+        api.listTags('activity_type'),
+        api.listTags('loss_reason'),
       ])
       tags.value = tagsRes.data
       statuses.value = statusesRes.data
@@ -42,7 +33,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function createTag(name: string, type: string) {
-    await apiClient.post('/api/tags', { name, type })
+    await api.createTag({ name, type })
     await fetchTags()
   }
 
@@ -50,12 +41,12 @@ export const useSettingsStore = defineStore('settings', () => {
     id: string,
     data: { name?: string; color?: string; group_name?: string; sort_order?: number; behavior?: string },
   ) {
-    await apiClient.patch(`/api/tags/${id}`, data)
+    await api.updateTag(id, data)
     await fetchTags()
   }
 
   async function deleteTag(id: string) {
-    await apiClient.delete(`/api/tags/${id}`)
+    await api.deleteTag(id)
     await fetchTags()
   }
 

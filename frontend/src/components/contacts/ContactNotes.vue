@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, shallowRef, watch } from 'vue'
-import { apiClient } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/auth'
 import { toast } from 'vue-sonner'
+import { listNotes, addNote, deleteNote, type ContactNote } from '@/api/contacts'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
-import { Skeleton } from '@/components/ui/skeleton'
+import PageState from '@/components/PageState.vue'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
@@ -19,15 +19,7 @@ import { Plus, MoreHorizontal, Trash2 } from '@lucide/vue'
 import { formatDateTime } from '@/utils/time'
 import { errorMessage } from '@/utils/errors'
 
-interface Note {
-  id: string
-  contact_id: string
-  user_id?: string
-  user_name?: string
-  note: string
-  created_at: string
-  updated_at: string
-}
+interface Note extends ContactNote {}
 
 const props = defineProps<{ contactId: string }>()
 
@@ -49,7 +41,7 @@ async function fetchNotes() {
   const seq = ++fetchSeq
   loading.value = true
   try {
-    const res = await apiClient.get(`/api/contacts/${props.contactId}/notes`)
+    const res = await listNotes(props.contactId)
     if (seq !== fetchSeq) return
     notes.value = res.data
   } catch (e) {
@@ -64,7 +56,7 @@ async function handleSave() {
   if (!newNote.value.trim() || saving.value) return
   saving.value = true
   try {
-    await apiClient.post(`/api/contacts/${props.contactId}/notes`, { note: newNote.value })
+    await addNote(props.contactId, newNote.value)
     newNote.value = ''
     isAdding.value = false
     await fetchNotes()
@@ -84,7 +76,7 @@ function confirmDelete(noteId: string) {
 async function handleDelete() {
   if (!noteToDelete.value) return
   try {
-    await apiClient.delete(`/api/contacts/${props.contactId}/notes/${noteToDelete.value}`)
+    await deleteNote(props.contactId, noteToDelete.value)
     noteToDelete.value = null
     deleteDialogOpen.value = false
     await fetchNotes()
@@ -108,10 +100,6 @@ function canDelete(note: Note): boolean {
       </Button>
     </div>
 
-    <div v-if="loading" class="space-y-3">
-      <Skeleton v-for="i in 3" :key="i" class="h-20 w-full" />
-    </div>
-
     <div v-if="isAdding" class="space-y-3 rounded-lg border p-3">
       <Textarea v-model="newNote" placeholder="Write a note..." class="min-h-24" />
       <div class="flex justify-end gap-2">
@@ -122,12 +110,15 @@ function canDelete(note: Note): boolean {
       </div>
     </div>
 
-    <div v-if="!loading && !isAdding && notes.length === 0" class="rounded-lg border border-dashed p-8 text-center">
-      <p class="text-sm text-muted-foreground">No notes yet. Add the first one.</p>
-    </div>
-
-    <div v-else-if="!loading" class="space-y-3">
-      <Card v-for="note in notes" :key="note.id">
+    <PageState
+      :loading="loading"
+      :empty="!isAdding && notes.length === 0"
+      empty-title="No notes yet. Add the first one."
+      :skeleton-count="3"
+      skeleton-class="h-20 w-full"
+    >
+      <div class="space-y-3">
+        <Card v-for="note in notes" :key="note.id">
         <CardHeader class="pb-1 pt-3 px-4">
           <div class="flex items-center justify-between">
             <div class="text-sm">
@@ -152,7 +143,8 @@ function canDelete(note: Note): boolean {
           <p class="text-sm whitespace-pre-wrap">{{ note.note }}</p>
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </PageState>
 
     <AlertDialog :open="deleteDialogOpen">
       <AlertDialogContent>

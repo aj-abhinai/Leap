@@ -1,8 +1,8 @@
 import { ref, shallowRef } from 'vue'
-import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import type { Lead } from '@/stores/leads'
 import type { PrefillContact, LeadSaveBody } from '@/components/leads/LeadForm.vue'
+import { createLead, updateLead, deleteLead as apiDeleteLead } from '@/api/leads'
 import { errorMessage } from '@/utils/errors'
 
 export function useLeadDrawer(onSaved: () => void) {
@@ -29,10 +29,10 @@ export function useLeadDrawer(onSaved: () => void) {
     saving.value = true
     try {
       if (editingLead.value) {
-        await apiClient.patch(`/api/leads/${editingLead.value.id}`, body)
+        await updateLead(editingLead.value.id, body)
         toast.success('Lead updated')
       } else {
-        await apiClient.post('/api/leads', body)
+        await createLead(body)
         if (body.new_contact) {
           toast.success('Contact created & linked')
         }
@@ -49,7 +49,7 @@ export function useLeadDrawer(onSaved: () => void) {
 
   async function deleteLead(leadId: string) {
     try {
-      await apiClient.delete(`/api/leads/${leadId}`)
+      await apiDeleteLead(leadId)
       toast.success('Lead deleted')
       drawerOpen.value = false
       onSaved()

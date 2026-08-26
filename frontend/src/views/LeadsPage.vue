@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { apiClient } from '@/composables/useApi'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Input } from '@/components/ui/input'
@@ -30,6 +29,8 @@ import type { LeadSaveBody } from '@/components/leads/LeadForm.vue'
 import { useLeadPipeline } from '@/composables/useLeadPipeline'
 import { useLeadDrawer } from '@/composables/useLeadDrawer'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
+import { debounce } from '@/utils/debounce'
+import { getContact } from '@/api/contacts'
 
 const route = useRoute()
 const rbac = useRBACStore()
@@ -73,14 +74,8 @@ const outcomeOptions = [
 ] as const
 
 // Debounce the text search; outcome/assignee filters apply immediately.
-let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch(
-  () => search.value,
-  () => {
-    clearTimeout(searchTimer)
-    searchTimer = setTimeout(() => loadLeads(), 300)
-  },
-)
+const debouncedLoad = debounce(() => loadLeads(), 300)
+watch(search, debouncedLoad)
 watch([outcomeFilter, assigneeFilter], () => loadLeads())
 
 async function onLeadSaved(body: LeadSaveBody) {
@@ -97,7 +92,7 @@ async function onLeadDeleted(leadId: string) {
 async function handleContactPrefill(contactId?: string) {
   if (!contactId) return
   try {
-    const res = await apiClient.get(`/api/contacts/${contactId}`)
+    const res = await getContact(contactId)
     const c = res.data as { id: string; name: string; email?: string; phone?: string }
     editingLead.value = null
     prefillContact.value = {

@@ -2,10 +2,13 @@
 import { computed, onMounted, shallowRef } from 'vue'
 import { useRemindersStore, type Reminder } from '@/stores/reminders'
 import { useAuthStore } from '@/stores/auth'
-import { Skeleton } from '@/components/ui/skeleton'
 import ReminderCard from '@/components/leads/ReminderCard.vue'
+import PageState from '@/components/PageState.vue'
 import { BellOff } from '@lucide/vue'
 import { snoozeRemindAt } from '@/utils/reminders'
+import { statusLabel } from '@/utils/activity'
+import { toast } from 'vue-sonner'
+import { errorMessage } from '@/utils/errors'
 
 const store = useRemindersStore()
 const auth = useAuthStore()
@@ -18,37 +21,34 @@ const visible = computed(() => {
   return store.reminders.filter((r) => r.user_id === auth.user!.id)
 })
 
-const now = () => Date.now()
-
-// Buckets: overdue = past remind_at not yet reminded; upcoming = future
-// remind_at, or scheduled_at when no remind_at; dismissed = reminded but
-// open; done = done or cancelled.
-const overdue = computed(() =>
-  visible.value.filter(
-    (r) =>
-      !r.is_done && !r.is_cancelled &&
-      !!r.remind_at && new Date(r.remind_at).getTime() < now() && !r.is_reminded,
-  ),
-)
-const upcoming = computed(() =>
-  visible.value.filter(
-    (r) =>
-      !r.is_done && !r.is_cancelled &&
-      ((!!r.remind_at && new Date(r.remind_at).getTime() >= now() && !r.is_reminded) ||
-        (!!r.scheduled_at && !r.remind_at && !r.is_reminded)),
-  ),
-)
-const dismissed = computed(() =>
-  visible.value.filter((r) => !r.is_done && !r.is_cancelled && r.is_reminded),
-)
+// Buckets derive from the shared status derivation: overdue = past remind_at
+// not yet reminded; upcoming = open with a future remind/schedule; dismissed =
+// reminded but open; done = done or cancelled.
+const overdue = computed(() => visible.value.filter((r) => statusLabel(r) === 'Overdue'))
+const upcoming = computed(() => visible.value.filter((r) => statusLabel(r) === 'Open'))
+const dismissed = computed(() => visible.value.filter((r) => statusLabel(r) === 'Reminded'))
 const done = computed(() => visible.value.filter((r) => r.is_done || r.is_cancelled))
 
-// snooze pushes the reminder forward by minutes; failures are swallowed so a
-// failed snooze leaves the card in place.
+// snooze pushes the reminder forward by minutes; failures surface as a toast
+// and leave the card in place.
 async function snooze(reminder: Reminder, minutes: number) {
   try {
-    await store.snoozeReminder(reminder, snoozeRemindAt(minutes))
-  } catch {}
+    await store.snoozeReminder(reminder.lead_id, reminder.id, snoozeRemindAt(minutes))
+    toast.success('Reminder snoozed')
+    await store.fetchReminders()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to snooze'))
+  }
+}
+
+async function dismiss(reminder: Reminder) {
+  try {
+    await store.dismissReminder(reminder.lead_id, reminder.id)
+    toast.success('Reminder dismissed')
+    await store.fetchReminders()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to dismiss reminder'))
+  }
 }
 
 function hasAny(list: unknown[]): boolean {
@@ -73,20 +73,18 @@ function hasAny(list: unknown[]): boolean {
       </label>
     </div>
 
-    <div v-if="store.loading" class="space-y-3">
-      <Skeleton v-for="i in 5" :key="i" class="h-16 w-full" />
-    </div>
-
-    <div
-      v-else-if="visible.length === 0"
-      class="flex flex-col items-center justify-center py-16 text-center"
+    <PageState
+      :loading="store.loading"
+      :empty="visible.length === 0"
+      empty-title="No pending reminders"
+      empty-hint="Create tasks with reminders from the leads kanban"
+      :skeleton-count="5"
+      skeleton-class="h-16 w-full"
     >
-      <BellOff class="size-10 text-muted-foreground/40 mb-3" />
-      <p class="text-sm font-medium text-muted-foreground">No pending reminders</p>
-      <p class="text-xs text-muted-foreground/60 mt-1">Create tasks with reminders from the leads kanban</p>
-    </div>
-
-    <div v-else class="space-y-6 max-w-2xl">
+      <template #empty-icon>
+        <BellOff class="mb-3 size-10 text-muted-foreground/40" />
+      </template>
+      <div class="space-y-6 max-w-2xl">
       <section v-if="hasAny(overdue)">
         <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-warning">Overdue</h2>
         <div class="space-y-3">
@@ -96,7 +94,7 @@ function hasAny(list: unknown[]): boolean {
             :reminder="reminder"
             overdue
             @snooze="snooze(reminder, $event)"
-            @dismiss="store.dismissReminder(reminder)"
+            @dismiss="dismiss(reminder)"
           />
         </div>
       </section>
@@ -109,7 +107,7 @@ function hasAny(list: unknown[]): boolean {
             :key="reminder.id"
             :reminder="reminder"
             @snooze="snooze(reminder, $event)"
-            @dismiss="store.dismissReminder(reminder)"
+            @dismiss="dismiss(reminder)"
           />
         </div>
       </section>
@@ -122,7 +120,7 @@ function hasAny(list: unknown[]): boolean {
             :key="reminder.id"
             :reminder="reminder"
             @snooze="snooze(reminder, $event)"
-            @dismiss="store.dismissReminder(reminder)"
+            @dismiss="dismiss(reminder)"
           />
         </div>
       </section>
@@ -137,6 +135,7 @@ function hasAny(list: unknown[]): boolean {
           />
         </div>
       </section>
-    </div>
+      </div>
+    </PageState>
   </div>
 </template>

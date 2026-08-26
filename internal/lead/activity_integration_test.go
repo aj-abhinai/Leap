@@ -688,7 +688,7 @@ func seedClosingStage(t *testing.T, db *sql.DB, pipelineID string) string {
 	t.Helper()
 	var id string
 	if err := db.QueryRow(
-		`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, 'Closed', 99, true) RETURNING id`,
+		`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Closed', 99, true, 'lost') RETURNING id`,
 		pipelineID,
 	).Scan(&id); err != nil {
 		t.Fatalf("seed closing stage: %v", err)
@@ -792,5 +792,252 @@ func TestListAllActivitiesMultiFilterArgBindingIntegration(t *testing.T) {
 	}
 	if total != 1 || len(searched) != 1 || searched[0].Type != "Call 1" {
 		t.Errorf("search+type: total = %d, got %d rows; want the open 'Call 1'", total, len(searched))
+	}
+}
+
+func seedQuickReplyTagBehavior(t *testing.T, db interface {
+	QueryRow(query string, args ...any) *sql.Row
+}, name, behavior string) string {
+	t.Helper()
+	var id string
+	if err := db.QueryRow(`INSERT INTO tags (name, type, behavior) VALUES ($1, 'quick_reply', $2) RETURNING id`, name, behavior).Scan(&id); err != nil {
+		t.Fatalf("seed quick reply tag: %v", err)
+	}
+	return id
+}
+
+func TestCreateActivityCloseLostMovesLeadIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	closingStageID := seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"}); err != nil {
+		t.Fatalf("create open task: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Closed Lost", "close_lost")
+
+	done := true
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:         "Call 2",
+		QuickReplyID: &qrID,
+		IsDone:       &done,
+	})
+	if err != nil {
+		t.Fatalf("create close_lost activity: %v", err)
+	}
+	if !act.IsDone || act.OccurredAt == nil {
+		t.Errorf("close_lost activity is_done = %v, occurred_at = %v; want done with occurred_at", act.IsDone, act.OccurredAt)
+	}
+
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.StageID != closingStageID {
+		t.Errorf("stage_id = %q, want closing stage %q", got.StageID, closingStageID)
+	}
+	if got.Outcome != "lost" {
+		t.Errorf("outcome = %q, want lost", got.Outcome)
+	}
+
+	var cancelled, total int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FILTER (WHERE is_cancelled), COUNT(*) FROM lead_activities WHERE lead_id = $1`,
+		created.ID,
+	).Scan(&cancelled, &total); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if total != 2 || cancelled != 1 {
+		t.Errorf("expected 1 of 2 tasks cancelled, got %d of %d", cancelled, total)
+	}
+
+	var history int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM lead_stage_history WHERE lead_id = $1 AND to_stage_id = $2`,
+		created.ID, closingStageID,
+	).Scan(&history); err != nil {
+		t.Fatalf("count history: %v", err)
+	}
+	if history != 1 {
+		t.Errorf("history rows into closing stage = %d, want 1", history)
+	}
+}
+
+func TestUpdateActivityCloseLostMovesLeadIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	closingStageID := seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"})
+	if err != nil {
+		t.Fatalf("create open task: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Closed Lost", "close_lost")
+
+	done := true
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &qrID, IsDone: &done}); err != nil {
+		t.Fatalf("complete with close_lost quick reply: %v", err)
+	}
+
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.StageID != closingStageID {
+		t.Errorf("stage_id = %q, want closing stage %q", got.StageID, closingStageID)
+	}
+	if got.Outcome != "lost" {
+		t.Errorf("outcome = %q, want lost", got.Outcome)
+	}
+
+	// Completing the closing touchpoint must not have been cancelled by the move.
+	var cancelled, total int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FILTER (WHERE is_cancelled), COUNT(*) FROM lead_activities WHERE lead_id = $1`,
+		created.ID,
+	).Scan(&cancelled, &total); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if total != 1 || cancelled != 0 {
+		t.Errorf("expected 0 of 1 tasks cancelled, got %d of %d", cancelled, total)
+	}
+}
+
+func TestEditDoneCloseLostActivityDoesNotRecloseLeadIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	_ = seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"})
+	if err != nil {
+		t.Fatalf("create open task: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Closed Lost", "close_lost")
+
+	done := true
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &qrID, IsDone: &done}); err != nil {
+		t.Fatalf("complete with close_lost quick reply: %v", err)
+	}
+
+	// Reopen the lead back into the open stage.
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &stageID}, ""); err != nil {
+		t.Fatalf("reopen lead: %v", err)
+	}
+
+	// Editing the old closing touchpoint (description only) must not re-close.
+	desc := "corrected note"
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{Description: &desc}); err != nil {
+		t.Fatalf("edit done close_lost activity: %v", err)
+	}
+
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.StageID != stageID {
+		t.Errorf("stage_id = %q, want open stage %q (edit must not re-close)", got.StageID, stageID)
+	}
+	if got.Outcome != "" {
+		t.Errorf("outcome = %q, want cleared", got.Outcome)
+	}
+}
+
+func TestCloseLostWithoutLostStageIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Closed Lost", "close_lost")
+
+	done := true
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:         "Call 1",
+		QuickReplyID: &qrID,
+		IsDone:       &done,
+	}); !errors.Is(err, ErrNoLostStage) {
+		t.Fatalf("create close_lost without lost stage = %v, want ErrNoLostStage", err)
+	}
+
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.StageID != stageID {
+		t.Errorf("stage_id = %q, want unchanged %q", got.StageID, stageID)
+	}
+}
+
+func TestCreateCloseLostActivityNotDoneDoesNotCloseLeadIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	_ = seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Closed Lost", "close_lost")
+
+	// A scheduled close_lost task (no is_done) must not close the lead.
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:         "Call 1",
+		QuickReplyID: &qrID,
+	})
+	if err != nil {
+		t.Fatalf("create scheduled close_lost activity: %v", err)
+	}
+	if act.IsDone || act.IsCancelled {
+		t.Errorf("activity is_done = %v, is_cancelled = %v; want open", act.IsDone, act.IsCancelled)
+	}
+
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.StageID != stageID {
+		t.Errorf("stage_id = %q, want open stage %q (scheduled close_lost task must not close)", got.StageID, stageID)
+	}
+	if got.Outcome != "" {
+		t.Errorf("outcome = %q, want empty", got.Outcome)
 	}
 }

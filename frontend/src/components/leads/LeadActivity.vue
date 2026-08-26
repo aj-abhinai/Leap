@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef, watch } from 'vue'
-import { apiClient } from '@/composables/useApi'
 import { useSettingsStore } from '@/stores/settings'
+import { useRemindersStore } from '@/stores/reminders'
+import { listLeadActivities, deleteLeadActivity, updateLeadActivity, type LeadActivity } from '@/api/leads'
 import { toast } from 'vue-sonner'
 import { Card, CardContent } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
+import PageState from '@/components/PageState.vue'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -12,11 +13,10 @@ import {
 import { MoreHorizontal, Trash2 } from '@lucide/vue'
 import { reminderIcon, snoozeRemindAt } from '@/utils/reminders'
 import { formatDateTime } from '@/utils/time'
+import { typeLabel } from '@/utils/activity'
 import { Badge } from '@/components/ui/badge'
-import TaskRow, { type ActivityRowActivity } from '@/components/leads/TaskRow.vue'
+import TaskRow from '@/components/leads/TaskRow.vue'
 import { errorMessage } from '@/utils/errors'
-
-interface Activity extends ActivityRowActivity {}
 
 const props = defineProps<{ leadId: string }>()
 
@@ -24,11 +24,12 @@ const emit = defineEmits<{
   closeLost: []
 }>()
 
-const activities = shallowRef<Activity[]>([])
+const activities = shallowRef<LeadActivity[]>([])
 const loading = shallowRef(false)
 const loadError = shallowRef('')
 
 const settings = useSettingsStore()
+const remindersStore = useRemindersStore()
 
 onMounted(() => {
   if (settings.activityTypes.length === 0) settings.fetchTags()
@@ -58,7 +59,7 @@ async function fetchActivities() {
   loading.value = true
   loadError.value = ''
   try {
-    const res = await apiClient.get(`/api/leads/${props.leadId}/activities`)
+    const res = await listLeadActivities(props.leadId)
     if (seq !== fetchSeq) return
     activities.value = res.data
   } catch (e) {
@@ -70,17 +71,17 @@ async function fetchActivities() {
   }
 }
 
-function isTouchpoint(a: Activity): boolean {
+function isTouchpoint(a: LeadActivity): boolean {
   return !!a.is_done || !!a.occurred_at || !!a.responded_at
 }
 
-function isOverdue(a: Activity): boolean {
+function isOverdue(a: LeadActivity): boolean {
   if (isTouchpoint(a)) return false
   const at = a.scheduled_at || a.remind_at
   return !!at && new Date(at).getTime() < Date.now()
 }
 
-function isUpcoming(a: Activity): boolean {
+function isUpcoming(a: LeadActivity): boolean {
   return !isTouchpoint(a) && !isOverdue(a)
 }
 
@@ -105,7 +106,7 @@ const visibleDone = computed(() =>
 
 async function deleteActivity(id: string) {
   try {
-    await apiClient.delete(`/api/leads/${props.leadId}/activities/${id}`)
+    await deleteLeadActivity(props.leadId, id)
     toast.success('Activity deleted')
     await fetchActivities()
   } catch (e) {
@@ -113,23 +114,29 @@ async function deleteActivity(id: string) {
   }
 }
 
-async function markDone(a: Activity) {
+async function markDone(a: LeadActivity) {
   try {
-    await apiClient.patch(`/api/leads/${props.leadId}/activities/${a.id}`, {
-      is_done: true,
-    })
+    await updateLeadActivity(props.leadId, a.id, { is_done: true })
     toast.success('Marked as done')
     await fetchActivities()
+    // Completing a task whose quick reply closes lost moves the lead server
+    // side; signal the drawer so it refreshes the kanban and closes. The tag
+    // catalog may still be loading, so fetch it before the behavior lookup.
+    if (a.quick_reply_id) {
+      if (settings.quickReplies.length === 0) await settings.fetchTags()
+      const qr = settings.quickReplies.find((s) => s.id === a.quick_reply_id)
+      if (qr?.behavior === 'close_lost') {
+        emit('closeLost')
+      }
+    }
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to mark response'))
   }
 }
 
-async function snooze(a: Activity, minutes: number) {
+async function snooze(a: LeadActivity, minutes: number) {
   try {
-    await apiClient.post(`/api/leads/${props.leadId}/reminders/${a.id}/snooze`, {
-      remind_at: snoozeRemindAt(minutes),
-    })
+    await remindersStore.snoozeReminder(props.leadId, a.id, snoozeRemindAt(minutes))
     toast.success('Reminder snoozed')
     await fetchActivities()
   } catch (e) {
@@ -137,28 +144,20 @@ async function snooze(a: Activity, minutes: number) {
   }
 }
 
-function typeLabel(type: string): string {
-  return type || 'Task'
-}
-
 defineExpose({ fetchActivities })
 </script>
 
 <template>
   <div class="space-y-3">
-    <div v-if="loading" class="space-y-2">
-      <Skeleton v-for="i in 3" :key="i" class="h-16 w-full" />
-    </div>
-
-    <div v-else-if="loadError" class="rounded-lg border border-dashed p-6 text-center">
-      <p class="text-sm text-destructive">{{ loadError }}</p>
-    </div>
-
-    <div v-else-if="activities.length === 0" class="rounded-lg border border-dashed p-6 text-center">
-      <p class="text-sm text-muted-foreground">No tasks logged yet</p>
-    </div>
-
-    <template v-else>
+    <PageState
+      :loading="loading"
+      :error="loadError"
+      :empty="activities.length === 0"
+      empty-title="No tasks logged yet"
+      :skeleton-count="3"
+      skeleton-class="h-16 w-full"
+      @retry="fetchActivities"
+    >
       <section v-if="doneActivities.length">
         <div class="mb-2 flex items-center justify-between">
           <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">History</h3>
@@ -261,6 +260,6 @@ defineExpose({ fetchActivities })
           />
         </div>
       </section>
-    </template>
+    </PageState>
   </div>
 </template>

@@ -2,7 +2,6 @@
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { type Lead } from '@/stores/leads'
-import { apiClient } from '@/composables/useApi'
 import { useSettingsStore } from '@/stores/settings'
 import { useRBACStore } from '@/stores/rbac'
 import { useUsersStore } from '@/stores/users'
@@ -21,18 +20,15 @@ import {
 import { Loader2, Link, Search } from '@lucide/vue'
 import type { Stage } from '@/stores/pipeline'
 import { formatCurrency, formatContactDetail } from '@/utils/format'
+import { debounce } from '@/utils/debounce'
+import { listContacts, resolveContactByPhone } from '@/api/contacts'
+import { listPrograms, type Program } from '@/api/programs'
 
 export interface PrefillContact {
   id: string
   name: string
   email?: string
   phone?: string
-}
-
-interface Program {
-  id: string
-  name: string
-  price: number
 }
 
 interface ContactOption {
@@ -181,12 +177,8 @@ function displayName(): string {
 
 // searchContacts debounces the contact picker search (300ms) and discards
 // out-of-order responses so a slow reply can never overwrite a newer query.
-let searchTimer: ReturnType<typeof setTimeout> | undefined
 let searchSeq = 0
-function searchContacts() {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(runContactSearch, 300)
-}
+const searchContacts = debounce(runContactSearch, 300)
 
 async function runContactSearch() {
   const q = contactSearch.value.trim()
@@ -197,7 +189,7 @@ async function runContactSearch() {
   const seq = ++searchSeq
   searchingContacts.value = true
   try {
-    const res = await apiClient.get(`/api/contacts?q=${encodeURIComponent(q)}&per_page=10`)
+    const res = await listContacts({ page: 1, perPage: 10, q })
     if (seq !== searchSeq) return
     contactResults.value = res.data
   } catch {
@@ -232,7 +224,7 @@ onMounted(async () => {
   if (settings.lossReasons.length === 0) settings.fetchTags()
   users.fetchOptions()
   try {
-    const res = await apiClient.get('/api/programs')
+    const res = await listPrograms()
     programs.value = res.data
   } catch {}
 })
@@ -268,7 +260,7 @@ async function handleSave() {
     }
     if (!resolvedOnce.value && newContactPhone.value.trim()) {
       try {
-        const res = await apiClient.get(`/api/contacts/resolve?phone=${encodeURIComponent(newContactPhone.value.trim())}`)
+        const res = await resolveContactByPhone(newContactPhone.value.trim())
         const matches = (res.data ?? []) as ResolveMatch[]
         if (matches.length > 0) {
           resolveMatches.value = matches

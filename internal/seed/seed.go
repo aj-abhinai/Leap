@@ -185,17 +185,18 @@ func seedDefaultPipeline(db *sql.DB) error {
 	stages := []struct {
 		name      string
 		isClosing bool
+		outcome   string
 	}{
-		{"New Customer", false},
-		{"Contacted", false},
-		{"Follow-up", false},
-		{"Closed Lost", true},
-		{"Converted", true},
+		{"New Customer", false, "open"},
+		{"Contacted", false, "open"},
+		{"Follow-up", false, "open"},
+		{"Closed Lost", true, "lost"},
+		{"Converted", true, "won"},
 	}
 	for i, st := range stages {
 		_, err := db.Exec(
-			`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing) VALUES ($1, $2, $3, $4)`,
-			pipelineID, st.name, i, st.isClosing,
+			`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, $2, $3, $4, $5)`,
+			pipelineID, st.name, i, st.isClosing, st.outcome,
 		)
 		if err != nil {
 			return fmt.Errorf("seed stage %s: %w", st.name, err)

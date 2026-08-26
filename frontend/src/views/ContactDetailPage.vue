@@ -16,7 +16,6 @@ import ContactForm, { type ContactSaveBody } from '@/components/contacts/Contact
 import ContactLeadJourney from '@/components/contacts/ContactLeadJourney.vue'
 import ContactNotes from '@/components/contacts/ContactNotes.vue'
 import { Mail, Phone, MapPin, ArrowLeft, Pencil } from '@lucide/vue'
-import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { getAvatarColor, getInitials } from '@/utils/avatar'
 import { errorMessage } from '@/utils/errors'
@@ -73,7 +72,7 @@ async function handleSave(body: ContactSaveBody) {
   // contact must then be discarded instead of overwriting the new contact.
   const seq = loadSeq
   try {
-    await apiClient.patch(`/api/contacts/${saved.id}`, body)
+    await store.update(saved.id, body)
     toast.success('Contact updated')
     drawerOpen.value = false
   } catch (e) {

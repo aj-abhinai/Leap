@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, shallowRef, computed } from 'vue'
-import { apiClient } from '@/composables/useApi'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,6 +24,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Plus, Shield, ShieldCheck, Trash2, Pencil } from '@lucide/vue'
+import { listRoles, listPermissions, createRole, updateRole, setRolePermissions, deleteRole as apiDeleteRole, type Role as ApiRole } from '@/api/roles'
 import { errorMessage } from '@/utils/errors'
 
 interface Permission {
@@ -33,10 +33,8 @@ interface Permission {
   description: string
 }
 
-interface Role {
-  id: string
-  name: string
-  description: string
+interface Role extends ApiRole {
+  description?: string
   permissions?: { id: string; name: string }[]
 }
 
@@ -67,7 +65,7 @@ onMounted(() => {
 async function loadRoles() {
   loading.value = true
   try {
-    const res = await apiClient.get('/api/roles')
+    const res = await listRoles()
     roles.value = res.data
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load roles'))
@@ -79,7 +77,7 @@ async function loadRoles() {
 async function loadPermissions() {
   permsLoading.value = true
   try {
-    const res = await apiClient.get('/api/permissions')
+    const res = await listPermissions()
     allPermissions.value = res.data
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load permissions'))
@@ -141,24 +139,20 @@ async function saveRole() {
   try {
     if (isEditing.value && editingRole.value) {
       const id = editingRole.value.id
-      await apiClient.patch(`/api/roles/${id}`, {
+      await updateRole(id, {
         name: (formName.value ?? '').trim(),
         description: (formDesc.value ?? '').trim(),
       })
       // Replace the permission set atomically in one request.
-      await apiClient.put(`/api/roles/${id}/permissions`, {
-        permission_ids: [...formPermissions.value],
-      })
+      await setRolePermissions(id, [...formPermissions.value])
       toast.success('Role updated')
     } else {
-      const res = await apiClient.post('/api/roles', {
+      const res = await createRole({
         name: (formName.value ?? '').trim(),
         description: (formDesc.value ?? '').trim(),
       })
       const role = res.data as Role
-      await apiClient.put(`/api/roles/${role.id}/permissions`, {
-        permission_ids: [...formPermissions.value],
-      })
+      await setRolePermissions(role.id, [...formPermissions.value])
       toast.success('Role created')
     }
     modalOpen.value = false
@@ -178,7 +172,7 @@ async function deleteRole() {
   const role = deletingRole.value
   if (!role) return
   try {
-    await apiClient.delete(`/api/roles/${role.id}`)
+    await apiDeleteRole(role.id)
     toast.success('Role deleted')
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to delete role'))
