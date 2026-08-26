@@ -123,7 +123,7 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
 		) pce ON true`
 	}
-	countQuery := "SELECT COUNT(*)" + countFrom + baseWhere
+	countQuery := "SELECT COUNT(*) " + countFrom + " " + baseWhere
 	err := s.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count leads: %w", err)
@@ -427,8 +427,8 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	// No match — create the contact and link the lead in the same transaction.
 	var id string
 	err := tx.QueryRow(
-		`INSERT INTO contacts (name, email, phone) VALUES ($1, $2, $3) RETURNING id`,
-		nc.Name, util.NullStr(nc.Email), util.NullStr(nc.Phone),
+		`INSERT INTO contacts (name) VALUES ($1) RETURNING id`,
+		nc.Name,
 	).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("create contact from lead: %w", err)

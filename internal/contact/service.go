@@ -53,7 +53,9 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 
 	if search != "" {
 		baseWhere += fmt.Sprintf(
-			" AND (name ILIKE $%d ESCAPE '\\' OR nickname ILIKE $%d ESCAPE '\\' OR email ILIKE $%d ESCAPE '\\' OR phone ILIKE $%d ESCAPE '\\')",
+			` AND (name ILIKE $%d ESCAPE '\' OR nickname ILIKE $%d ESCAPE '\'
+				OR EXISTS (SELECT 1 FROM contact_phones cp WHERE cp.contact_id = contacts.id AND cp.value ILIKE $%d ESCAPE '\')
+				OR EXISTS (SELECT 1 FROM contact_emails ce WHERE ce.contact_id = contacts.id AND ce.value ILIKE $%d ESCAPE '\'))`,
 			argIdx, argIdx+1, argIdx+2, argIdx+3,
 		)
 		searchTerm := "%" + escapeLike(search) + "%"
@@ -76,8 +78,7 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 	offset := util.Offset(page, perPage)
 
 	selectQuery := fmt.Sprintf(
-		`SELECT id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''),
-			COALESCE(location, ''), age, created_at, updated_at
+		`SELECT id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, created_at, updated_at
 		FROM contacts %s
 		ORDER BY created_at DESC
 		LIMIT $%d OFFSET $%d`,
@@ -95,7 +96,7 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 	for rows.Next() {
 		var c Contact
 		if err := rows.Scan(
-			&c.ID, &c.Name, &c.Nickname, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+			&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -311,12 +312,15 @@ func (s *Service) resolveByPhone(phone string) ([]ResolveMatch, error) {
 	}
 	rows, err := s.db.Query(
 		`SELECT DISTINCT ON (c.id) c.id, c.name,
-			COALESCE(c.email, ''), COALESCE(pcp.value, '')
+			COALESCE(ece.value, ''), COALESCE(pcp.value, '')
 		FROM contacts c
 		JOIN contact_phones cp ON cp.contact_id = c.id
 		LEFT JOIN LATERAL (
 			SELECT value FROM contact_phones WHERE contact_id = c.id AND is_primary LIMIT 1
 		) pcp ON true
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_emails WHERE contact_id = c.id AND is_primary LIMIT 1
+		) ece ON true
 		WHERE c.deleted_at IS NULL
 		  AND regexp_replace(cp.value, '\D', '', 'g') IN ($1, '91' || $1)
 		ORDER BY c.id, c.updated_at DESC`,
@@ -340,13 +344,12 @@ func (s *Service) resolveByPhone(phone string) ([]ResolveMatch, error) {
 func (s *Service) get(id string) (*Contact, error) {
 	var c Contact
 	err := s.db.QueryRow(
-		`SELECT id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''),
-			COALESCE(location, ''), age, created_at, updated_at
+		`SELECT id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, created_at, updated_at
 		FROM contacts
 		WHERE id = $1 AND deleted_at IS NULL`,
 		id,
 	).Scan(
-		&c.ID, &c.Name, &c.Nickname, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get contact: %w", err)
@@ -363,7 +366,15 @@ func (s *Service) get(id string) (*Contact, error) {
 }
 
 func (s *Service) create(req CreateRequest) (*Contact, error) {
-	if err := validateCollectionLimits(req.Phones, req.Emails, req.TagIDs, req.Phone, req.Email); err != nil {
+	// Fold the scalar phone/email form fields into the child-row lists so the
+	// rest of the create path deals with lists only.
+	if req.Phone != "" && len(req.Phones) == 0 {
+		req.Phones = []PhoneValue{{Value: req.Phone, IsPrimary: true}}
+	}
+	if req.Email != "" && len(req.Emails) == 0 {
+		req.Emails = []EmailValue{{Value: req.Email, IsPrimary: true}}
+	}
+	if err := validateCollectionLimits(req.Phones, req.Emails, req.TagIDs); err != nil {
 		return nil, err
 	}
 	// Advisory duplicate warning via targeted indexed lookups, not a full-table
@@ -373,7 +384,7 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 	if err != nil {
 		return nil, err
 	}
-	created, err := s.createWithKeys(req, contactKeys{})
+	created, err := s.insertContact(req)
 	if err != nil {
 		return nil, err
 	}
@@ -394,9 +405,8 @@ func escapeLike(s string) string {
 
 // validateCollectionLimits enforces the per-contact caps on phones, emails,
 // and tags so a single request cannot flood the child tables or hold a pooled
-// connection for thousands of sequential inserts. The scalar phone/email
-// mirrors are checked too — they land in the same child tables.
-func validateCollectionLimits(phones []PhoneValue, emails []EmailValue, tagIDs []string, scalarPhone, scalarEmail string) error {
+// connection for thousands of sequential inserts.
+func validateCollectionLimits(phones []PhoneValue, emails []EmailValue, tagIDs []string) error {
 	if len(phones) > maxContactPhones {
 		return fmt.Errorf("%w: at most %d phones per contact", ErrCollectionLimit, maxContactPhones)
 	}
@@ -405,12 +415,6 @@ func validateCollectionLimits(phones []PhoneValue, emails []EmailValue, tagIDs [
 	}
 	if len(tagIDs) > maxContactTags {
 		return fmt.Errorf("%w: at most %d tags per contact", ErrCollectionLimit, maxContactTags)
-	}
-	if len(scalarPhone) > maxValueLength {
-		return fmt.Errorf("%w: phone value is too long", ErrCollectionLimit)
-	}
-	if len(scalarEmail) > maxValueLength {
-		return fmt.Errorf("%w: email value is too long", ErrCollectionLimit)
 	}
 	for _, p := range phones {
 		if len(p.Value) > maxValueLength {
@@ -426,10 +430,9 @@ func validateCollectionLimits(phones []PhoneValue, emails []EmailValue, tagIDs [
 }
 
 // duplicateReasonPoint reports whether the given phone/email already belong to
-// a live contact, using targeted indexed lookups rather than materializing the
-// whole contact table (the single-create path). Both the child tables and the
-// legacy scalar columns are checked so rows predating the child tables still
-// dedupe.
+// a live contact, using targeted indexed lookups (the normalized expression
+// indexes on the child tables) rather than materializing the whole contact
+// table. The single-create path uses this; bulk import loads all keys once.
 func (s *Service) duplicateReasonPoint(phone, email string) (string, error) {
 	p := util.NormalizePhone(phone)
 	e := util.NormalizeEmail(email)
@@ -445,17 +448,6 @@ func (s *Service) duplicateReasonPoint(phone, email string) (string, error) {
 		).Scan(&phoneMatch); err != nil {
 			return "", fmt.Errorf("check duplicate phone: %w", err)
 		}
-		if !phoneMatch {
-			if err := s.db.QueryRow(
-				`SELECT EXISTS(
-					SELECT 1 FROM contacts
-					WHERE deleted_at IS NULL
-					  AND regexp_replace(COALESCE(phone, ''), '\D', '', 'g') IN ($1, '91' || $1)
-				)`, p,
-			).Scan(&phoneMatch); err != nil {
-				return "", fmt.Errorf("check duplicate phone: %w", err)
-			}
-		}
 	}
 
 	emailMatch := false
@@ -468,16 +460,6 @@ func (s *Service) duplicateReasonPoint(phone, email string) (string, error) {
 			)`, e,
 		).Scan(&emailMatch); err != nil {
 			return "", fmt.Errorf("check duplicate email: %w", err)
-		}
-		if !emailMatch {
-			if err := s.db.QueryRow(
-				`SELECT EXISTS(
-					SELECT 1 FROM contacts
-					WHERE deleted_at IS NULL AND lower(trim(COALESCE(email, ''))) = $1
-				)`, e,
-			).Scan(&emailMatch); err != nil {
-				return "", fmt.Errorf("check duplicate email: %w", err)
-			}
 		}
 	}
 
@@ -493,10 +475,9 @@ func (s *Service) duplicateReasonPoint(phone, email string) (string, error) {
 	}
 }
 
-// createWithKeys inserts a contact while reusing already-loaded duplicate
-// lookup keys. Bulk import calls this so the full-table key scan runs once
-// per import instead of once per row.
-func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact, error) {
+// insertContact inserts a contact and its child rows (phones, emails, tags)
+// in one transaction, then returns the fully populated contact.
+func (s *Service) insertContact(req CreateRequest) (*Contact, error) {
 	var c Contact
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -516,25 +497,23 @@ func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact,
 	}
 
 	// validate the "at least one phone or one email" invariant
-	if req.Phone == "" && req.Email == "" && len(req.Phones) == 0 && len(req.Emails) == 0 {
+	if len(req.Phones) == 0 && len(req.Emails) == 0 {
 		return nil, ErrNoContactDetail
 	}
 
 	err = tx.QueryRow(
-		`INSERT INTO contacts (name, nickname, email, phone, location, age, status_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
-		req.Name, util.NullStr(req.Nickname), util.NullStr(req.Email), util.NullStr(req.Phone),
-		util.NullStr(req.Location), req.Age, statusID,
+		`INSERT INTO contacts (name, nickname, location, age, status_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, created_at, updated_at`,
+		req.Name, util.NullStr(req.Nickname), util.NullStr(req.Location), req.Age, statusID,
 	).Scan(
-		&c.ID, &c.Name, &c.Nickname, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create contact: %w", err)
 	}
 
-	// sync phones/emails child rows (also writes the primary flag)
-	if err := syncPhonesEmailsTx(tx, c.ID, req.Phones, req.Emails, req.Phone, req.Email); err != nil {
+	if err := syncPhonesEmailsTx(tx, c.ID, req.Phones, req.Emails); err != nil {
 		return nil, fmt.Errorf("create contact: %w", err)
 	}
 
@@ -553,9 +532,6 @@ func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact,
 	if err := s.loadAllPhonesEmails(&populated[0]); err != nil {
 		return nil, fmt.Errorf("create contact: load phones and emails: %w", err)
 	}
-	if reason := keys.duplicateReason(req.Phone, req.Email); reason != "" {
-		populated[0].Warnings = append(populated[0].Warnings, reason)
-	}
 	if len(unknownTags) > 0 {
 		populated[0].Warnings = append(populated[0].Warnings, "ignored unknown tag id(s)")
 	}
@@ -566,17 +542,8 @@ func (s *Service) createWithKeys(req CreateRequest, keys contactKeys) (*Contact,
 // values, maintaining exactly one primary per type. Each type is cleared and
 // rewritten only when its slice is non-nil, so a caller that sends just the
 // phones (or just the emails) does not wipe the other. When no explicit primary
-// is marked, the first value becomes primary; legacy scalar phone/email are
-// merged in as the primary when no child rows are provided.
-func syncPhonesEmailsTx(q queryer, contactID string, phones []PhoneValue, emails []EmailValue, scalarPhone, scalarEmail string) error {
-	// Merge legacy scalar values in as primary when no child rows exist.
-	if len(phones) == 0 && scalarPhone != "" {
-		phones = []PhoneValue{{Value: scalarPhone, IsPrimary: true}}
-	}
-	if len(emails) == 0 && scalarEmail != "" {
-		emails = []EmailValue{{Value: scalarEmail, IsPrimary: true}}
-	}
-
+// is marked, the first value becomes primary.
+func syncPhonesEmailsTx(q queryer, contactID string, phones []PhoneValue, emails []EmailValue) error {
 	if phones != nil {
 		if _, err := q.Exec(`DELETE FROM contact_phones WHERE contact_id = $1`, contactID); err != nil {
 			return fmt.Errorf("clear contact phones: %w", err)
@@ -651,13 +618,6 @@ func insertEmailRows(q queryer, contactID string, emails []EmailValue) error {
 }
 
 func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact, error) {
-	scalarPhone, scalarEmail := "", ""
-	if req.Phone != nil {
-		scalarPhone = *req.Phone
-	}
-	if req.Email != nil {
-		scalarEmail = *req.Email
-	}
 	if req.Phones != nil || req.Emails != nil || req.TagIDs != nil || req.Phone != nil || req.Email != nil {
 		var phones []PhoneValue
 		if req.Phones != nil {
@@ -667,8 +627,15 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		if req.Emails != nil {
 			emails = *req.Emails
 		}
-		if err := validateCollectionLimits(phones, emails, req.TagIDs, scalarPhone, scalarEmail); err != nil {
+		if err := validateCollectionLimits(phones, emails, req.TagIDs); err != nil {
 			return nil, err
+		}
+		// A scalar phone/email lands in the child tables too, so bound its length.
+		if req.Phone != nil && len(*req.Phone) > maxValueLength {
+			return nil, fmt.Errorf("%w: phone value is too long", ErrCollectionLimit)
+		}
+		if req.Email != nil && len(*req.Email) > maxValueLength {
+			return nil, fmt.Errorf("%w: email value is too long", ErrCollectionLimit)
 		}
 	}
 
@@ -701,24 +668,20 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		`UPDATE contacts SET
 			name = COALESCE(NULLIF($2, ''), name),
 			nickname = COALESCE($3, nickname),
-			email = COALESCE($4, email),
-			phone = COALESCE($5, phone),
-			location = COALESCE($6, location),
-			age = COALESCE($7, age),
-			status_id = CASE WHEN $8::text IS NOT NULL THEN NULLIF($8::text, '')::uuid ELSE status_id END,
+			location = COALESCE($4, location),
+			age = COALESCE($5, age),
+			status_id = CASE WHEN $6::text IS NOT NULL THEN NULLIF($6::text, '')::uuid ELSE status_id END,
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id, name, COALESCE(nickname, ''), COALESCE(email, ''), COALESCE(phone, ''), COALESCE(location, ''), age, created_at, updated_at`,
+		RETURNING id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, created_at, updated_at`,
 		id,
 		req.Name,
 		req.Nickname,
-		req.Email,
-		req.Phone,
 		req.Location,
 		req.Age,
 		req.StatusID,
 	).Scan(
-		&c.ID, &c.Name, &c.Nickname, &c.Email, &c.Phone, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update contact: %w", err)
@@ -738,7 +701,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		if len(phones) == 0 && len(emails) == 0 {
 			return nil, ErrNoContactDetail
 		}
-		if err := syncPhonesEmailsTx(tx, id, phones, emails, "", ""); err != nil {
+		if err := syncPhonesEmailsTx(tx, id, phones, emails); err != nil {
 			return nil, fmt.Errorf("update contact: sync phones and emails: %w", err)
 		}
 	} else if req.Phone != nil || req.Email != nil {
@@ -761,7 +724,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 				emails = append(emails, EmailValue{Value: *req.Email, IsPrimary: true})
 			}
 		}
-		if err := syncPhonesEmailsTx(tx, id, phones, emails, "", ""); err != nil {
+		if err := syncPhonesEmailsTx(tx, id, phones, emails); err != nil {
 			return nil, fmt.Errorf("update contact: sync scalar phone and email: %w", err)
 		}
 	}

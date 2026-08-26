@@ -1138,7 +1138,7 @@ func TestCreateLeadRejectsDeletedContactIntegration(t *testing.T) {
 
 	var contactID string
 	if err := db.QueryRow(
-		`INSERT INTO contacts (name, email, phone) VALUES ('Soft Deleted', 'gone@example.com', '555') RETURNING id`,
+		`INSERT INTO contacts (name) VALUES ('Soft Deleted') RETURNING id`,
 	).Scan(&contactID); err != nil {
 		t.Fatalf("seed contact: %v", err)
 	}
@@ -1193,7 +1193,7 @@ func TestUpdateLeadRejectsDeletedContactIntegration(t *testing.T) {
 
 	var deletedID string
 	if err := db.QueryRow(
-		`INSERT INTO contacts (name, email, phone) VALUES ('Soft Deleted', 'gone2@example.com', '556') RETURNING id`,
+		`INSERT INTO contacts (name) VALUES ('Soft Deleted') RETURNING id`,
 	).Scan(&deletedID); err != nil {
 		t.Fatalf("seed contact: %v", err)
 	}
@@ -1218,12 +1218,25 @@ func TestResolveOrCreateSkipsDeletedContactsIntegration(t *testing.T) {
 	svc := NewService(db)
 
 	// A deleted contact whose phone/email would otherwise match must not be
-	// resolved: the lead entry creates a fresh contact instead.
+	// resolved: the lead entry creates a fresh contact instead. The phone and
+	// email live in the child tables, where resolution looks.
 	var deletedID string
 	if err := db.QueryRow(
-		`INSERT INTO contacts (name, email, phone) VALUES ('Deleted Match', 'match@example.com', '9876543210') RETURNING id`,
+		`INSERT INTO contacts (name) VALUES ('Deleted Match') RETURNING id`,
 	).Scan(&deletedID); err != nil {
 		t.Fatalf("seed contact: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO contact_phones (contact_id, value, is_primary) VALUES ($1, '9876543210', true)`,
+		deletedID,
+	); err != nil {
+		t.Fatalf("seed contact phone: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO contact_emails (contact_id, value, is_primary) VALUES ($1, 'match@example.com', true)`,
+		deletedID,
+	); err != nil {
+		t.Fatalf("seed contact email: %v", err)
 	}
 	if _, err := db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, deletedID); err != nil {
 		t.Fatalf("soft-delete contact: %v", err)

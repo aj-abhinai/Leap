@@ -36,39 +36,47 @@ type contactKeys struct {
 
 func (s *Service) loadContactKeys() (contactKeys, error) {
 	keys := contactKeys{phones: map[string]bool{}, emails: map[string]bool{}}
-	// phones and emails come from the child tables (contact_phones/contact_emails);
-	// legacy scalar columns are also scanned so dedupe still works for any rows
-	// created before the child tables were populated.
 	rows, err := s.db.Query(`
-		SELECT COALESCE(cp.value, ''), COALESCE(ce.value, '')
-		FROM contacts c
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_phones WHERE contact_id = c.id AND is_primary LIMIT 1
-		) cp ON true
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_emails WHERE contact_id = c.id AND is_primary LIMIT 1
-		) ce ON true
-		WHERE c.deleted_at IS NULL
-		UNION
-		SELECT COALESCE(phone, ''), COALESCE(email, '') FROM contacts WHERE deleted_at IS NULL
-	`)
+		SELECT cp.value FROM contact_phones cp
+		JOIN contacts c ON c.id = cp.contact_id AND c.deleted_at IS NULL`)
 	if err != nil {
-		return keys, fmt.Errorf("load contact keys: %w", err)
+		return keys, fmt.Errorf("load contact phones: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var phone, email string
-		if err := rows.Scan(&phone, &email); err != nil {
-			return keys, fmt.Errorf("scan contact key: %w", err)
+		var phone string
+		if err := rows.Scan(&phone); err != nil {
+			return keys, fmt.Errorf("scan contact phone: %w", err)
 		}
 		if p := util.NormalizePhone(phone); p != "" {
 			keys.phones[p] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return keys, fmt.Errorf("load contact phones: iterate: %w", err)
+	}
+	rows.Close()
+
+	rows, err = s.db.Query(`
+		SELECT ce.value FROM contact_emails ce
+		JOIN contacts c ON c.id = ce.contact_id AND c.deleted_at IS NULL`)
+	if err != nil {
+		return keys, fmt.Errorf("load contact emails: %w", err)
+	}
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return keys, fmt.Errorf("scan contact email: %w", err)
 		}
 		if e := util.NormalizeEmail(email); e != "" {
 			keys.emails[e] = true
 		}
 	}
-	return keys, rows.Err()
+	if err := rows.Err(); err != nil {
+		return keys, fmt.Errorf("load contact emails: iterate: %w", err)
+	}
+	rows.Close()
+	return keys, nil
 }
 
 // recordMatch registers a successfully imported row so later rows in the same
@@ -176,24 +184,22 @@ func (s *Service) insertContactsBulk(pending []pendingContact) error {
 	}
 	defer tx.Rollback()
 
-	args := make([]any, 0, len(pending)*6)
+	args := make([]any, 0, len(pending)*4)
 	placeholders := make([]string, 0, len(pending))
 	argIdx := 1
 	for _, p := range pending {
 		placeholders = append(placeholders,
-			fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)", argIdx, argIdx+1, argIdx+2, argIdx+3, argIdx+4, argIdx+5))
+			fmt.Sprintf("($%d, $%d, $%d, $%d)", argIdx, argIdx+1, argIdx+2, argIdx+3))
 		args = append(args,
 			p.contact.Name,
-			util.NullStr(p.contact.Email),
-			util.NullStr(p.contact.Phone),
 			util.NullStr(p.contact.Location),
 			nil,
 			nil,
 		)
-		argIdx += 6
+		argIdx += 4
 	}
 
-	query := `INSERT INTO contacts (name, email, phone, location, age, status_id) VALUES ` +
+	query := `INSERT INTO contacts (name, location, age, status_id) VALUES ` +
 		strings.Join(placeholders, ", ") +
 		` RETURNING id`
 	rows, err := tx.Query(query, args...)

@@ -1,1 +1,0 @@
-ALTER TABLE lead_stages DROP COLUMN IF EXISTS outcome;

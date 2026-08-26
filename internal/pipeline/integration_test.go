@@ -35,7 +35,7 @@ func TestDeletePipelineWithLeadsReturnsInUseIntegration(t *testing.T) {
 	pipelineID, stageID := seedPipeline(t, db)
 	var contactID string
 	if err := db.QueryRow(
-		`INSERT INTO contacts (name, phone) VALUES ('Alice', '9876543210') RETURNING id`,
+		`INSERT INTO contacts (name) VALUES ('Alice') RETURNING id`,
 	).Scan(&contactID); err != nil {
 		t.Fatalf("seed contact: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestDeleteStageWithLeadsReturnsInUseIntegration(t *testing.T) {
 	pipelineID, stageID := seedPipeline(t, db)
 	var contactID string
 	if err := db.QueryRow(
-		`INSERT INTO contacts (name, phone) VALUES ('Alice', '9876543210') RETURNING id`,
+		`INSERT INTO contacts (name) VALUES ('Alice') RETURNING id`,
 	).Scan(&contactID); err != nil {
 		t.Fatalf("seed contact: %v", err)
 	}
