@@ -17,6 +17,7 @@ import (
 	"crm/internal/ratelimit"
 	"crm/internal/rbac"
 	"crm/internal/seed"
+	"crm/internal/settings"
 	"crm/internal/tag"
 	"flag"
 	"fmt"
@@ -129,6 +130,9 @@ func main() {
 	exportSvc := export.NewService(database)
 	exportH := export.NewHandler(exportSvc)
 
+	settingsSvc := settings.NewService(database)
+	settingsH := settings.NewHandler(settingsSvc)
+
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)
 	// ClientIP resolves the client IP for rate limiting from the socket peer,
@@ -212,6 +216,8 @@ func main() {
 
 			r.Get("/api/reminders", middleware.RequirePermission(rbacSvc, "lead:read", leadH.PendingReminders))
 			r.Get("/api/activities", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListAllActivities))
+			r.Get("/api/settings/nudge-lead-minutes", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.GetNudgeLeadMinutes))
+			r.Put("/api/settings/nudge-lead-minutes", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.SetNudgeLeadMinutes))
 			r.Patch("/api/leads/{lead_id}/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
 			r.Post("/api/leads/{lead_id}/reminders/{id}/snooze", middleware.RequirePermission(rbacSvc, "lead:write", leadH.SnoozeReminder))
 

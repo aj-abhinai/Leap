@@ -32,7 +32,7 @@ const maxSnoozeHorizon = 365 * 24 * time.Hour
 const activitySelect = `
 	SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
 		la.type, la.description, la.quick_reply_id, t.name,
-		la.scheduled_at, la.remind_at, la.responded_at, la.occurred_at,
+		la.scheduled_at, la.scheduled_end_at, la.remind_at, la.responded_at, la.occurred_at,
 		la.is_done, la.is_cancelled, la.is_reminded, la.created_at, la.updated_at
 	FROM lead_activities la
 	LEFT JOIN users u ON u.id = la.user_id
@@ -84,6 +84,9 @@ func (s *Service) quickReplyBehaviorTx(q interface {
 // optional — a quick "Call 1 / Busy, reschedule" entry needs no prose.
 var ErrEmptyType = errors.New("activity type cannot be empty")
 
+// ErrInvalidRange marks a range task whose end time is not after its start.
+var ErrInvalidRange = errors.New("scheduled_end_at must be after scheduled_at")
+
 // ErrNothingToUpdate marks an activity update request with no fields set.
 var ErrNothingToUpdate = errors.New("nothing to update")
 
@@ -108,7 +111,7 @@ func scanActivity(scan rowScanner) (Activity, error) {
 	if err := scan.Scan(
 		&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
 		&a.Type, &a.Description, &quickReplyID, &quickReplyName,
-		&a.ScheduledAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
+		&a.ScheduledAt, &a.ScheduledEndAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
 		&a.IsDone, &a.IsCancelled, &a.IsReminded, &a.CreatedAt, &a.UpdatedAt,
 	); err != nil {
 		return a, err
@@ -149,31 +152,54 @@ func (s *Service) listActivities(leadID string, page, perPage int) ([]Activity, 
 	return activities, total, nil
 }
 
+// nudgeLeadMinutesTx returns the org-wide nudge lead time in minutes (ADR 004
+// "default nudge: 5 minutes before the start time"), defaulting to 5 when the
+// setting is absent or malformed. It runs inside the caller's transaction so
+// the defaulting and the insert cannot diverge.
+func (s *Service) nudgeLeadMinutesTx(q interface {
+	QueryRow(query string, args ...any) *sql.Row
+}) (int, error) {
+	const defaultLead = 5
+	var raw string
+	err := q.QueryRow(`SELECT value FROM settings WHERE key = 'nudge_lead_minutes'`).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return defaultLead, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load nudge lead minutes: %w", err)
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return defaultLead, nil
+	}
+	return n, nil
+}
+
 // insertActivityTx inserts one activity row inside a transaction and returns
 // it joined with the stage, user, and quick-reply names.
-func (s *Service) insertActivityTx(tx *sql.Tx, leadID, stageID, userID, typeValue, desc string, quickReplyID *string, scheduledAt, remindAt *time.Time, respondedAt, occurredAt any, isDone bool) (*Activity, error) {
+func (s *Service) insertActivityTx(tx *sql.Tx, leadID, stageID, userID, typeValue, desc string, quickReplyID *string, scheduledAt, scheduledEndAt, remindAt *time.Time, respondedAt, occurredAt any, isDone bool) (*Activity, error) {
 	var a Activity
 	var quickReplyIDOut, quickReplyName sql.NullString
 	err := tx.QueryRow(`
 		WITH ins AS (
-			INSERT INTO lead_activities (lead_id, stage_id, user_id, type, description, quick_reply_id, scheduled_at, remind_at, responded_at, occurred_at, is_done)
-			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, NULLIF($6, '')::uuid, $7, $8, $9, $10, $11)
+			INSERT INTO lead_activities (lead_id, stage_id, user_id, type, description, quick_reply_id, scheduled_at, scheduled_end_at, remind_at, responded_at, occurred_at, is_done)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, NULLIF($6, '')::uuid, $7, $8, $9, $10, $11, $12)
 			RETURNING id, lead_id, stage_id, user_id, type, description, quick_reply_id,
-				scheduled_at, remind_at, responded_at, occurred_at, is_done, is_cancelled, is_reminded, created_at, updated_at
+				scheduled_at, scheduled_end_at, remind_at, responded_at, occurred_at, is_done, is_cancelled, is_reminded, created_at, updated_at
 		)
 		SELECT ins.id, ins.lead_id, ins.stage_id, COALESCE(ls.name, ''), ins.user_id, COALESCE(u.name, ''),
 			ins.type, ins.description, ins.quick_reply_id, COALESCE(t.name, ''),
-			ins.scheduled_at, ins.remind_at, ins.responded_at, ins.occurred_at,
+			ins.scheduled_at, ins.scheduled_end_at, ins.remind_at, ins.responded_at, ins.occurred_at,
 			ins.is_done, ins.is_cancelled, ins.is_reminded, ins.created_at, ins.updated_at
 		FROM ins
 		LEFT JOIN users u ON u.id = ins.user_id
 		LEFT JOIN lead_stages ls ON ls.id = ins.stage_id
 		LEFT JOIN tags t ON t.id = ins.quick_reply_id`,
-		leadID, stageID, userID, typeValue, desc, quickReplyID, scheduledAt, remindAt, respondedAt, occurredAt, isDone,
+		leadID, stageID, userID, typeValue, desc, quickReplyID, scheduledAt, scheduledEndAt, remindAt, respondedAt, occurredAt, isDone,
 	).Scan(
 		&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
 		&a.Type, &a.Description, &quickReplyIDOut, &quickReplyName,
-		&a.ScheduledAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
+		&a.ScheduledAt, &a.ScheduledEndAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
 		&a.IsDone, &a.IsCancelled, &a.IsReminded, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
@@ -193,6 +219,10 @@ func (s *Service) insertActivityTx(tx *sql.Tx, leadID, stageID, userID, typeValu
 func (s *Service) createActivity(leadID, stageID, userID string, req CreateActivityRequest) (*Activity, error) {
 	if err := validateActivityFields(req.Type); err != nil {
 		return nil, err
+	}
+	// A range task's end must be after its start.
+	if req.ScheduledEndAt != nil && (req.ScheduledAt == nil || !req.ScheduledEndAt.After(*req.ScheduledAt)) {
+		return nil, ErrInvalidRange
 	}
 
 	tx, err := s.db.Begin()
@@ -224,7 +254,19 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	}
 	desc := strings.TrimSpace(req.Description)
 
-	a, err := s.insertActivityTx(tx, leadID, stageID, userID, req.Type, desc, req.QuickReplyID, req.ScheduledAt, req.RemindAt, respondedAt, occurredAt, isDone)
+	// Nudge lead time (ADR 004): when a task is scheduled without an explicit
+	// remind time, the reminder defaults to lead minutes before the start.
+	remindAt := req.RemindAt
+	if remindAt == nil && req.ScheduledAt != nil {
+		lead, err := s.nudgeLeadMinutesTx(tx)
+		if err != nil {
+			return nil, err
+		}
+		t := req.ScheduledAt.Add(-time.Duration(lead) * time.Minute)
+		remindAt = &t
+	}
+
+	a, err := s.insertActivityTx(tx, leadID, stageID, userID, req.Type, desc, req.QuickReplyID, req.ScheduledAt, req.ScheduledEndAt, remindAt, respondedAt, occurredAt, isDone)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +275,7 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	// time spawns the next occurrence of the same type at the new time. A
 	// close_lost reply never spawns a next task — the deal ends here.
 	if req.RescheduleAt != nil && behavior != closeLostBehavior {
-		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, req.Type, "", nil, req.RescheduleAt, req.RescheduleAt, nil, nil, false); err != nil {
+		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, req.Type, "", nil, req.RescheduleAt, nil, req.RescheduleAt, nil, nil, false); err != nil {
 			return nil, fmt.Errorf("create next activity: %w", err)
 		}
 	}
@@ -276,7 +318,7 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 // the lead.
 func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateActivityRequest) (*Activity, error) {
 	if req.QuickReplyID == nil && req.IsDone == nil && req.Type == nil && req.Description == nil &&
-		!req.ScheduledAt.Set && !req.RemindAt.Set && req.OccurredAt == nil &&
+		!req.ScheduledAt.Set && !req.ScheduledEndAt.Set && !req.RemindAt.Set && req.OccurredAt == nil &&
 		req.IsCancelled == nil && req.RescheduleAt == nil {
 		return nil, ErrNothingToUpdate
 	}
@@ -295,9 +337,10 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	var cur Activity
 	var curQuickReplyID sql.NullString
 	err = tx.QueryRow(`
-		SELECT id, quick_reply_id, responded_at, is_done, type, description FROM lead_activities WHERE id = $1 AND lead_id = $2`,
+		SELECT id, quick_reply_id, responded_at, is_done, type, description, scheduled_at, scheduled_end_at
+		FROM lead_activities WHERE id = $1 AND lead_id = $2`,
 		activityID, leadID,
-	).Scan(&cur.ID, &curQuickReplyID, &cur.RespondedAt, &cur.IsDone, &cur.Type, &cur.Description)
+	).Scan(&cur.ID, &curQuickReplyID, &cur.RespondedAt, &cur.IsDone, &cur.Type, &cur.Description, &cur.ScheduledAt, &cur.ScheduledEndAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -313,6 +356,19 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	}
 	if err := validateActivityFields(mergedType); err != nil {
 		return nil, err
+	}
+
+	// Validate the merged range: end must be after start when both present.
+	mergedStart := cur.ScheduledAt
+	if req.ScheduledAt.Set {
+		mergedStart = req.ScheduledAt.Value
+	}
+	mergedEnd := cur.ScheduledEndAt
+	if req.ScheduledEndAt.Set {
+		mergedEnd = req.ScheduledEndAt.Value
+	}
+	if mergedEnd != nil && (mergedStart == nil || !mergedEnd.After(*mergedStart)) {
+		return nil, ErrInvalidRange
 	}
 
 	// Descriptions are optional and stored trimmed.
@@ -349,21 +405,23 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 			type = COALESCE($6, type),
 			description = COALESCE($7, description),
 			scheduled_at = CASE WHEN $8 THEN $9 ELSE scheduled_at END,
-			remind_at = CASE WHEN $10 THEN $11 ELSE remind_at END,
-			is_reminded = CASE WHEN $10 AND $11::timestamptz IS NOT NULL THEN false ELSE is_reminded END,
-			occurred_at = COALESCE($12, occurred_at, CASE WHEN $4 = true THEN now() ELSE NULL END),
-			is_cancelled = COALESCE($13, is_cancelled),
+			scheduled_end_at = CASE WHEN $10 THEN $11 ELSE scheduled_end_at END,
+			remind_at = CASE WHEN $12 THEN $13 ELSE remind_at END,
+			is_reminded = CASE WHEN $12 AND $13::timestamptz IS NOT NULL THEN false ELSE is_reminded END,
+			occurred_at = COALESCE($14, occurred_at, CASE WHEN $4 = true THEN now() ELSE NULL END),
+			is_cancelled = COALESCE($15, is_cancelled),
 			updated_at = now()
 		WHERE id = $1 AND lead_id = $2
 		RETURNING id, lead_id, stage_id, '', user_id, '', type, description, quick_reply_id, '',
-			scheduled_at, remind_at, responded_at, occurred_at, is_done, is_cancelled, is_reminded, created_at, updated_at`,
+			scheduled_at, scheduled_end_at, remind_at, responded_at, occurred_at, is_done, is_cancelled, is_reminded, created_at, updated_at`,
 		activityID, leadID, req.QuickReplyID, req.IsDone, respondedAt, req.Type, desc,
-		req.ScheduledAt.Set, req.ScheduledAt.Value, req.RemindAt.Set, req.RemindAt.Value,
+		req.ScheduledAt.Set, req.ScheduledAt.Value, req.ScheduledEndAt.Set, req.ScheduledEndAt.Value,
+		req.RemindAt.Set, req.RemindAt.Value,
 		req.OccurredAt, req.IsCancelled,
 	).Scan(
 		&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
 		&a.Type, &a.Description, &quickReplyID, &quickReplyName,
-		&a.ScheduledAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
+		&a.ScheduledAt, &a.ScheduledEndAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
 		&a.IsDone, &a.IsCancelled, &a.IsReminded, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
@@ -383,9 +441,17 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 
 	// "Log attempt + next": a completed activity with a reschedule time spawns
 	// the next occurrence of the same type at the new time. A close_lost reply
-	// never spawns a next task — the deal ends here.
+	// never spawns a next task — the deal ends here. The next task's reminder
+	// defaults to the nudge lead time before the new schedule (ADR 004).
 	if req.RescheduleAt != nil && (req.IsDone != nil && *req.IsDone) && !a.IsCancelled && behavior != closeLostBehavior {
-		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, mergedType, "", nil, req.RescheduleAt, req.RescheduleAt, nil, nil, false); err != nil {
+		nextRemind := req.RescheduleAt
+		if lead, err := s.nudgeLeadMinutesTx(tx); err != nil {
+			return nil, err
+		} else {
+			t := req.RescheduleAt.Add(-time.Duration(lead) * time.Minute)
+			nextRemind = &t
+		}
+		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, mergedType, "", nil, req.RescheduleAt, nil, nextRemind, nil, nil, false); err != nil {
 			return nil, fmt.Errorf("create next activity: %w", err)
 		}
 	}
@@ -500,7 +566,7 @@ func (s *Service) getPendingReminders(userID string) ([]ActivityListItem, error)
 	rows, err := s.db.Query(`
 		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
 			la.type, la.description, la.quick_reply_id, COALESCE(t.name, ''),
-			la.scheduled_at, la.remind_at, la.responded_at, la.occurred_at,
+			la.scheduled_at, la.scheduled_end_at, la.remind_at, la.responded_at, la.occurred_at,
 			la.is_done, la.is_cancelled, la.is_reminded, la.created_at, la.updated_at,
 			COALESCE(NULLIF(l.nickname, ''), c.name, ''), l.contact_id
 		FROM lead_activities la
@@ -532,7 +598,7 @@ func (s *Service) getPendingReminders(userID string) ([]ActivityListItem, error)
 		if err := rows.Scan(
 			&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
 			&a.Type, &a.Description, &quickReplyID, &quickReplyName,
-			&a.ScheduledAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
+			&a.ScheduledAt, &a.ScheduledEndAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
 			&a.IsDone, &a.IsCancelled, &a.IsReminded, &a.CreatedAt, &a.UpdatedAt,
 			&displayName, &contactID,
 		); err != nil {
@@ -611,7 +677,10 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 		// "all"
 	}
 	if f.Overdue {
-		add("la.remind_at IS NOT NULL AND la.remind_at < now() AND NOT la.is_done AND NOT la.is_cancelled")
+		// Overdue = past the due boundary, everywhere (ADR 004): the end for a
+		// range task, the single time for a point task, the reminder only as
+		// the fallback for reminder-only entries.
+		add("COALESCE(la.scheduled_end_at, la.scheduled_at, la.remind_at) < now() AND NOT la.is_done AND NOT la.is_cancelled")
 	}
 	if f.Mine {
 		userID := f.UserID
@@ -670,7 +739,7 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 	rows, err := s.db.Query(`
 		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
 			la.type, la.description, la.quick_reply_id, COALESCE(t.name, ''),
-			la.scheduled_at, la.remind_at, la.responded_at, la.occurred_at,
+			la.scheduled_at, la.scheduled_end_at, la.remind_at, la.responded_at, la.occurred_at,
 			la.is_done, la.is_cancelled, la.is_reminded, la.created_at, la.updated_at,
 			COALESCE(NULLIF(l.nickname, ''), c.name, ''), l.contact_id
 		FROM lead_activities la
@@ -699,7 +768,7 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 		if err := rows.Scan(
 			&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
 			&a.Type, &a.Description, &quickReplyID, &quickReplyName,
-			&a.ScheduledAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
+			&a.ScheduledAt, &a.ScheduledEndAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
 			&a.IsDone, &a.IsCancelled, &a.IsReminded, &a.CreatedAt, &a.UpdatedAt,
 			&displayName, &contactID,
 		); err != nil {

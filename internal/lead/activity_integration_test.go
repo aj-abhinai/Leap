@@ -1144,3 +1144,87 @@ func TestCreateCloseLostActivityNotDoneDoesNotCloseLeadIntegration(t *testing.T)
 		t.Errorf("outcome = %q, want empty", got.Outcome)
 	}
 }
+
+func TestCreateActivityDefaultsReminderToNudgeLeadIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	// With no explicit remind time, the reminder defaults to 5 minutes before
+	// the schedule (ADR 004 default nudge).
+	start := time.Now().Add(2 * time.Hour).Truncate(time.Second)
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:        "call",
+		ScheduledAt: &start,
+	})
+	if err != nil {
+		t.Fatalf("create scheduled activity: %v", err)
+	}
+	want := start.Add(-5 * time.Minute)
+	if act.RemindAt == nil || !act.RemindAt.Equal(want) {
+		t.Errorf("remind_at = %v, want %v (5 minutes before start)", act.RemindAt, want)
+	}
+
+	// An explicit remind time always wins over the default.
+	explicit := start.Add(-30 * time.Minute)
+	act2, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:        "call",
+		ScheduledAt: &start,
+		RemindAt:    &explicit,
+	})
+	if err != nil {
+		t.Fatalf("create activity with explicit remind: %v", err)
+	}
+	if act2.RemindAt == nil || !act2.RemindAt.Equal(explicit) {
+		t.Errorf("remind_at = %v, want explicit %v", act2.RemindAt, explicit)
+	}
+}
+
+func TestCreateActivityRejectsInvalidRangeIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	start := time.Now().Add(time.Hour).Truncate(time.Second)
+	end := start.Add(-time.Minute) // before the start
+	_, err = svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:           "call",
+		ScheduledAt:    &start,
+		ScheduledEndAt: &end,
+	})
+	if !errors.Is(err, ErrInvalidRange) {
+		t.Errorf("end before start = %v, want ErrInvalidRange", err)
+	}
+
+	// A range task with end after start is accepted and the end is stored.
+	goodEnd := start.Add(time.Hour)
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:           "call",
+		ScheduledAt:    &start,
+		ScheduledEndAt: &goodEnd,
+	})
+	if err != nil {
+		t.Fatalf("create range task: %v", err)
+	}
+	if act.ScheduledEndAt == nil || !act.ScheduledEndAt.Equal(goodEnd) {
+		t.Errorf("scheduled_end_at = %v, want %v", act.ScheduledEndAt, goodEnd)
+	}
+}

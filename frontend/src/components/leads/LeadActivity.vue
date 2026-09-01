@@ -13,7 +13,7 @@ import {
 import { MoreHorizontal, Trash2 } from '@lucide/vue'
 import { reminderIcon, snoozeRemindAt } from '@/utils/reminders'
 import { formatDateTime } from '@/utils/time'
-import { typeLabel } from '@/utils/activity'
+import { typeLabel, isOverdue as isActivityOverdue } from '@/utils/activity'
 import { Badge } from '@/components/ui/badge'
 import TaskRow from '@/components/leads/TaskRow.vue'
 import { errorMessage } from '@/utils/errors'
@@ -75,10 +75,10 @@ function isTouchpoint(a: LeadActivity): boolean {
   return !!a.is_done || !!a.occurred_at || !!a.responded_at
 }
 
+// Overdue uses the shared due-boundary rule (ADR 004) so the timeline and the
+// Activities page never disagree about what slipped.
 function isOverdue(a: LeadActivity): boolean {
-  if (isTouchpoint(a)) return false
-  const at = a.scheduled_at || a.remind_at
-  return !!at && new Date(at).getTime() < Date.now()
+  return isActivityOverdue(a)
 }
 
 function isUpcoming(a: LeadActivity): boolean {
@@ -90,8 +90,8 @@ const openActivities = computed(() => {
   return activities.value
     .filter((a) => !isTouchpoint(a))
     .sort((x, y) => {
-      const tx = new Date(x.scheduled_at || x.remind_at || x.created_at).getTime()
-      const ty = new Date(y.scheduled_at || y.remind_at || y.created_at).getTime()
+      const tx = new Date(x.scheduled_end_at || x.scheduled_at || x.remind_at || x.created_at).getTime()
+      const ty = new Date(y.scheduled_end_at || y.scheduled_at || y.remind_at || y.created_at).getTime()
       return tx - ty
     })
 })

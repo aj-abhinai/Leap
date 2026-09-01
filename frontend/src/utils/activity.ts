@@ -7,6 +7,7 @@ export interface ActivityStatusLike {
   is_reminded: boolean
   remind_at?: string
   scheduled_at?: string
+  scheduled_end_at?: string
   created_at?: string
 }
 
@@ -14,23 +15,24 @@ export function typeLabel(type: string): string {
   return type || 'Task'
 }
 
-// isOverdue is reminder-based: an open, un-reminded task whose remind_at has
-// passed. Tasks without a remind_at are never overdue here.
-export function isOverdue(item: Pick<ActivityStatusLike, 'is_done' | 'is_cancelled' | 'remind_at'>): boolean {
-  return (
-    !item.is_done && !item.is_cancelled &&
-    !!item.remind_at && new Date(item.remind_at).getTime() < Date.now()
-  )
+// isOverdue = past the due boundary, everywhere (ADR 004): the end for a
+// range task, the single time for a point task, the reminder only as the
+// fallback for reminder-only entries.
+export function isOverdue(item: Pick<ActivityStatusLike, 'is_done' | 'is_cancelled' | 'scheduled_at' | 'scheduled_end_at' | 'remind_at'>): boolean {
+  if (item.is_done || item.is_cancelled) return false
+  const boundary = item.scheduled_end_at ?? item.scheduled_at ?? item.remind_at
+  return !!boundary && new Date(boundary).getTime() < Date.now()
 }
 
-// due returns the effective due time: remind_at, else scheduled_at, else created_at.
-export function due(item: Pick<ActivityStatusLike, 'remind_at' | 'scheduled_at' | 'created_at'>): string {
-  if (item.remind_at) return item.remind_at
+// due returns the effective due time: end (for a range), start, reminder, else created_at.
+export function due(item: Pick<ActivityStatusLike, 'scheduled_end_at' | 'scheduled_at' | 'remind_at' | 'created_at'>): string {
+  if (item.scheduled_end_at) return item.scheduled_end_at
   if (item.scheduled_at) return item.scheduled_at
+  if (item.remind_at) return item.remind_at
   return item.created_at || ''
 }
 
-export function dueLabel(item: Pick<ActivityStatusLike, 'remind_at' | 'scheduled_at' | 'created_at'>): string {
+export function dueLabel(item: Pick<ActivityStatusLike, 'scheduled_end_at' | 'scheduled_at' | 'remind_at' | 'created_at'>): string {
   const t = due(item)
   return t ? new Date(t).toLocaleString() : ''
 }

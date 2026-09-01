@@ -16,7 +16,18 @@ export const useRemindersStore = defineStore('reminders', () => {
     ),
   )
 
-  const pendingCount = computed(() => openReminders.value.filter((r) => !r.is_reminded).length)
+  const pendingCount = computed(() => {
+    const endOfToday = new Date()
+    endOfToday.setHours(23, 59, 59, 999)
+    // The badge is the day-start digest (ADR 004): all tasks due today —
+    // overdue plus upcoming today — so the first open of the day reads
+    // "N tasks today".
+    return openReminders.value.filter((r) => {
+      if (r.is_reminded) return false
+      const due = new Date(r.scheduled_end_at ?? r.scheduled_at ?? r.remind_at ?? r.created_at).getTime()
+      return due <= endOfToday.getTime() && !Number.isNaN(due)
+    }).length
+  })
 
   async function fetchReminders() {
     loading.value = true

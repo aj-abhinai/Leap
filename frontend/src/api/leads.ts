@@ -46,6 +46,7 @@ export interface LeadActivity {
   quick_reply_id?: string
   quick_reply_name?: string
   scheduled_at?: string
+  scheduled_end_at?: string
   remind_at?: string
   occurred_at?: string
   responded_at?: string

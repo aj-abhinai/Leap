@@ -13,6 +13,9 @@ CREATE TABLE lead_activities (
     type TEXT NOT NULL DEFAULT 'note',
     description TEXT NOT NULL DEFAULT '',
     scheduled_at TIMESTAMPTZ,
+    -- scheduled_end_at is the optional end of a range task ("3:00–5:00pm").
+    -- The nudge fires before the start; overdue begins after the end.
+    scheduled_end_at TIMESTAMPTZ,
     remind_at TIMESTAMPTZ,
     occurred_at TIMESTAMPTZ,
     responded_at TIMESTAMPTZ,
@@ -51,3 +54,12 @@ CREATE TABLE audit_logs (
 
 CREATE INDEX idx_audit_logs_created_at ON audit_logs (created_at DESC);
 CREATE INDEX idx_audit_logs_user_id ON audit_logs (user_id);
+
+-- Org-wide settings (key-value). The nudge lead time ("how many minutes
+-- before the start time the reminder fires") is the first setting; defaults
+-- to 5 when absent (ADR 004).
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

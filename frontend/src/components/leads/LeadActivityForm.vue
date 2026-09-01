@@ -34,6 +34,8 @@ const description = ref('')
 const quickReplyId = ref('')
 const scheduledDate = ref('')
 const scheduledTime = ref('')
+const endDate = ref('')
+const endTime = ref('')
 const remindDate = ref('')
 const remindTime = ref('')
 const nextDate = ref('')
@@ -109,6 +111,8 @@ function setChip(id: string) {
   nextTime.value = ''
   scheduledDate.value = ''
   scheduledTime.value = ''
+  endDate.value = ''
+  endTime.value = ''
   remindDate.value = ''
   remindTime.value = ''
 }
@@ -126,6 +130,8 @@ function clearForm() {
   quickReplyId.value = ''
   scheduledDate.value = ''
   scheduledTime.value = ''
+  endDate.value = ''
+  endTime.value = ''
   remindDate.value = ''
   remindTime.value = ''
   nextDate.value = ''
@@ -189,6 +195,7 @@ async function handleSave() {
     }
   } else {
     payload.scheduled_at = mergeDateTime(scheduledDate.value, scheduledTime.value)
+    payload.scheduled_end_at = mergeDateTime(endDate.value, endTime.value)
     payload.remind_at = mergeDateTime(remindDate.value, remindTime.value)
     // A close_lost quick reply completes the activity immediately so it is logged
     // as the closing touchpoint, not cancelled by the subsequent stage move.
@@ -354,6 +361,16 @@ async function handleSave() {
             <div class="space-y-1.5">
               <Label class="text-xs">Scheduled time</Label>
               <Input v-model="scheduledTime" type="time" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="space-y-1.5">
+              <Label class="text-xs">Until date (optional)</Label>
+              <Input v-model="endDate" type="date" />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">Until time</Label>
+              <Input v-model="endTime" type="time" />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-2">

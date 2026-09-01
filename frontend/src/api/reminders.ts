@@ -15,6 +15,7 @@ export interface Reminder {
   type: string
   description: string
   scheduled_at?: string
+  scheduled_end_at?: string
   remind_at?: string
   is_done: boolean
   is_cancelled: boolean

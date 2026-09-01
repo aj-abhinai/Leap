@@ -136,6 +136,9 @@ type Activity struct {
 	QuickReplyID   string     `json:"quick_reply_id,omitempty"`
 	QuickReplyName string     `json:"quick_reply_name,omitempty"`
 	ScheduledAt    *time.Time `json:"scheduled_at,omitempty"`
+	// ScheduledEndAt is the optional end of a range task; overdue begins after
+	// it when present (ADR 004).
+	ScheduledEndAt *time.Time `json:"scheduled_end_at,omitempty"`
 	RemindAt       *time.Time `json:"remind_at,omitempty"`
 	RespondedAt    *time.Time `json:"responded_at,omitempty"`
 	// OccurredAt is when the activity actually happened (stamped on completion).
@@ -152,7 +155,10 @@ type CreateActivityRequest struct {
 	Description  string     `json:"description"`
 	QuickReplyID *string    `json:"quick_reply_id,omitempty"`
 	ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
-	RemindAt     *time.Time `json:"remind_at,omitempty"`
+	// ScheduledEndAt is the optional end of a range task; must be after
+	// ScheduledAt when present.
+	ScheduledEndAt *time.Time `json:"scheduled_end_at,omitempty"`
+	RemindAt       *time.Time `json:"remind_at,omitempty"`
 	// RescheduleAt, when set with a quick reply, logs the completed attempt and
 	// auto-creates the next occurrence of the same type at this time (the
 	// create-form equivalent of updateActivity's reschedule flow).
@@ -168,14 +174,16 @@ type UpdateActivityRequest struct {
 	IsDone       *bool   `json:"is_done,omitempty"`
 	Type         *string `json:"type,omitempty"`
 	Description  *string `json:"description,omitempty"`
-	// ScheduledAt and RemindAt use optionalTime so an update can distinguish
-	// "not sent" (keep the current value) from an explicit null (clear it).
-	// A plain *time.Time cannot tell the two apart — both decode to nil — which
-	// made schedules impossible to clear via the edit form.
-	ScheduledAt  optionalTime `json:"scheduled_at,omitempty"`
-	RemindAt     optionalTime `json:"remind_at,omitempty"`
-	OccurredAt   *time.Time   `json:"occurred_at,omitempty"`
-	IsCancelled  *bool        `json:"is_cancelled,omitempty"`
+	// ScheduledAt, ScheduledEndAt and RemindAt use optionalTime so an update
+	// can distinguish "not sent" (keep the current value) from an explicit
+	// null (clear it). A plain *time.Time cannot tell the two apart — both
+	// decode to nil — which made schedules impossible to clear via the edit
+	// form.
+	ScheduledAt   optionalTime `json:"scheduled_at,omitempty"`
+	ScheduledEndAt optionalTime `json:"scheduled_end_at,omitempty"`
+	RemindAt      optionalTime `json:"remind_at,omitempty"`
+	OccurredAt    *time.Time   `json:"occurred_at,omitempty"`
+	IsCancelled   *bool        `json:"is_cancelled,omitempty"`
 	// RescheduleAt, when set with is_done=true, logs the completed attempt and
 	// auto-creates the next occurrence of the same type at this time.
 	RescheduleAt *time.Time `json:"reschedule_at,omitempty"`
