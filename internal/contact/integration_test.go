@@ -714,7 +714,7 @@ func TestBulkCreateNeverExposesRawErrorsIntegration(t *testing.T) {
 	}
 }
 
-func TestCreateContactReturnsDuplicateWarningIntegration(t *testing.T) {
+func TestCreateContactRejectsDuplicateUntilConfirmedIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
@@ -722,14 +722,27 @@ func TestCreateContactReturnsDuplicateWarningIntegration(t *testing.T) {
 		t.Fatalf("create existing: %v", err)
 	}
 
-	created, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210"})
-	if err != nil {
-		t.Fatalf("manual create should succeed despite duplicate: %v", err)
+	// A duplicate phone without confirmation is rejected with a 409-style error
+	// carrying the matched contact; nothing is inserted.
+	_, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210"})
+	var dupErr *DuplicateError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("expected DuplicateError, got %v", err)
 	}
-	if len(created.Warnings) != 1 || created.Warnings[0] != "phone matches an existing contact" {
-		t.Errorf("warnings = %+v, want phone duplicate warning", created.Warnings)
+	if len(dupErr.Matches) != 1 || dupErr.Matches[0].Name != "Existing" {
+		t.Errorf("matches = %+v, want the existing contact", dupErr.Matches)
 	}
 
+	// The same create with confirmation succeeds and keeps a warning.
+	created, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210", ConfirmDuplicates: true})
+	if err != nil {
+		t.Fatalf("create with confirm_duplicates: %v", err)
+	}
+	if len(created.Warnings) != 1 {
+		t.Errorf("warnings = %+v, want duplicate warning", created.Warnings)
+	}
+
+	// A clean contact is created without warnings.
 	clean, err := svc.create(CreateRequest{Name: "Bob", Phone: "1112223333"})
 	if err != nil {
 		t.Fatalf("create clean contact: %v", err)

@@ -22,7 +22,20 @@ var (
 	// ErrCollectionLimit marks requests whose phones, emails, or tag lists
 	// exceed the per-contact caps or whose value lengths exceed the maximum.
 	ErrCollectionLimit = errors.New("contact collection limit exceeded")
+	// ErrDuplicate marks a create whose primary phone or email collides with
+	// a live contact and the request did not confirm the duplicate. It wraps
+	// the matched contact(s) so the handler can return them in a 409.
+	ErrDuplicate = errors.New("duplicate contact")
 )
+
+// DuplicateError carries the live-contact matches for a rejected duplicate
+// create, so the handler can surface which contact already exists.
+type DuplicateError struct {
+	Matches []DuplicateMatch
+}
+
+func (e *DuplicateError) Error() string { return ErrDuplicate.Error() }
+func (e *DuplicateError) Unwrap() error { return ErrDuplicate }
 
 // Per-contact collection and value caps bound the work a single create/update
 // request can trigger: each element is inserted with its own Exec inside the
@@ -377,21 +390,80 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 	if err := validateCollectionLimits(req.Phones, req.Emails, req.TagIDs); err != nil {
 		return nil, err
 	}
-	// Advisory duplicate warning via targeted indexed lookups, not a full-table
-	// key scan (the bulk import path still scans once for the whole file). Runs
-	// before the insert so the new contact itself is not flagged.
-	reason, err := s.duplicateReasonPoint(req.Phone, req.Email)
+	// Duplicate guard (ADR 002 "phone primary, three deliberate flows"): a
+	// create whose primary phone or email collides with a live contact is
+	// rejected with a 409 unless the caller confirms the duplicate. The match
+	// lookup runs before the insert so the new contact itself is not flagged.
+	matches, err := s.duplicateMatches(req.Phone, req.Email)
 	if err != nil {
 		return nil, err
+	}
+	if len(matches) > 0 && !req.ConfirmDuplicates {
+		return nil, &DuplicateError{Matches: matches}
 	}
 	created, err := s.insertContact(req)
 	if err != nil {
 		return nil, err
 	}
-	if reason != "" {
-		created.Warnings = append(created.Warnings, reason)
+	if len(matches) > 0 {
+		created.Warnings = append(created.Warnings, "phone or email matches an existing contact")
 	}
 	return created, nil
+}
+
+// duplicateMatches returns the live contacts whose primary phone or email
+// collides with the given phone/email after normalization, using targeted
+// indexed lookups rather than scanning the whole contact table.
+func (s *Service) duplicateMatches(phone, email string) ([]DuplicateMatch, error) {
+	p := util.NormalizePhone(phone)
+	e := util.NormalizeEmail(email)
+	if p == "" && e == "" {
+		return nil, nil
+	}
+	// Match on the primary phone/email of existing live contacts, plus any
+	// phone/email value so a secondary value also surfaces as a duplicate.
+	rows, err := s.db.Query(
+		`SELECT DISTINCT c.id, c.name,
+			COALESCE(pcp.value, ''), COALESCE(ece.value, '')
+		FROM contacts c
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_phones WHERE contact_id = c.id AND is_primary LIMIT 1
+		) pcp ON true
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_emails WHERE contact_id = c.id AND is_primary LIMIT 1
+		) ece ON true
+		WHERE c.deleted_at IS NULL
+		  AND (
+			($1 <> '' AND EXISTS (
+				SELECT 1 FROM contact_phones cp
+				WHERE cp.contact_id = c.id
+				  AND regexp_replace(cp.value, '\D', '', 'g') IN ($1, '91' || $1)
+			))
+			OR
+			($2 <> '' AND EXISTS (
+				SELECT 1 FROM contact_emails ce
+				WHERE ce.contact_id = c.id
+				  AND lower(trim(ce.value)) = $2
+			))
+		  )`,
+		p, e,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("find duplicate contacts: %w", err)
+	}
+	defer rows.Close()
+	matches := []DuplicateMatch{}
+	for rows.Next() {
+		var m DuplicateMatch
+		if err := rows.Scan(&m.ID, &m.Name, &m.Phone, &m.Email); err != nil {
+			return nil, fmt.Errorf("find duplicate contacts: scan: %w", err)
+		}
+		matches = append(matches, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("find duplicate contacts: iterate: %w", err)
+	}
+	return matches, nil
 }
 
 // escapeLike escapes LIKE/ILIKE metacharacters in user input so a query such
@@ -427,52 +499,6 @@ func validateCollectionLimits(phones []PhoneValue, emails []EmailValue, tagIDs [
 		}
 	}
 	return nil
-}
-
-// duplicateReasonPoint reports whether the given phone/email already belong to
-// a live contact, using targeted indexed lookups (the normalized expression
-// indexes on the child tables) rather than materializing the whole contact
-// table. The single-create path uses this; bulk import loads all keys once.
-func (s *Service) duplicateReasonPoint(phone, email string) (string, error) {
-	p := util.NormalizePhone(phone)
-	e := util.NormalizeEmail(email)
-
-	phoneMatch := false
-	if p != "" {
-		if err := s.db.QueryRow(
-			`SELECT EXISTS(
-				SELECT 1 FROM contact_phones cp
-				JOIN contacts c ON c.id = cp.contact_id AND c.deleted_at IS NULL
-				WHERE regexp_replace(cp.value, '\D', '', 'g') IN ($1, '91' || $1)
-			)`, p,
-		).Scan(&phoneMatch); err != nil {
-			return "", fmt.Errorf("check duplicate phone: %w", err)
-		}
-	}
-
-	emailMatch := false
-	if e != "" {
-		if err := s.db.QueryRow(
-			`SELECT EXISTS(
-				SELECT 1 FROM contact_emails ce
-				JOIN contacts c ON c.id = ce.contact_id AND c.deleted_at IS NULL
-				WHERE lower(trim(ce.value)) = $1
-			)`, e,
-		).Scan(&emailMatch); err != nil {
-			return "", fmt.Errorf("check duplicate email: %w", err)
-		}
-	}
-
-	switch {
-	case phoneMatch && emailMatch:
-		return "phone and email match an existing contact", nil
-	case phoneMatch:
-		return "phone matches an existing contact", nil
-	case emailMatch:
-		return "email matches an existing contact", nil
-	default:
-		return "", nil
-	}
 }
 
 // insertContact inserts a contact and its child rows (phones, emails, tags)

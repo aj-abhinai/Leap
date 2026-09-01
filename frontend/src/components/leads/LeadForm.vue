@@ -21,7 +21,7 @@ import { Loader2, Link, Search } from '@lucide/vue'
 import type { Stage } from '@/stores/pipeline'
 import { formatCurrency, formatContactDetail } from '@/utils/format'
 import { debounce } from '@/utils/debounce'
-import { listContacts, resolveContactByPhone } from '@/api/contacts'
+import { listContacts, resolveContactByPhone, type ResolveMatch } from '@/api/contacts'
 import { listPrograms, type Program } from '@/api/programs'
 
 export interface PrefillContact {
@@ -32,13 +32,6 @@ export interface PrefillContact {
 }
 
 interface ContactOption {
-  id: string
-  name: string
-  phone?: string
-  email?: string
-}
-
-interface ResolveMatch {
   id: string
   name: string
   phone?: string
@@ -261,7 +254,7 @@ async function handleSave() {
     if (!resolvedOnce.value && newContactPhone.value.trim()) {
       try {
         const res = await resolveContactByPhone(newContactPhone.value.trim())
-        const matches = (res.data ?? []) as ResolveMatch[]
+        const matches = res.data ?? []
         if (matches.length > 0) {
           resolveMatches.value = matches
           resolvedOnce.value = true

@@ -44,18 +44,30 @@ type TagRef struct {
 }
 
 // CreateRequest is the contact creation payload. A contact must carry at
-// least one phone or one email.
+// least one phone or one email. ConfirmDuplicates acknowledges that the
+// created phone/email may collide with an existing live contact.
 type CreateRequest struct {
-	Name     string       `json:"name"`
-	Nickname string       `json:"nickname,omitempty"`
-	Email    string       `json:"email,omitempty"`
-	Phone    string       `json:"phone,omitempty"`
-	Phones   []PhoneValue `json:"phones,omitempty"`
-	Emails   []EmailValue `json:"emails,omitempty"`
-	Location string       `json:"location,omitempty"`
-	Age      *int         `json:"age,omitempty"`
-	TagIDs   []string     `json:"tag_ids,omitempty"`
-	StatusID *string      `json:"status_id,omitempty"`
+	Name              string       `json:"name"`
+	Nickname          string       `json:"nickname,omitempty"`
+	Email             string       `json:"email,omitempty"`
+	Phone             string       `json:"phone,omitempty"`
+	Phones            []PhoneValue `json:"phones,omitempty"`
+	Emails            []EmailValue `json:"emails,omitempty"`
+	Location          string       `json:"location,omitempty"`
+	Age               *int         `json:"age,omitempty"`
+	TagIDs            []string     `json:"tag_ids,omitempty"`
+	StatusID          *string      `json:"status_id,omitempty"`
+	ConfirmDuplicates bool         `json:"confirm_duplicates,omitempty"`
+}
+
+// DuplicateMatch is a live contact whose primary phone or email collides with
+// the phone/email being created. It is returned in a 409 so the UI can show
+// which contact already exists before the user confirms the duplicate.
+type DuplicateMatch struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Phone string `json:"phone,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 // UpdateRequest is the partial-update payload. Scalar phone/email fields

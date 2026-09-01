@@ -31,7 +31,18 @@ func NewHandler(svc *Service, perms PermissionChecker) *Handler {
 
 // respondError writes a mapped error response for mutation handlers.
 func respondError(w http.ResponseWriter, err error) {
+	var dupErr *DuplicateError
 	switch {
+	case errors.As(err, &dupErr):
+		// A create colliding with a live contact returns 409 with the matched
+		// contact(s) so the UI can offer an explicit duplicate confirmation.
+		respond.JSON(
+			w,
+			http.StatusConflict,
+			map[string]any{"duplicates": dupErr.Matches},
+			&respond.Error{Code: "DUPLICATE_CONTACT", Message: "A contact with this phone or email already exists"},
+			nil,
+		)
 	case errors.Is(err, ErrNotFound), respond.IsNotFound(err):
 		respond.JSON(
 			w,

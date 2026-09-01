@@ -13,12 +13,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Loader2, Plus, X, Star } from '@lucide/vue'
+import type { DuplicateMatch } from '@/api/contacts'
 
 const props = defineProps<{
   editingContact: Contact | null
   saving?: boolean
+  duplicateMatches?: DuplicateMatch[] | null
 }>()
 
 export interface ContactSaveBody {
@@ -32,10 +44,12 @@ export interface ContactSaveBody {
   emails: { value: string; is_primary: boolean }[]
   phone: string
   email: string
+  confirm_duplicates?: boolean
 }
 
 const emit = defineEmits<{
   save: [body: ContactSaveBody]
+  'confirm-duplicate': [confirmed: boolean]
 }>()
 
 const settings = useSettingsStore()
@@ -259,5 +273,26 @@ async function handleSave() {
         {{ saving ? 'Saving...' : (editingContact ? 'Update' : 'Create') }}
       </Button>
     </div>
+
+    <AlertDialog :open="!!props.duplicateMatches?.length" @update:open="(v) => !v && emit('confirm-duplicate', false)">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Duplicate contact</AlertDialogTitle>
+          <AlertDialogDescription>
+            A contact with this phone or email already exists:
+            <ul class="mt-2 space-y-1">
+              <li v-for="m in props.duplicateMatches" :key="m.id" class="text-sm">
+                {{ m.name }}<template v-if="m.phone"> · {{ m.phone }}</template><template v-if="m.email"> · {{ m.email }}</template>
+              </li>
+            </ul>
+            Create anyway?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel @click="emit('confirm-duplicate', false)">Cancel</AlertDialogCancel>
+          <AlertDialogAction @click="emit('confirm-duplicate', true)">Create anyway</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>

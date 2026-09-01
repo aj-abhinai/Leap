@@ -15,7 +15,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Plus, MoreHorizontal, Trash2 } from '@lucide/vue'
+import { Plus, MoreHorizontal, Trash2, Loader2 } from '@lucide/vue'
 import { formatDateTime } from '@/utils/time'
 import { errorMessage } from '@/utils/errors'
 
@@ -31,6 +31,10 @@ const newNote = shallowRef('')
 const saving = shallowRef(false)
 const noteToDelete = shallowRef<string | null>(null)
 const deleteDialogOpen = shallowRef(false)
+const total = shallowRef(0)
+const page = shallowRef(1)
+const loadingMore = shallowRef(false)
+const PAGE_SIZE = 50
 
 // Watch the prop: the component instance is reused when the route param
 // changes, so onMounted-only fetching would leave stale notes behind.
@@ -40,15 +44,36 @@ watch(() => props.contactId, () => fetchNotes(), { immediate: true })
 async function fetchNotes() {
   const seq = ++fetchSeq
   loading.value = true
+  page.value = 1
   try {
-    const res = await listNotes(props.contactId)
+    const res = await listNotes(props.contactId, { page: 1, perPage: PAGE_SIZE })
     if (seq !== fetchSeq) return
     notes.value = res.data
+    total.value = res.meta?.total ?? res.data.length
   } catch (e) {
     if (seq !== fetchSeq) return
     toast.error(errorMessage(e, 'Failed to load notes'))
   } finally {
     if (seq === fetchSeq) loading.value = false
+  }
+}
+
+// loadMore fetches the next page and appends it; the server caps each page at
+// 50 so the feed grows in bounded chunks.
+async function loadMore() {
+  if (loadingMore.value) return
+  loadingMore.value = true
+  const seq = fetchSeq
+  try {
+    const res = await listNotes(props.contactId, { page: page.value + 1, perPage: PAGE_SIZE })
+    if (seq !== fetchSeq) return
+    notes.value = [...notes.value, ...res.data]
+    total.value = res.meta?.total ?? total.value
+    page.value++
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to load more notes'))
+  } finally {
+    loadingMore.value = false
   }
 }
 
@@ -143,6 +168,12 @@ function canDelete(note: Note): boolean {
           <p class="text-sm whitespace-pre-wrap">{{ note.note }}</p>
         </CardContent>
       </Card>
+      <div v-if="notes.length < total" class="flex justify-center">
+        <Button variant="outline" size="sm" :disabled="loadingMore" @click="loadMore">
+          <Loader2 v-if="loadingMore" class="size-3.5 mr-1 animate-spin" />
+          Load more
+        </Button>
+      </div>
       </div>
     </PageState>
 

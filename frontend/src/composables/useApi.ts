@@ -14,10 +14,14 @@ export interface ApiResponse<T = any> {
 
 export class ApiError extends Error {
   code?: string
-  constructor(message: string, code?: string) {
+  // payload is the parsed response body (e.g. { duplicates: [...] } on a 409
+  // duplicate contact) so callers can surface server-provided details.
+  payload?: any
+  constructor(message: string, code?: string, payload?: any) {
     super(message)
     this.name = 'ApiError'
     this.code = code
+    this.payload = payload
   }
 }
 
@@ -76,7 +80,7 @@ async function request<T = any>(
     throw new Error(`Unexpected response from server (${res.status})`)
   }
   if (json.error) {
-    throw new ApiError(json.error.message, json.error.code)
+    throw new ApiError(json.error.message, json.error.code, json)
   }
   return json
 }

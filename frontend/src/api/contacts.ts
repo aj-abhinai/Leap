@@ -49,6 +49,24 @@ export interface ContactNote {
 
 export type ContactSaveBody = Record<string, any>
 
+// ResolveMatch is the compact contact result returned by the resolve
+// endpoint (lead entry phone lookup): id, name, and primary phone/email.
+export interface ResolveMatch {
+  id: string
+  name: string
+  phone?: string
+  email?: string
+}
+
+// DuplicateMatch is a live contact returned in a 409 when a create collides
+// with an existing primary phone or email and the duplicate is unconfirmed.
+export interface DuplicateMatch {
+  id: string
+  name: string
+  phone?: string
+  email?: string
+}
+
 export interface BulkImportResult {
   imported: number
   failed: number
@@ -85,12 +103,16 @@ export function bulkImportContacts(contacts: unknown[]): Promise<ApiResponse<Bul
   return apiClient.post('/api/contacts/bulk', { contacts })
 }
 
-export function resolveContactByPhone(phone: string): Promise<ApiResponse<Contact | null>> {
+export function resolveContactByPhone(phone: string): Promise<ApiResponse<ResolveMatch[]>> {
   return apiClient.get(`/api/contacts/resolve?phone=${encodeURIComponent(phone)}`)
 }
 
-export function listNotes(contactId: string): Promise<ApiResponse<ContactNote[]>> {
-  return apiClient.get(`/api/contacts/${contactId}/notes`)
+export function listNotes(contactId: string, params?: { page?: number; perPage?: number }): Promise<ApiResponse<ContactNote[]>> {
+  const p = new URLSearchParams()
+  if (params?.page) p.set('page', String(params.page))
+  if (params?.perPage) p.set('per_page', String(params.perPage))
+  const qs = p.toString()
+  return apiClient.get(`/api/contacts/${contactId}/notes${qs ? `?${qs}` : ''}`)
 }
 
 export function addNote(contactId: string, note: string): Promise<ApiResponse<ContactNote>> {

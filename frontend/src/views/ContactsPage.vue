@@ -24,6 +24,8 @@ import {
 } from '@/components/ui/sheet'
 import { FolderKanban, Pencil, Trash2, Users } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
+import { ApiError } from '@/composables/useApi'
+import type { DuplicateMatch } from '@/api/contacts'
 import ContactForm, { type ContactSaveBody } from '@/components/contacts/ContactForm.vue'
 import ContactCompactCard from '@/components/contacts/ContactCompactCard.vue'
 import ContactSpreadsheet from '@/components/contacts/ContactSpreadsheet.vue'
@@ -45,6 +47,7 @@ const perPage = 20
 const drawerOpen = shallowRef(false)
 const editingContact = ref<Contact | null>(null)
 const saving = shallowRef(false)
+const duplicateMatches = shallowRef<DuplicateMatch[] | null>(null)
 
 const deletingId = shallowRef<string | null>(null)
 const deleteDialogOpen = shallowRef(false)
@@ -112,9 +115,10 @@ function openEdit(contact: Contact) {
 }
 
 // handleSave creates or updates the edited contact and closes the drawer;
-// duplicate-phone warnings from create are toasted.
+// a 409 duplicate surfaces the matched contact(s) in a confirm dialog.
 async function handleSave(body: ContactSaveBody) {
   saving.value = true
+  lastSaveBody.value = body
   try {
     if (editingContact.value) {
       await store.update(editingContact.value.id, body)
@@ -129,9 +133,27 @@ async function handleSave(body: ContactSaveBody) {
     drawerOpen.value = false
     loadContacts()
   } catch (e) {
+    if (e instanceof ApiError && e.code === 'DUPLICATE_CONTACT') {
+      duplicateMatches.value = e.payload?.duplicates ?? []
+      return
+    }
     toast.error(errorMessage(e, 'Failed to save contact'))
   } finally {
     saving.value = false
+  }
+}
+
+// lastSaveBody holds the create body that got a 409 so the confirm action can
+// re-submit it with confirm_duplicates set.
+const lastSaveBody = shallowRef<ContactSaveBody | null>(null)
+
+async function confirmDuplicate(confirmed: boolean) {
+  duplicateMatches.value = null
+  if (!confirmed) return
+  const body = lastSaveBody.value
+  lastSaveBody.value = null
+  if (body) {
+    await handleSave({ ...body, confirm_duplicates: true })
   }
 }
 
@@ -303,7 +325,9 @@ async function handleDelete() {
           :key="editingContact?.id ?? 'create'"
           :editing-contact="editingContact"
           :saving="saving"
+          :duplicate-matches="duplicateMatches"
           @save="handleSave"
+          @confirm-duplicate="confirmDuplicate"
         />
       </SheetContent>
     </Sheet>
