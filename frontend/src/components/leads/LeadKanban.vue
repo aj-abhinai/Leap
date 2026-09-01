@@ -205,9 +205,8 @@ function applyCardFields() {
 // ---- bulk move ----
 const selectedIds = shallowRef<Set<string>>(new Set())
 
-// A closed lead (one in a closing stage) is terminal and cannot be bulk-moved
-// (ADR 002): bulk move is for open work; dragging a closed card spawns a new
-// cycle instead.
+// A closed lead (one in a closing stage) is terminal and cannot be bulk-moved:
+// bulk move is for open work; dragging a closed card spawns a new cycle instead.
 function isClosedLead(lead: Lead): boolean {
   return lead.stage_outcome === 'won' || lead.stage_outcome === 'lost'
 }

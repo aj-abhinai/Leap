@@ -11,7 +11,7 @@ import (
 )
 
 // DefaultNudgeLeadMinutes is the nudge lead time when no setting is stored
-// (ADR 004: default nudge, 5 minutes before the start time).
+// (5 minutes before the start time).
 const DefaultNudgeLeadMinutes = 5
 
 // NudgeLeadMinutesKey is the settings row key for the nudge lead time.

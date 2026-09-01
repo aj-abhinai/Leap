@@ -75,7 +75,7 @@ function isTouchpoint(a: LeadActivity): boolean {
   return !!a.is_done || !!a.occurred_at || !!a.responded_at
 }
 
-// Overdue uses the shared due-boundary rule (ADR 004) so the timeline and the
+// Overdue uses the shared due-boundary rule so the timeline and the
 // Activities page never disagree about what slipped.
 function isOverdue(a: LeadActivity): boolean {
   return isActivityOverdue(a)

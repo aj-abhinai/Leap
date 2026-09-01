@@ -232,7 +232,7 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	}
 	desc := strings.TrimSpace(req.Description)
 
-	// Nudge lead time (ADR 004): when a task is scheduled without an explicit
+	// Nudge lead time: when a task is scheduled without an explicit
 	// remind time, the reminder defaults to lead minutes before the start.
 	remindAt := req.RemindAt
 	if remindAt == nil && req.ScheduledAt != nil {
@@ -420,7 +420,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	// "Log attempt + next": a completed activity with a reschedule time spawns
 	// the next occurrence of the same type at the new time. A close_lost reply
 	// never spawns a next task — the deal ends here. The next task's reminder
-	// defaults to the nudge lead time before the new schedule (ADR 004).
+	// defaults to the nudge lead time before the new schedule.
 	if req.RescheduleAt != nil && (req.IsDone != nil && *req.IsDone) && !a.IsCancelled && behavior != closeLostBehavior {
 		nextRemind := req.RescheduleAt
 		if lead, err := settings.NudgeLeadMinutes(tx); err != nil {
@@ -531,11 +531,11 @@ func (s *Service) snoozeReminder(leadID, activityID string, remindAt time.Time) 
 }
 
 // getPendingReminders returns the open tasks the requesting user is
-// responsible for (ADR 004 "Recipient: the person responsible"): tasks on
-// leads assigned to me, or on unassigned leads where I created the task, or
-// genuinely unowned work (both null — visible to everyone so someone picks it
-// up). A team that never assigns leads degrades gracefully back to a shared
-// bell. Both overdue and upcoming are included so the reminders page can
+// responsible for: tasks on leads assigned to me, or on unassigned leads
+// where I created the task, or genuinely unowned work (both null — visible
+// to everyone so someone picks it up). A team that never assigns leads
+// degrades gracefully back to a shared bell. Both overdue and upcoming are
+// included so the reminders page can
 // render Overdue / Upcoming / Done sections; dismissed (is_reminded) rows are
 // included too so the Dismissed section can list them. Each row carries the
 // lead display name and contact id so reminder surfaces can show whose lead
@@ -624,7 +624,7 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 		// "all"
 	}
 	if f.Overdue {
-		// Overdue = past the due boundary, everywhere (ADR 004): the end for a
+		// Overdue = past the due boundary, everywhere: the end for a
 		// range task, the single time for a point task, the reminder only as
 		// the fallback for reminder-only entries.
 		w.Add("COALESCE(la.scheduled_end_at, la.scheduled_at, la.remind_at) < now() AND NOT la.is_done AND NOT la.is_cancelled")

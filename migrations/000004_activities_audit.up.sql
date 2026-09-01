@@ -57,7 +57,7 @@ CREATE INDEX idx_audit_logs_user_id ON audit_logs (user_id);
 
 -- Org-wide settings (key-value). The nudge lead time ("how many minutes
 -- before the start time the reminder fires") is the first setting; defaults
--- to 5 when absent (ADR 004).
+-- to 5 when absent.
 CREATE TABLE settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

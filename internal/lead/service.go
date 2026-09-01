@@ -48,7 +48,7 @@ var (
 	ErrInvalidAssignee = errors.New("assigned_to must reference an active user")
 	// ErrClosedToClosedMove marks a stage move from one closing stage to
 	// another (e.g. lost → won). A closed lead is terminal; a mislabel is fixed
-	// by starting a new cycle, not by re-closing the old row (ADR 002).
+	// by starting a new cycle, not by re-closing the old row.
 	ErrClosedToClosedMove = errors.New("a closed lead cannot move to another closing stage")
 )
 
@@ -191,7 +191,10 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 	offset := util.Offset(page, perPage)
 
 	limitArg := w.NextArg()
-	selectQuery := leadSelect + countFrom + `
+	// leadSelect already carries the full FROM with the phone/email laterals,
+	// so the page query needs only the WHERE appended — appending countFrom
+	// would duplicate the FROM (syntax error).
+	selectQuery := leadSelect + `
 		WHERE ` + whereSQL + `
 		ORDER BY l.created_at DESC
 		LIMIT $` + strconv.Itoa(limitArg) + ` OFFSET $` + strconv.Itoa(limitArg+1)
@@ -216,9 +219,9 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 }
 
 // board returns the kanban payload: for every stage in the pipeline, the true
-// count of live leads in that stage plus only the newest BoardWindow leads
-// (ADR 002 "kanban operational surface"). Older leads are never deleted, just
-// not rendered; a created_at from/to filter brings them back into the window.
+// count of live leads in that stage plus only the newest BoardWindow leads.
+// Older leads are never deleted, just not rendered; a created_at from/to
+// filter brings them back into the window.
 func (s *Service) board(f BoardFilters) (*Board, error) {
 	w := leadFilters(f.Search, f.Outcome, f.AssignedTo)
 	if f.PipelineID != "" {
@@ -352,9 +355,9 @@ func (s *Service) validateAssignedToTx(tx *sql.Tx, assignedTo *string) error {
 }
 
 // spawnCycle starts a new lead row for a closed lead's contact when the user
-// drags the closed card back to an open stage (ADR 002 "one row, one cycle").
-// The new row carries the contact (always), a fresh program price snapshot,
-// and the nickname; the assignee starts unassigned and notes/tasks do not
+// drags the closed card back to an open stage. The new row carries the
+// contact (always), a fresh program price snapshot, and the nickname; the
+// assignee starts unassigned and notes/tasks do not
 // carry. The old row stays terminal and untouched.
 func (s *Service) spawnCycle(old *Lead, targetStageID, userID string) (*Lead, error) {
 	tx, err := s.db.Begin()
@@ -403,7 +406,13 @@ func (s *Service) spawnCycle(old *Lead, targetStageID, userID string) (*Lead, er
 		return nil, err
 	}
 	l.DisplayName = l.displayName()
-	s.logActivity(l.ID, "lead", "create", "Started new cycle from closed lead "+old.ID, userID)
+	// Audit with the closed lead's display name, not its UUID, so the log
+	// reads like every other audit description.
+	name := old.DisplayName
+	if name == "" {
+		name = old.ID
+	}
+	s.logActivity(l.ID, "lead", "create", fmt.Sprintf("Started new cycle from closed lead %q", name), userID)
 	return &l, nil
 }
 
@@ -610,11 +619,11 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		return nil, fmt.Errorf("update lead: load current: %w", err)
 	}
 
-	// ADR 002 "lead lifecycle: one row, one cycle": a closed lead (one in a
-	// closing stage) is terminal. Dragging it to an open stage must not mutate
-	// the row — it spawns a new lead row for the same contact in the target
-	// stage, carrying the contact, a fresh program price snapshot, and the
-	// nickname; the assignee starts unassigned and notes/tasks do not carry.
+	// A closed lead (one in a closing stage) is terminal. Dragging it to an
+	// open stage must not mutate the row — it spawns a new lead row for the
+	// same contact in the target stage, carrying the contact, a fresh program
+	// price snapshot, and the nickname; the assignee starts unassigned and
+	// notes/tasks do not carry.
 	// Moving a closed lead into another closing stage (lost → won) is rejected:
 	// a mislabel is fixed by a new cycle, not by re-closing the old row.
 	if req.StageID != nil && *req.StageID != "" && *req.StageID != old.StageID &&
@@ -709,7 +718,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 			}
 		}
 		// Moving out of a closing stage never reaches here: the top-of-update
-		// check spawns a new cycle or rejects the move (ADR 002).
+		// check spawns a new cycle or rejects the move.
 	}
 
 	var programPrice *float64

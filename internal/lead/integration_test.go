@@ -720,6 +720,23 @@ func TestStageMoveOutOfClosingSpawnsCycleIntegration(t *testing.T) {
 	if oldRow.StageID != closedStage || oldRow.Outcome != "won" {
 		t.Errorf("old row = stage %q outcome %q, want terminal won", oldRow.StageID, oldRow.Outcome)
 	}
+
+	// The spawn writes an audit entry naming the closed lead by display name,
+	// not its raw UUID.
+	var desc string
+	err = db.QueryRow(
+		`SELECT description FROM audit_logs WHERE resource_type = 'lead' AND resource_id = $1 AND action = 'create'`,
+		spawned.ID,
+	).Scan(&desc)
+	if err != nil {
+		t.Fatalf("query spawn audit: %v", err)
+	}
+	if !strings.Contains(desc, "Cycle One") {
+		t.Errorf("spawn audit description = %q, want it to name the closed lead by display name", desc)
+	}
+	if strings.Contains(desc, created.ID) {
+		t.Errorf("spawn audit description = %q, want no raw lead UUID", desc)
+	}
 }
 
 func TestStageMoveClosedToClosedRejectedIntegration(t *testing.T) {
@@ -730,21 +747,28 @@ func TestStageMoveClosedToClosedRejectedIntegration(t *testing.T) {
 	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Closed Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
 	}
-	var lostStage, wonStage string
-	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Lost', 0, true, 'lost') RETURNING id`, pipelineID).Scan(&lostStage); err != nil {
+	var openStage, lostStage, wonStage string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Open', 0, 'open') RETURNING id`, pipelineID).Scan(&openStage); err != nil {
+		t.Fatalf("seed open stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Lost', 1, true, 'lost') RETURNING id`, pipelineID).Scan(&lostStage); err != nil {
 		t.Fatalf("seed lost stage: %v", err)
 	}
-	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 1, true, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 2, true, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
 		t.Fatalf("seed won stage: %v", err)
 	}
 
 	created, err := svc.create(CreateRequest{
 		NewContact: &NewContact{Name: "Bob", Phone: "1234567890"},
 		PipelineID: pipelineID,
-		StageID:    lostStage,
+		StageID:    openStage,
 	}, "")
 	if err != nil {
 		t.Fatalf("create lead: %v", err)
+	}
+	// Close it as lost first (a lead cannot be created in a closing stage).
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &lostStage}, ""); err != nil {
+		t.Fatalf("move to lost: %v", err)
 	}
 
 	// A closed lead cannot be re-closed into another closing stage.
@@ -1100,6 +1124,54 @@ func TestPatchLeadStageMoveSucceedsIntegration(t *testing.T) {
 	}
 	if updated.StageID != stageB {
 		t.Errorf("stage_id = %q, want %q", updated.StageID, stageB)
+	}
+}
+
+// TestPatchLeadClosedToClosedReturns422Integration seeds an open, a lost and
+// a won stage, moves a lead to lost, then PATCHes it to won and asserts the
+// handler responds 422 (not 500) — ErrClosedToClosedMove must map cleanly.
+func TestPatchLeadClosedToClosedReturns422Integration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	h := NewHandler(svc)
+
+	var pipelineID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Closed Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	var openStage, lostStage, wonStage string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Open', 0, 'open') RETURNING id`, pipelineID).Scan(&openStage); err != nil {
+		t.Fatalf("seed open stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Lost', 1, true, 'lost') RETURNING id`, pipelineID).Scan(&lostStage); err != nil {
+		t.Fatalf("seed lost stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 2, true, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
+		t.Fatalf("seed won stage: %v", err)
+	}
+
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Bob", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &lostStage}, ""); err != nil {
+		t.Fatalf("move to lost: %v", err)
+	}
+
+	body, _ := json.Marshal(UpdateRequest{StageID: &wonStage})
+	req := httptest.NewRequest(http.MethodPatch, "/api/leads/"+created.ID, strings.NewReader(string(body)))
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", created.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+
+	h.Update(rr, req)
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 (not 500)", rr.Code)
 	}
 }
 

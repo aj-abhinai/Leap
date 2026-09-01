@@ -9,9 +9,9 @@ import NotificationPanel from './NotificationPanel.vue'
 const store = useRemindersStore()
 const isOpen = shallowRef(false)
 
-// The bell polls every 60 seconds (ADR 004) so a nudge arrives at the due
-// moment even when the user is not looking; the interval pauses while the tab
-// is hidden to avoid background churn. Opening the panel also refreshes.
+// The bell polls every 60 seconds so a nudge arrives at the due moment even
+// when the user is not looking; the interval pauses while the tab is hidden
+// to avoid background churn. Opening the panel also refreshes.
 let timer: ReturnType<typeof setInterval> | null = null
 
 function startPolling() {

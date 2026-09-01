@@ -15,8 +15,8 @@ const store = useSettingsStore()
 const nudgeMinutes = shallowRef(5)
 const nudgeLoading = shallowRef(false)
 
-// The nudge lead time (ADR 004): how many minutes before a task's start time
-// its reminder fires. One org-wide value, default 5.
+// The nudge lead time: how many minutes before a task's start time its
+// reminder fires. One org-wide value, default 5.
 async function loadNudge() {
   try {
     const res = await getNudgeLeadMinutes()

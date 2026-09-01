@@ -118,8 +118,8 @@ type Board struct {
 	Stages []BoardStage `json:"stages"`
 }
 
-// BoardWindow caps how many leads render per kanban column (ADR 002 "kanban
-// operational surface"): older cards are never deleted, just not rendered.
+// BoardWindow caps how many leads render per kanban column: older cards are
+// never deleted, just not rendered.
 const BoardWindow = 200
 
 // Activity is a task on a lead with a lifecycle: scheduled, done, cancelled,
@@ -137,7 +137,7 @@ type Activity struct {
 	QuickReplyName string     `json:"quick_reply_name,omitempty"`
 	ScheduledAt    *time.Time `json:"scheduled_at,omitempty"`
 	// ScheduledEndAt is the optional end of a range task; overdue begins after
-	// it when present (ADR 004).
+	// it when present.
 	ScheduledEndAt *time.Time `json:"scheduled_end_at,omitempty"`
 	RemindAt       *time.Time `json:"remind_at,omitempty"`
 	RespondedAt    *time.Time `json:"responded_at,omitempty"`

@@ -15,9 +15,9 @@ export function typeLabel(type: string): string {
   return type || 'Task'
 }
 
-// isOverdue = past the due boundary, everywhere (ADR 004): the end for a
-// range task, the single time for a point task, the reminder only as the
-// fallback for reminder-only entries.
+// isOverdue = past the due boundary, everywhere: the end for a range task,
+// the single time for a point task, the reminder only as the fallback for
+// reminder-only entries.
 export function isOverdue(item: Pick<ActivityStatusLike, 'is_done' | 'is_cancelled' | 'scheduled_at' | 'scheduled_end_at' | 'remind_at'>): boolean {
   if (item.is_done || item.is_cancelled) return false
   const boundary = item.scheduled_end_at ?? item.scheduled_at ?? item.remind_at

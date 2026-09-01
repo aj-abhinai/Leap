@@ -389,10 +389,10 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 	if err := validateCollectionLimits(req.Phones, req.Emails, req.TagIDs); err != nil {
 		return nil, err
 	}
-	// Duplicate guard (ADR 002 "phone primary, three deliberate flows"): a
-	// create whose primary phone or email collides with a live contact is
-	// rejected with a 409 unless the caller confirms the duplicate. The match
-	// lookup runs before the insert so the new contact itself is not flagged.
+	// Duplicate guard: a create whose primary phone or email collides with a
+	// live contact is rejected with a 409 unless the caller confirms the
+	// duplicate. The match lookup runs before the insert so the new contact
+	// itself is not flagged.
 	// The effective primary is the first marked-primary list value, else the
 	// first value, so list-only creates (no scalar) are guarded too.
 	phone := req.Phone

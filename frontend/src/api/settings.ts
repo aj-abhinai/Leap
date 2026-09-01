@@ -1,7 +1,7 @@
 import { apiClient, type ApiResponse } from '@/composables/useApi'
 
 // Org settings (GET/PUT /api/settings/*). The nudge lead time is the minutes
-// before a task's start time that its reminder fires (ADR 004).
+// before a task's start time that its reminder fires.
 
 export function getNudgeLeadMinutes(): Promise<ApiResponse<{ minutes: number }>> {
   return apiClient.get('/api/settings/nudge-lead-minutes')

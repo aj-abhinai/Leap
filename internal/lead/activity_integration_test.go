@@ -1049,12 +1049,18 @@ func TestEditDoneCloseLostActivityDoesNotRecloseLeadIntegration(t *testing.T) {
 		t.Fatalf("complete with close_lost quick reply: %v", err)
 	}
 
-	// Reopen the lead back into the open stage.
-	if _, err := svc.update(created.ID, UpdateRequest{StageID: &stageID}, ""); err != nil {
+	// "Reopen" the lead back into the open stage: under the one-row-one-cycle
+	// model this spawns a NEW row; the old row stays terminal.
+	spawned, err := svc.update(created.ID, UpdateRequest{StageID: &stageID}, "")
+	if err != nil {
 		t.Fatalf("reopen lead: %v", err)
 	}
+	if spawned.ID == created.ID {
+		t.Error("expected a new cycle row for the reopened lead, got the same id")
+	}
 
-	// Editing the old closing touchpoint (description only) must not re-close.
+	// Editing the old closing touchpoint (description only) must not re-close
+	// the old terminal row or touch the new cycle.
 	desc := "corrected note"
 	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{Description: &desc}); err != nil {
 		t.Fatalf("edit done close_lost activity: %v", err)
@@ -1062,13 +1068,24 @@ func TestEditDoneCloseLostActivityDoesNotRecloseLeadIntegration(t *testing.T) {
 
 	got, err := svc.get(created.ID)
 	if err != nil {
-		t.Fatalf("get lead: %v", err)
+		t.Fatalf("get old lead: %v", err)
 	}
-	if got.StageID != stageID {
-		t.Errorf("stage_id = %q, want open stage %q (edit must not re-close)", got.StageID, stageID)
+	if got.StageID == stageID {
+		t.Errorf("old row stage_id = %q, want the closing stage (terminal, not reopened)", got.StageID)
 	}
-	if got.Outcome != "" {
-		t.Errorf("outcome = %q, want cleared", got.Outcome)
+	if got.Outcome != "lost" {
+		t.Errorf("old row outcome = %q, want lost (terminal)", got.Outcome)
+	}
+
+	spawnedGot, err := svc.get(spawned.ID)
+	if err != nil {
+		t.Fatalf("get new cycle: %v", err)
+	}
+	if spawnedGot.StageID != stageID {
+		t.Errorf("new cycle stage_id = %q, want open stage %q", spawnedGot.StageID, stageID)
+	}
+	if spawnedGot.Outcome != "" {
+		t.Errorf("new cycle outcome = %q, want empty", spawnedGot.Outcome)
 	}
 }
 
@@ -1160,7 +1177,7 @@ func TestCreateActivityDefaultsReminderToNudgeLeadIntegration(t *testing.T) {
 	}
 
 	// With no explicit remind time, the reminder defaults to 5 minutes before
-	// the schedule (ADR 004 default nudge).
+	// the schedule (the default nudge lead time).
 	start := time.Now().Add(2 * time.Hour).Truncate(time.Second)
 	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
 		Type:        "call",
