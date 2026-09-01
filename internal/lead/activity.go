@@ -486,14 +486,17 @@ func (s *Service) snoozeReminder(leadID, activityID string, remindAt time.Time) 
 	return rows > 0, nil
 }
 
-// getPendingReminders returns every open task — an activity that is neither
-// done nor cancelled and has a due time (scheduled_at, or remind_at for a
-// reminder-only entry). Both overdue and upcoming are included so the
-// reminders page can render Overdue / Upcoming / Done sections; dismissed
-// (is_reminded) rows are included too so the Dismissed section can list them.
-// Each row carries the lead display name and contact id so reminder surfaces
-// can show whose lead the task belongs to and open the lead drawer.
-func (s *Service) getPendingReminders() ([]ActivityListItem, error) {
+// getPendingReminders returns the open tasks the requesting user is
+// responsible for (ADR 004 "Recipient: the person responsible"): tasks on
+// leads assigned to me, or on unassigned leads where I created the task, or
+// genuinely unowned work (both null — visible to everyone so someone picks it
+// up). A team that never assigns leads degrades gracefully back to a shared
+// bell. Both overdue and upcoming are included so the reminders page can
+// render Overdue / Upcoming / Done sections; dismissed (is_reminded) rows are
+// included too so the Dismissed section can list them. Each row carries the
+// lead display name and contact id so reminder surfaces can show whose lead
+// the task belongs to and open the lead drawer.
+func (s *Service) getPendingReminders(userID string) ([]ActivityListItem, error) {
 	rows, err := s.db.Query(`
 		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
 			la.type, la.description, la.quick_reply_id, COALESCE(t.name, ''),
@@ -508,8 +511,14 @@ func (s *Service) getPendingReminders() ([]ActivityListItem, error) {
 		LEFT JOIN tags t ON t.id = la.quick_reply_id
 		WHERE NOT la.is_done AND NOT la.is_cancelled
 			AND (la.remind_at IS NOT NULL OR la.scheduled_at IS NOT NULL)
+			AND (
+				l.assigned_to = $1
+				OR (l.assigned_to IS NULL AND la.user_id = $1)
+				OR (l.assigned_to IS NULL AND la.user_id IS NULL)
+			)
 		ORDER BY COALESCE(la.remind_at, la.scheduled_at) ASC
 		LIMIT 100`,
+		userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get pending reminders: %w", err)

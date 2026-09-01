@@ -429,7 +429,8 @@ func (h *Handler) UpdateActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) PendingReminders(w http.ResponseWriter, r *http.Request) {
-	reminders, err := h.svc.getPendingReminders()
+	userID := ctxutil.GetUserID(r)
+	reminders, err := h.svc.getPendingReminders(userID)
 	if err != nil {
 		respond.ServerError(w, err)
 		return

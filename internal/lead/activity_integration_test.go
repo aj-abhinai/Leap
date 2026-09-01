@@ -229,12 +229,115 @@ func TestPendingRemindersExcludeDeletedLeadsIntegration(t *testing.T) {
 		t.Fatalf("soft-delete lead: %v", err)
 	}
 
-	reminders, err := svc.getPendingReminders()
+	reminders, err := svc.getPendingReminders("00000000-0000-0000-0000-000000000000")
 	if err != nil {
 		t.Fatalf("get pending reminders: %v", err)
 	}
 	if len(reminders) != 1 || reminders[0].LeadID != live.ID {
 		t.Errorf("pending reminders = %+v, want only the live lead's reminder", reminders)
+	}
+}
+
+func TestPendingRemindersScopedToResponsibleUserIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	assigneeID := seedTestUser(t, db, "assignee@example.com")
+	creatorID := seedTestUser(t, db, "creator@example.com")
+	otherID := seedTestUser(t, db, "other@example.com")
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+
+	// Lead assigned to assignee; task created by creator.
+	assignedLead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+		AssignedTo: &assigneeID,
+	}, creatorID)
+	if err != nil {
+		t.Fatalf("create assigned lead: %v", err)
+	}
+	// Unassigned lead; task created by creator.
+	unassignedLead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Bob", Phone: "0987654321"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, creatorID)
+	if err != nil {
+		t.Fatalf("create unassigned lead: %v", err)
+	}
+	// Unowned lead: no assignee, task created by nobody (system).
+	unownedLead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Carol", Phone: "1112223333"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create unowned lead: %v", err)
+	}
+
+	for _, leadID := range []string{assignedLead.ID, unassignedLead.ID, unownedLead.ID} {
+		if _, err := db.Exec(
+			`INSERT INTO lead_activities (lead_id, stage_id, user_id, type, remind_at)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, 'call', $4)`,
+			leadID, stageID, creatorID, time.Now().Add(time.Hour),
+		); err != nil {
+			t.Fatalf("seed reminder: %v", err)
+		}
+	}
+	// The unowned lead's task has no creator.
+	if _, err := db.Exec(
+		`UPDATE lead_activities SET user_id = NULL WHERE lead_id = $1`,
+		unownedLead.ID,
+	); err != nil {
+		t.Fatalf("clear unowned task creator: %v", err)
+	}
+
+	// The assignee sees their assigned lead's task (and the unowned one).
+	assigned, err := svc.getPendingReminders(assigneeID)
+	if err != nil {
+		t.Fatalf("get pending reminders (assignee): %v", err)
+	}
+	assignedIDs := map[string]bool{}
+	for _, r := range assigned {
+		assignedIDs[r.LeadID] = true
+	}
+	if !assignedIDs[assignedLead.ID] || !assignedIDs[unownedLead.ID] {
+		t.Errorf("assignee reminders = %v, want assigned + unowned leads", assignedIDs)
+	}
+	if assignedIDs[unassignedLead.ID] {
+		t.Errorf("assignee reminders include unassigned lead's task, want excluded")
+	}
+
+	// The creator sees their task on the unassigned lead (and the unowned one),
+	// but not the task on the assignee-owned lead.
+	creator, err := svc.getPendingReminders(creatorID)
+	if err != nil {
+		t.Fatalf("get pending reminders (creator): %v", err)
+	}
+	creatorIDs := map[string]bool{}
+	for _, r := range creator {
+		creatorIDs[r.LeadID] = true
+	}
+	if !creatorIDs[unassignedLead.ID] || !creatorIDs[unownedLead.ID] {
+		t.Errorf("creator reminders = %v, want unassigned + unowned leads", creatorIDs)
+	}
+	if creatorIDs[assignedLead.ID] {
+		t.Errorf("creator reminders include assigned lead's task, want excluded")
+	}
+
+	// An unrelated user sees only the genuinely unowned work.
+	other, err := svc.getPendingReminders(otherID)
+	if err != nil {
+		t.Fatalf("get pending reminders (other): %v", err)
+	}
+	otherIDs := map[string]bool{}
+	for _, r := range other {
+		otherIDs[r.LeadID] = true
+	}
+	if len(otherIDs) != 1 || !otherIDs[unownedLead.ID] {
+		t.Errorf("other reminders = %v, want only the unowned lead", otherIDs)
 	}
 }
 
