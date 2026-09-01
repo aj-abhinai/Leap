@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2, User } from '@lucide/vue'
+import { Loader2, User, KeyRound } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
 
 const auth = useAuthStore()
@@ -68,7 +68,14 @@ async function handleSave() {
             <Input id="pphone" v-model="formPhone" placeholder="Phone number" />
           </div>
           <div v-if="error" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{{ error }}</div>
-          <div class="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-end">
+          <div class="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
+            <RouterLink
+              to="/change-password"
+              class="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <KeyRound class="size-4" />
+              Change password
+            </RouterLink>
             <Button type="submit" :disabled="saving" class="w-full sm:w-auto">
               <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
               Save
