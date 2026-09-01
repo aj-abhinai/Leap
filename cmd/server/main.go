@@ -139,8 +139,11 @@ func main() {
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.BodyLimit)
+	// Empty allowlist: the SPA and API are same-origin in dev (Vite proxy)
+	// and production (single binary), so browsers block all cross-site
+	// calls. A future cross-origin consumer gets its origin added here.
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{"*"},
+		AllowedOrigins: []string{},
 		AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		MaxAge:         300,

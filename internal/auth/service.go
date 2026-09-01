@@ -259,12 +259,14 @@ func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*User,
 	return &u, nil
 }
 
-// changePassword verifies the current password and replaces it. The caller's
-// session survives (refreshing with a fresh token); all other sessions for
-// the user are revoked.
-func (s *Service) changePassword(userID, currentPassword, newPassword string) error {
+// changePassword verifies the current password and replaces it. Every
+// existing session for the user is revoked, then the caller receives a fresh
+// token pair so the device that changed the password stays signed in. If the
+// fresh pair cannot be issued after the revocation committed, the caller is
+// logged out too (fail closed), matching the refresh rotation contract.
+func (s *Service) changePassword(userID, currentPassword, newPassword string) (*TokenResponse, error) {
 	if err := ValidatePassword(newPassword); err != nil {
-		return err
+		return nil, err
 	}
 	var currentHash string
 	err := s.db.QueryRow(
@@ -272,19 +274,19 @@ func (s *Service) changePassword(userID, currentPassword, newPassword string) er
 		userID,
 	).Scan(&currentHash)
 	if err != nil {
-		return fmt.Errorf("change password: %w", err)
+		return nil, fmt.Errorf("change password: %w", err)
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(currentPassword)); err != nil {
-		return ErrIncorrectPassword
+		return nil, ErrIncorrectPassword
 	}
 	newHash, err := HashPassword(newPassword, s.cfg.BcryptCost)
 	if err != nil {
-		return fmt.Errorf("change password: hash: %w", err)
+		return nil, fmt.Errorf("change password: hash: %w", err)
 	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("change password: %w", err)
+		return nil, fmt.Errorf("change password: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -292,15 +294,18 @@ func (s *Service) changePassword(userID, currentPassword, newPassword string) er
 		`UPDATE users SET password_hash = $2, must_change_password = false, updated_at = now() WHERE id = $1`,
 		userID, newHash,
 	); err != nil {
-		return fmt.Errorf("change password: update: %w", err)
+		return nil, fmt.Errorf("change password: update: %w", err)
 	}
 	if _, err := tx.Exec(
 		`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND NOT revoked`,
 		userID,
 	); err != nil {
-		return fmt.Errorf("change password: revoke sessions: %w", err)
+		return nil, fmt.Errorf("change password: revoke sessions: %w", err)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("change password: %w", err)
+	}
+	return s.generateTokenPair(userID)
 }
 
 func HashPassword(password string, cost int) (string, error) {

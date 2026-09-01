@@ -1,8 +1,10 @@
 import { apiClient, type ApiResponse, type RequestOptions } from '@/composables/useApi'
 
 // Auth endpoints. The auth store owns session state (tokens, epochs) and
-// calls these; login/refresh/logout carry the CSRF cookie header and skip the
+// calls these; refresh/logout carry the CSRF cookie header and skip the
 // client's 401-refresh loop (a failed refresh must not refresh itself).
+// Login has neither: the route enforces no CSRF check because a first
+// login has no cookie to echo yet.
 
 const CSRF_COOKIE = 'crm_csrf'
 
@@ -38,7 +40,7 @@ export interface LoginResponse {
 }
 
 export function login(email: string, password: string): Promise<ApiResponse<LoginResponse>> {
-  return apiClient.post('/api/auth/login', { email, password }, csrfOptions())
+  return apiClient.post('/api/auth/login', { email, password }, { skipAuth: true })
 }
 
 export function refresh(): Promise<ApiResponse<LoginResponse>> {
@@ -60,7 +62,7 @@ export function updateProfile(body: { name: string; phone: string }): Promise<Ap
 export function changePassword(body: {
   current_password: string
   new_password: string
-}): Promise<ApiResponse<null>> {
+}): Promise<ApiResponse<LoginResponse>> {
   return apiClient.patch('/api/auth/me/password', body)
 }
 

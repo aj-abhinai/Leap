@@ -46,6 +46,22 @@ func (s *Service) LogLogout(userID, userName, email string) {
 	}
 }
 
+// LogPasswordChange records a password change in the audit log. It is a
+// security event: it tells an operator when an account got a new password.
+func (s *Service) LogPasswordChange(userID, userName, email string) {
+	desc := "user changed password"
+	if email != "" {
+		desc = email + " changed password"
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO audit_logs (description, user_id, user_name, action, resource_type)
+		VALUES ($1, $2, $3, 'password_change', 'user')`,
+		desc, userID, userName,
+	); err != nil {
+		slog.Error("log password change", "error", err, "user_id", userID)
+	}
+}
+
 func (s *Service) list(page, perPage int, filters ActivityFilters) ([]Entry, int, error) {
 	var total int
 	baseWhere := "WHERE 1=1"

@@ -179,9 +179,13 @@ func TestChangePasswordSuccessIntegration(t *testing.T) {
 	id := seedUserWithFlag(t, db, "carol@example.com", "original-pw", true)
 	svc := NewService(db, authTestConfig())
 
-	err := svc.changePassword(id, "original-pw", "New-Passw0rd!")
+	// The fresh pair issued to the changing device keeps it signed in.
+	resp, err := svc.changePassword(id, "original-pw", "New-Passw0rd!")
 	if err != nil {
 		t.Fatalf("changePassword: %v", err)
+	}
+	if resp.AccessToken == "" || resp.RefreshToken == "" {
+		t.Error("expected a fresh token pair after password change")
 	}
 
 	// Log in with the new password, flag should now be false.
@@ -199,7 +203,7 @@ func TestChangePasswordWrongCurrentIntegration(t *testing.T) {
 	id := seedUserWithFlag(t, db, "dave@example.com", "real-pw", true)
 	svc := NewService(db, authTestConfig())
 
-	err := svc.changePassword(id, "wrong-current", "New-Passw0rd!")
+	_, err := svc.changePassword(id, "wrong-current", "New-Passw0rd!")
 	if !errors.Is(err, ErrIncorrectPassword) {
 		t.Errorf("expected ErrIncorrectPassword, got %v", err)
 	}
@@ -210,7 +214,7 @@ func TestChangePasswordTooShortIntegration(t *testing.T) {
 	id := seedUser(t, db, "eve@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	err := svc.changePassword(id, "correct-horse", "short")
+	_, err := svc.changePassword(id, "correct-horse", "short")
 	if !errors.Is(err, ErrPasswordTooShort) {
 		t.Errorf("expected ErrPasswordTooShort, got %v", err)
 	}
@@ -231,12 +235,20 @@ func TestChangePasswordRevokesSessionsIntegration(t *testing.T) {
 		t.Fatalf("login 2: %v", err)
 	}
 
-	err = svc.changePassword(id, "frank-pw", "New-Frank-Pw1!")
+	// The fresh pair issued to the changing device keeps it signed in;
+	// the two earlier sessions are revoked.
+	resp3, err := svc.changePassword(id, "frank-pw", "New-Frank-Pw1!")
 	if err != nil {
 		t.Fatalf("changePassword: %v", err)
 	}
+	if resp3.AccessToken == "" || resp3.RefreshToken == "" {
+		t.Error("expected a fresh token pair after password change")
+	}
+	if _, err := svc.refresh(resp3.RefreshToken); err != nil {
+		t.Errorf("fresh session after change: expected refresh to succeed, got %v", err)
+	}
 
-	// Both sessions should be revoked.
+	// Both earlier sessions should be revoked.
 	if _, err := svc.refresh(resp1.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
 		t.Errorf("session 1: expected ErrTokenRevoked, got %v", err)
 	}

@@ -4,11 +4,11 @@ import (
 	"crm/internal/audit"
 	"crm/internal/auth"
 	"crm/internal/respond"
+	"crm/internal/util"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -816,7 +816,7 @@ func (s *Service) createUser(name, email, password string, actorID string) (*Use
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
+	email = util.NormalizeEmail(email)
 	var u UserInfo
 	err = s.db.QueryRow(
 		`INSERT INTO users (name, email, password_hash, must_change_password) VALUES ($1, $2, $3, true)

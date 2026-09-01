@@ -113,6 +113,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function changePassword(currentPassword: string, newPassword: string) {
     const res = await authApi.changePassword({ current_password: currentPassword, new_password: newPassword })
+    // The change revoked every session; the response carries the fresh pair
+    // issued to this device, so it must replace the in-memory access token.
+    setAccess(res.data)
     mustChangePassword.value = false
     return res.data
   }

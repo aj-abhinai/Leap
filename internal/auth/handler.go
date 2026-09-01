@@ -212,14 +212,30 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if err := h.svc.changePassword(userID, req.CurrentPassword, req.NewPassword); err != nil {
+	resp, err := h.svc.changePassword(userID, req.CurrentPassword, req.NewPassword)
+	if err != nil {
 		writeAuthError(w, http.StatusBadRequest, err)
+		return
+	}
+	// The audit entry is best-effort: a failed insert must not fail the
+	// committed password change. The session re-establishment below is
+	// fail-closed, matching refresh rotation.
+	u, err := h.svc.getUser(userID)
+	if err != nil {
+		slog.Error("password change audit lookup", "error", err, "user_id", userID)
+	} else if h.actLog != nil {
+		h.actLog.LogPasswordChange(u.ID, u.Name, u.Email)
+	}
+	if !h.establishSession(w, resp.RefreshToken) {
 		return
 	}
 	respond.JSON(
 		w,
 		http.StatusOK,
-		map[string]string{"message": "Password changed"},
+		map[string]any{
+			"access_token": resp.AccessToken,
+			"expires_at":   resp.ExpiresAt,
+		},
 		nil,
 		nil,
 	)

@@ -221,7 +221,7 @@ describe('auth store', () => {
     expect(auth.user?.id).toBe('u1')
   })
 
-  it('changePassword clears the flag and returns the message', async () => {
+  it('changePassword stores the fresh access token and clears the flag', async () => {
     const fetchMock = vi.fn()
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ data: { access_token: accessToken, expires_at: 999 } }))
@@ -232,9 +232,13 @@ describe('auth store', () => {
     await auth.bootstrap()
     auth.mustChangePassword = true
 
-    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { message: 'Password changed' } }))
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ data: { access_token: 'fresh-access-token', expires_at: 999 } }),
+    )
     await auth.changePassword('old', 'new-password')
 
     expect(auth.mustChangePassword).toBe(false)
+    expect(auth.accessToken).toBe('fresh-access-token')
+    expect(auth.isAuthenticated).toBe(true)
   })
 })
