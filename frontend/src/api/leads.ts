@@ -119,8 +119,20 @@ export function createLead(body: LeadSaveBody): Promise<ApiResponse<Lead>> {
   return apiClient.post('/api/leads', body)
 }
 
-export function updateLead(id: string, body: LeadSaveBody): Promise<ApiResponse<Lead>> {
-  return apiClient.patch(`/api/leads/${id}`, body)
+// UpdateLeadResult distinguishes a plain stage move from a cycle spawn: the
+// server returns the SAME lead id when an open lead moved, and a NEW lead id
+// when a closed lead dragged to an open stage started a new cycle (the old
+// row stays terminal).
+export interface UpdateLeadResult {
+  lead: Lead
+  spawned: boolean
+}
+
+export function updateLead(id: string, body: LeadSaveBody): Promise<ApiResponse<UpdateLeadResult>> {
+  return apiClient.patch<Lead>(`/api/leads/${id}`, body).then((res) => ({
+    ...res,
+    data: { lead: res.data, spawned: res.data.id !== id },
+  }))
 }
 
 export function deleteLead(id: string): Promise<ApiResponse<null>> {

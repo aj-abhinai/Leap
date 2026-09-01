@@ -43,3 +43,14 @@ func NormalizePhone(phone string) string {
 func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
+
+// likeEscaper escapes the ILIKE/LIKE metacharacters in a user search term so
+// a literal '%' or '_' is matched literally instead of widening the pattern.
+// Patterns built with it must use ESCAPE '\' in the SQL.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// LikePattern wraps a user search term in '%...%' with its wildcards escaped,
+// for use in ILIKE/LIKE predicates with ESCAPE '\'.
+func LikePattern(s string) string {
+	return "%" + likeEscaper.Replace(s) + "%"
+}

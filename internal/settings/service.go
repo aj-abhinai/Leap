@@ -27,11 +27,19 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
-// GetNudgeLeadMinutes returns the org-wide nudge lead time in minutes,
-// defaulting to DefaultNudgeLeadMinutes when unset or malformed.
-func (s *Service) GetNudgeLeadMinutes() (int, error) {
+// Queryer is satisfied by *sql.DB and *sql.Tx so settings reads can run
+// inside a caller's transaction.
+type Queryer interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// NudgeLeadMinutes reads the org-wide nudge lead time in minutes, defaulting
+// to DefaultNudgeLeadMinutes when the setting is absent or malformed. It runs
+// on any Queryer so the lead transaction paths share the settings package's
+// parse/default rule instead of re-implementing it.
+func NudgeLeadMinutes(q Queryer) (int, error) {
 	var raw string
-	err := s.db.QueryRow(`SELECT value FROM settings WHERE key = $1`, NudgeLeadMinutesKey).Scan(&raw)
+	err := q.QueryRow(`SELECT value FROM settings WHERE key = $1`, NudgeLeadMinutesKey).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DefaultNudgeLeadMinutes, nil
 	}
@@ -43,6 +51,12 @@ func (s *Service) GetNudgeLeadMinutes() (int, error) {
 		return DefaultNudgeLeadMinutes, nil
 	}
 	return n, nil
+}
+
+// GetNudgeLeadMinutes returns the org-wide nudge lead time in minutes,
+// defaulting to DefaultNudgeLeadMinutes when unset or malformed.
+func (s *Service) GetNudgeLeadMinutes() (int, error) {
+	return NudgeLeadMinutes(s.db)
 }
 
 // SetNudgeLeadMinutes stores the org-wide nudge lead time in minutes. Negative

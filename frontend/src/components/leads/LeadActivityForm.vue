@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useSettingsStore } from '@/stores/settings'
 import { createLeadActivity } from '@/api/leads'
@@ -32,14 +32,36 @@ const settings = useSettingsStore()
 const activityType = ref('')
 const description = ref('')
 const quickReplyId = ref('')
-const scheduledDate = ref('')
-const scheduledTime = ref('')
-const endDate = ref('')
-const endTime = ref('')
-const remindDate = ref('')
-const remindTime = ref('')
-const nextDate = ref('')
-const nextTime = ref('')
+
+// Schedule fields are date+time pairs so a "time without a date" cannot
+// exist; clear()/payload helpers keep the reset and submit paths in one place.
+interface ScheduleSlot {
+  date: string
+  time: string
+}
+const schedule = reactive<{
+  start: ScheduleSlot
+  end: ScheduleSlot
+  remind: ScheduleSlot
+  next: ScheduleSlot
+}>({
+  start: { date: '', time: '' },
+  end: { date: '', time: '' },
+  remind: { date: '', time: '' },
+  next: { date: '', time: '' },
+})
+
+function clearSchedule() {
+  for (const slot of [schedule.start, schedule.end, schedule.remind, schedule.next]) {
+    slot.date = ''
+    slot.time = ''
+  }
+}
+
+function slotPayload(slot: ScheduleSlot): string | undefined {
+  return mergeDateTime(slot.date, slot.time) || undefined
+}
+
 const saving = ref(false)
 const error = ref('')
 
@@ -59,7 +81,7 @@ const selectedBehavior = computed(() => selectedChip.value?.behavior || 'log')
 const showNextFields = computed(() => selectedBehavior.value === 'next')
 const showCloseNotice = computed(() => selectedBehavior.value === 'close_lost')
 const showMoreScheduleFields = computed(() => !showNextFields.value && !showCloseNotice.value)
-const hasNextTime = computed(() => !!mergeDateTime(nextDate.value, nextTime.value))
+const hasNextTime = computed(() => !!mergeDateTime(schedule.next.date, schedule.next.time))
 const moreOptions = ref(false)
 
 onMounted(() => {
@@ -95,26 +117,22 @@ watch(
 
 // When a schedule is entered and the reminder is untouched, default the
 // reminder to the scheduled time — a reminder is the nudge for a task.
-watch([scheduledDate, scheduledTime], () => {
-  if (!scheduledDate.value || !scheduledTime.value) return
-  if (!remindDate.value && !remindTime.value) {
-    remindDate.value = scheduledDate.value
-    remindTime.value = scheduledTime.value
-  }
-})
+watch(
+  () => [schedule.start.date, schedule.start.time],
+  () => {
+    if (!schedule.start.date || !schedule.start.time) return
+    if (!schedule.remind.date && !schedule.remind.time) {
+      schedule.remind.date = schedule.start.date
+      schedule.remind.time = schedule.start.time
+    }
+  },
+)
 
 function setChip(id: string) {
   quickReplyId.value = id
   // Switching behaviors resets stale next/schedule state so a schedule entered
   // under one behavior is never silently submitted under another.
-  nextDate.value = ''
-  nextTime.value = ''
-  scheduledDate.value = ''
-  scheduledTime.value = ''
-  endDate.value = ''
-  endTime.value = ''
-  remindDate.value = ''
-  remindTime.value = ''
+  clearSchedule()
 }
 
 function applyLastType() {
@@ -128,32 +146,25 @@ function clearForm() {
   activityType.value = ''
   description.value = ''
   quickReplyId.value = ''
-  scheduledDate.value = ''
-  scheduledTime.value = ''
-  endDate.value = ''
-  endTime.value = ''
-  remindDate.value = ''
-  remindTime.value = ''
-  nextDate.value = ''
-  nextTime.value = ''
+  clearSchedule()
   // A follow-up log right after a save should still skip the type pick.
   applyLastType()
 }
 
 function pickNextPreset(preset: NextPreset) {
   const at = preset.at().toISOString()
-  nextDate.value = toLocalDateInput(at)
-  nextTime.value = toLocalTimeInput(at)
+  schedule.next.date = toLocalDateInput(at)
+  schedule.next.time = toLocalTimeInput(at)
 }
 
 // Highlights the preset that produced the current next date/time so a tap has
 // visible feedback (the date/time inputs themselves live under More options).
 const selectedPreset = computed(() =>
-  findSelectedPreset(nextDate.value, nextTime.value, nextPresets),
+  findSelectedPreset(schedule.next.date, schedule.next.time, nextPresets),
 )
 
 function formatNextAt(): string {
-  const next = mergeDateTime(nextDate.value, nextTime.value)
+  const next = mergeDateTime(schedule.next.date, schedule.next.time)
   if (!next) return ''
   return new Date(next).toLocaleString([], {
     weekday: 'short',
@@ -181,10 +192,10 @@ async function handleSave() {
 
   // Capture before clearForm() resets the state these derive from.
   const wasCloseLost = showCloseNotice.value
-  const hasNext = showNextFields.value && !!mergeDateTime(nextDate.value, nextTime.value)
+  const hasNext = showNextFields.value && !!mergeDateTime(schedule.next.date, schedule.next.time)
 
   if (showNextFields.value) {
-    const next = mergeDateTime(nextDate.value, nextTime.value)
+    const next = slotPayload(schedule.next)
     if (next) {
       // "Log attempt + next": the current activity completes with the quick reply
       // and the next occurrence of the same type is created for this time.
@@ -194,9 +205,9 @@ async function handleSave() {
       payload.is_done = true
     }
   } else {
-    payload.scheduled_at = mergeDateTime(scheduledDate.value, scheduledTime.value)
-    payload.scheduled_end_at = mergeDateTime(endDate.value, endTime.value)
-    payload.remind_at = mergeDateTime(remindDate.value, remindTime.value)
+    payload.scheduled_at = slotPayload(schedule.start)
+    payload.scheduled_end_at = slotPayload(schedule.end)
+    payload.remind_at = slotPayload(schedule.remind)
     // A close_lost quick reply completes the activity immediately so it is logged
     // as the closing touchpoint, not cancelled by the subsequent stage move.
     if (wasCloseLost) {
@@ -344,11 +355,11 @@ async function handleSave() {
           <div class="grid grid-cols-2 gap-2">
             <div class="space-y-1.5">
               <Label class="text-xs">Next date</Label>
-              <Input v-model="nextDate" type="date" />
+              <Input v-model="schedule.next.date" type="date" />
             </div>
             <div class="space-y-1.5">
               <Label class="text-xs">Next time</Label>
-              <Input v-model="nextTime" type="time" />
+              <Input v-model="schedule.next.time" type="time" />
             </div>
           </div>
         </template>
@@ -356,31 +367,31 @@ async function handleSave() {
           <div class="grid grid-cols-2 gap-2">
             <div class="space-y-1.5">
               <Label class="text-xs">Scheduled date</Label>
-              <Input v-model="scheduledDate" type="date" />
+              <Input v-model="schedule.start.date" type="date" />
             </div>
             <div class="space-y-1.5">
               <Label class="text-xs">Scheduled time</Label>
-              <Input v-model="scheduledTime" type="time" />
+              <Input v-model="schedule.start.time" type="time" />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div class="space-y-1.5">
               <Label class="text-xs" for="until-date">Until date (optional)</Label>
-              <Input id="until-date" v-model="endDate" type="date" />
+              <Input id="until-date" v-model="schedule.end.date" type="date" />
             </div>
             <div class="space-y-1.5">
               <Label class="text-xs" for="until-time">Until time</Label>
-              <Input id="until-time" v-model="endTime" type="time" />
+              <Input id="until-time" v-model="schedule.end.time" type="time" />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div class="space-y-1.5">
               <Label class="text-xs">Remind date</Label>
-              <Input v-model="remindDate" type="date" />
+              <Input v-model="schedule.remind.date" type="date" />
             </div>
             <div class="space-y-1.5">
               <Label class="text-xs">Remind time</Label>
-              <Input v-model="remindTime" type="time" />
+              <Input v-model="schedule.remind.time" type="time" />
             </div>
           </div>
         </template>

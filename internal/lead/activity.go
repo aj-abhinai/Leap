@@ -1,6 +1,7 @@
 package lead
 
 import (
+	"crm/internal/settings"
 	"crm/internal/util"
 	"database/sql"
 	"errors"
@@ -152,29 +153,6 @@ func (s *Service) listActivities(leadID string, page, perPage int) ([]Activity, 
 	return activities, total, nil
 }
 
-// nudgeLeadMinutesTx returns the org-wide nudge lead time in minutes (ADR 004
-// "default nudge: 5 minutes before the start time"), defaulting to 5 when the
-// setting is absent or malformed. It runs inside the caller's transaction so
-// the defaulting and the insert cannot diverge.
-func (s *Service) nudgeLeadMinutesTx(q interface {
-	QueryRow(query string, args ...any) *sql.Row
-}) (int, error) {
-	const defaultLead = 5
-	var raw string
-	err := q.QueryRow(`SELECT value FROM settings WHERE key = 'nudge_lead_minutes'`).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return defaultLead, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("load nudge lead minutes: %w", err)
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
-		return defaultLead, nil
-	}
-	return n, nil
-}
-
 // insertActivityTx inserts one activity row inside a transaction and returns
 // it joined with the stage, user, and quick-reply names.
 func (s *Service) insertActivityTx(tx *sql.Tx, leadID, stageID, userID, typeValue, desc string, quickReplyID *string, scheduledAt, scheduledEndAt, remindAt *time.Time, respondedAt, occurredAt any, isDone bool) (*Activity, error) {
@@ -258,7 +236,7 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	// remind time, the reminder defaults to lead minutes before the start.
 	remindAt := req.RemindAt
 	if remindAt == nil && req.ScheduledAt != nil {
-		lead, err := s.nudgeLeadMinutesTx(tx)
+		lead, err := settings.NudgeLeadMinutes(tx)
 		if err != nil {
 			return nil, err
 		}
@@ -445,7 +423,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	// defaults to the nudge lead time before the new schedule (ADR 004).
 	if req.RescheduleAt != nil && (req.IsDone != nil && *req.IsDone) && !a.IsCancelled && behavior != closeLostBehavior {
 		nextRemind := req.RescheduleAt
-		if lead, err := s.nudgeLeadMinutesTx(tx); err != nil {
+		if lead, err := settings.NudgeLeadMinutes(tx); err != nil {
 			return nil, err
 		} else {
 			t := req.RescheduleAt.Add(-time.Duration(lead) * time.Minute)
@@ -634,45 +612,14 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 		order = "desc"
 	}
 
-	// Conditions use a "$?" placeholder; renumber() assigns real $n after all
-	// args are collected so multi-arg predicates (search) stay consistent.
-	// One counter is shared across all conditions — each condition continues
-	// from the previous one's last number.
-	where := []string{"l.deleted_at IS NULL"}
-	args := []any{}
-	add := func(cond string, a ...any) {
-		where = append(where, cond)
-		args = append(args, a...)
-	}
-	argIdx := 0
-	renumber := func(cond string) string {
-		var b strings.Builder
-		for {
-			i := strings.Index(cond, "$?")
-			if i < 0 {
-				b.WriteString(cond)
-				break
-			}
-			b.WriteString(cond[:i])
-			argIdx++
-			b.WriteString(fmt.Sprintf("$%d", argIdx))
-			cond = cond[i+2:]
-		}
-		return b.String()
-	}
-	apply := func() {
-		for i, c := range where {
-			where[i] = renumber(c)
-		}
-	}
-
+	w := util.NewWhereBuilder("l.deleted_at IS NULL")
 	switch f.Status {
 	case "done":
-		add("la.is_done = $?", true)
+		w.Add("la.is_done = $?", true)
 	case "cancelled":
-		add("la.is_cancelled = $?", true)
+		w.Add("la.is_cancelled = $?", true)
 	case "open":
-		add("NOT la.is_done AND NOT la.is_cancelled")
+		w.Add("NOT la.is_done AND NOT la.is_cancelled")
 	default:
 		// "all"
 	}
@@ -680,35 +627,30 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 		// Overdue = past the due boundary, everywhere (ADR 004): the end for a
 		// range task, the single time for a point task, the reminder only as
 		// the fallback for reminder-only entries.
-		add("COALESCE(la.scheduled_end_at, la.scheduled_at, la.remind_at) < now() AND NOT la.is_done AND NOT la.is_cancelled")
+		w.Add("COALESCE(la.scheduled_end_at, la.scheduled_at, la.remind_at) < now() AND NOT la.is_done AND NOT la.is_cancelled")
 	}
 	if f.Mine {
 		userID := f.UserID
 		if userID == "" {
-			add("la.user_id IS NOT NULL")
+			w.Add("la.user_id IS NOT NULL")
 		} else {
-			add("la.user_id = $?", userID)
+			w.Add("la.user_id = $?", userID)
 		}
 	}
 	if f.Type != "" {
-		add("la.type = $?", f.Type)
+		w.Add("la.type = $?", f.Type)
 	}
 	if f.Search != "" {
-		// Escape ILIKE wildcards so a literal '%' or '_' in the query is
-		// matched literally instead of matching everything.
-		escape := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-		pat := "%" + escape.Replace(f.Search) + "%"
-		add("(la.description ILIKE $? ESCAPE '\\' OR COALESCE(c.name, '') ILIKE $? ESCAPE '\\' OR COALESCE(l.nickname, '') ILIKE $? ESCAPE '\\')", pat, pat, pat)
+		pat := util.LikePattern(f.Search)
+		w.Add("(la.description ILIKE $? ESCAPE '\\' OR COALESCE(c.name, '') ILIKE $? ESCAPE '\\' OR COALESCE(l.nickname, '') ILIKE $? ESCAPE '\\')", pat, pat, pat)
 	}
 	if f.From != nil {
-		add("COALESCE(la.occurred_at, la.responded_at, la.scheduled_at, la.created_at) >= $?", *f.From)
+		w.Add("COALESCE(la.occurred_at, la.responded_at, la.scheduled_at, la.created_at) >= $?", *f.From)
 	}
 	if f.To != nil {
-		add("COALESCE(la.occurred_at, la.responded_at, la.scheduled_at, la.created_at) <= $?", *f.To)
+		w.Add("COALESCE(la.occurred_at, la.responded_at, la.scheduled_at, la.created_at) <= $?", *f.To)
 	}
-	apply()
-
-	whereSQL := strings.Join(where, " AND ")
+	whereSQL := w.SQL()
 
 	var total int
 	if err := s.db.QueryRow(
@@ -716,7 +658,7 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 		FROM lead_activities la
 		JOIN leads l ON l.id = la.lead_id
 		LEFT JOIN contacts c ON c.id = l.contact_id
-		WHERE `+whereSQL, args...,
+		WHERE `+whereSQL, w.Args()...,
 	).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count all activities: %w", err)
 	}
@@ -735,7 +677,7 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 	offset := (f.Page - 1) * f.PerPage
 
 	// The WHERE placeholders were renumbered 1..N; LIMIT/OFFSET follow after.
-	limitArg := len(args) + 1
+	limitArg := w.NextArg()
 	rows, err := s.db.Query(`
 		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
 			la.type, la.description, la.quick_reply_id, COALESCE(t.name, ''),
@@ -751,7 +693,7 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 		WHERE `+whereSQL+`
 		ORDER BY `+orderBy+` `+strings.ToUpper(order)+`
 		LIMIT $`+strconv.Itoa(limitArg)+` OFFSET $`+strconv.Itoa(limitArg+1),
-		append(args, f.PerPage, offset)...,
+		append(w.Args(), f.PerPage, offset)...,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list all activities: %w", err)

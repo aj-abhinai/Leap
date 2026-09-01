@@ -64,55 +64,106 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
-	var total int
-	baseWhere := "WHERE l.deleted_at IS NULL"
-	args := []any{}
-	argIdx := 1
+// leadSelect is the canonical lead row projection shared by list, board, and
+// get. The FROM/joins are appended by each caller (board and get add the
+// phone/email laterals unconditionally; list only adds them for searches).
+const leadSelect = `
+	SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
+		l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
+		l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
+		COALESCE(l.outcome, ''),
+		COALESCE(l.lost_reason, ''), l.value,
+		l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at,
+		COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
+	FROM leads l
+	LEFT JOIN lead_stages ls ON l.stage_id = ls.id
+	LEFT JOIN contacts c ON l.contact_id = c.id
+	LEFT JOIN programs p ON l.program_id = p.id
+	LEFT JOIN LATERAL (
+		SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+	) pcp ON true
+	LEFT JOIN LATERAL (
+		SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+	) pce ON true
+	LEFT JOIN LATERAL (
+		SELECT type, scheduled_at FROM lead_activities
+		WHERE lead_id = l.id AND NOT is_done AND NOT is_cancelled AND scheduled_at IS NOT NULL
+		ORDER BY scheduled_at ASC LIMIT 1
+	) nt ON true
+	LEFT JOIN LATERAL (
+		SELECT type, COALESCE(occurred_at, responded_at) AS touched_at FROM lead_activities
+		WHERE lead_id = l.id AND COALESCE(occurred_at, responded_at) IS NOT NULL
+		ORDER BY COALESCE(occurred_at, responded_at) DESC LIMIT 1
+	) lt ON true`
 
-	if f.PipelineID != "" {
-		baseWhere += fmt.Sprintf(" AND l.pipeline_id = $%d", argIdx)
-		args = append(args, f.PipelineID)
-		argIdx++
+// scanLead scans one row produced by leadSelect into a Lead.
+func scanLead(scan interface {
+	Scan(dest ...any) error
+}) (Lead, error) {
+	var l Lead
+	err := scan.Scan(
+		&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
+		&l.PipelineID, &l.StageID, &l.StageName, &l.StageOutcome, &l.Outcome, &l.LostReason, &l.Value,
+		&l.ProgramID, &l.ProgramName, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+		&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
+	)
+	if err != nil {
+		return l, err
 	}
-	if f.StageID != "" {
-		baseWhere += fmt.Sprintf(" AND l.stage_id = $%d", argIdx)
-		args = append(args, f.StageID)
-		argIdx++
+	l.DisplayName = l.displayName()
+	return l, nil
+}
+
+// leadFilters builds the shared lead WHERE clause used by list and board:
+// search (nickname, contact name, primary phone/email, program name),
+// outcome (the linked stage's outcome), and assigned_to ("none" = unassigned,
+// "" = no filter, otherwise a user id). The search clause references the
+// pcp/pce laterals, so callers must include them in the FROM when search is
+// non-empty.
+func leadFilters(search, outcome, assignedTo string) *util.WhereBuilder {
+	w := util.NewWhereBuilder("l.deleted_at IS NULL")
+	if search != "" {
+		pat := util.LikePattern(search)
+		w.Add(`(COALESCE(l.nickname, '') ILIKE $? ESCAPE '\' OR c.name ILIKE $? ESCAPE '\' OR pcp.value ILIKE $? ESCAPE '\' OR pce.value ILIKE $? ESCAPE '\' OR COALESCE(p.name, '') ILIKE $? ESCAPE '\')`,
+			pat, pat, pat, pat, pat)
 	}
-	if f.ContactID != "" {
-		baseWhere += fmt.Sprintf(" AND l.contact_id = $%d", argIdx)
-		args = append(args, f.ContactID)
-		argIdx++
-	}
-	if f.Search != "" {
-		// Escape ILIKE wildcards so a literal '%' or '_' in the query is
-		// matched literally instead of matching everything.
-		escape := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-		pat := "%" + escape.Replace(f.Search) + "%"
-		baseWhere += fmt.Sprintf(
-			" AND (COALESCE(l.nickname, '') ILIKE $%d ESCAPE '\\' OR c.name ILIKE $%d ESCAPE '\\' OR pcp.value ILIKE $%d ESCAPE '\\' OR pce.value ILIKE $%d ESCAPE '\\' OR COALESCE(p.name, '') ILIKE $%d ESCAPE '\\')",
-			argIdx, argIdx, argIdx, argIdx, argIdx,
-		)
-		args = append(args, pat)
-		argIdx++
-	}
-	switch f.Outcome {
+	switch outcome {
 	case "open", "won", "lost":
-		baseWhere += fmt.Sprintf(" AND ls.outcome = $%d", argIdx)
-		args = append(args, f.Outcome)
-		argIdx++
+		w.Add("ls.outcome = $?", outcome)
 	}
-	switch f.AssignedTo {
+	switch assignedTo {
 	case "none":
-		baseWhere += " AND l.assigned_to IS NULL"
+		w.Add("l.assigned_to IS NULL")
 	case "":
 		// no filter
 	default:
-		baseWhere += fmt.Sprintf(" AND l.assigned_to = $%d", argIdx)
-		args = append(args, f.AssignedTo)
-		argIdx++
+		w.Add("l.assigned_to = $?", assignedTo)
 	}
+	return w
+}
+
+// leadSearchFrom is the extra FROM fragment (phone/email laterals) that the
+// search clause references; it is appended only when a search is present.
+const leadSearchFrom = `
+	LEFT JOIN LATERAL (
+		SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+	) pcp ON true
+	LEFT JOIN LATERAL (
+		SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+	) pce ON true`
+
+func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
+	w := leadFilters(f.Search, f.Outcome, f.AssignedTo)
+	if f.PipelineID != "" {
+		w.Add("l.pipeline_id = $?", f.PipelineID)
+	}
+	if f.StageID != "" {
+		w.Add("l.stage_id = $?", f.StageID)
+	}
+	if f.ContactID != "" {
+		w.Add("l.contact_id = $?", f.ContactID)
+	}
+	whereSQL := w.SQL()
 
 	// The count needs the same joins the where clauses reference (contacts for
 	// search names, stage for outcome). The phone/email laterals are only
@@ -123,16 +174,10 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 		LEFT JOIN contacts c ON l.contact_id = c.id
 		LEFT JOIN programs p ON l.program_id = p.id`
 	if f.Search != "" {
-		countFrom += `
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
-		) pcp ON true
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
-		) pce ON true`
+		countFrom += leadSearchFrom
 	}
-	countQuery := "SELECT COUNT(*) " + countFrom + " " + baseWhere
-	err := s.db.QueryRow(countQuery, args...).Scan(&total)
+	var total int
+	err := s.db.QueryRow("SELECT COUNT(*) "+countFrom+" WHERE "+whereSQL, w.Args()...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count leads: %w", err)
 	}
@@ -145,42 +190,12 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 	}
 	offset := util.Offset(page, perPage)
 
-	selectQuery := fmt.Sprintf(
-		`SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
-			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
-			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
-			COALESCE(l.outcome, ''),
-			COALESCE(l.lost_reason, ''), l.value,
-			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at,
-			COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
-		FROM leads l
-		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
-		LEFT JOIN contacts c ON l.contact_id = c.id
-		LEFT JOIN programs p ON l.program_id = p.id
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
-		) pcp ON true
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
-		) pce ON true
-		LEFT JOIN LATERAL (
-			SELECT type, scheduled_at FROM lead_activities
-			WHERE lead_id = l.id AND NOT is_done AND NOT is_cancelled AND scheduled_at IS NOT NULL
-			ORDER BY scheduled_at ASC LIMIT 1
-		) nt ON true
-		LEFT JOIN LATERAL (
-			SELECT type, COALESCE(occurred_at, responded_at) AS touched_at FROM lead_activities
-			WHERE lead_id = l.id AND COALESCE(occurred_at, responded_at) IS NOT NULL
-			ORDER BY COALESCE(occurred_at, responded_at) DESC LIMIT 1
-		) lt ON true
-		%s
+	limitArg := w.NextArg()
+	selectQuery := leadSelect + countFrom + `
+		WHERE ` + whereSQL + `
 		ORDER BY l.created_at DESC
-		LIMIT $%d OFFSET $%d`,
-		baseWhere, argIdx, argIdx+1,
-	)
-	args = append(args, perPage, offset)
-
-	rows, err := s.db.Query(selectQuery, args...)
+		LIMIT $` + strconv.Itoa(limitArg) + ` OFFSET $` + strconv.Itoa(limitArg+1)
+	rows, err := s.db.Query(selectQuery, append(w.Args(), perPage, offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list leads: %w", err)
 	}
@@ -188,16 +203,10 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 
 	leads := []Lead{}
 	for rows.Next() {
-		var l Lead
-		if err := rows.Scan(
-			&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
-			&l.PipelineID, &l.StageID, &l.StageName, &l.StageOutcome, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
-			&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
-			&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
-		); err != nil {
+		l, err := scanLead(rows)
+		if err != nil {
 			return nil, 0, err
 		}
-		l.DisplayName = l.displayName()
 		leads = append(leads, l)
 	}
 	if err := rows.Err(); err != nil {
@@ -211,46 +220,17 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 // (ADR 002 "kanban operational surface"). Older leads are never deleted, just
 // not rendered; a created_at from/to filter brings them back into the window.
 func (s *Service) board(f BoardFilters) (*Board, error) {
-	args := []any{}
-	argIdx := 1
-	where := "l.deleted_at IS NULL"
+	w := leadFilters(f.Search, f.Outcome, f.AssignedTo)
 	if f.PipelineID != "" {
-		where += fmt.Sprintf(" AND l.pipeline_id = $%d", argIdx)
-		args = append(args, f.PipelineID)
-		argIdx++
-	}
-	if f.Search != "" {
-		escape := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-		pat := "%" + escape.Replace(f.Search) + "%"
-		where += fmt.Sprintf(` AND (COALESCE(l.nickname, '') ILIKE $%d ESCAPE '\' OR c.name ILIKE $%d ESCAPE '\' OR pcp.value ILIKE $%d ESCAPE '\' OR pce.value ILIKE $%d ESCAPE '\' OR COALESCE(p.name, '') ILIKE $%d ESCAPE '\')`, argIdx, argIdx, argIdx, argIdx, argIdx)
-		args = append(args, pat)
-		argIdx++
-	}
-	switch f.Outcome {
-	case "open", "won", "lost":
-		where += fmt.Sprintf(" AND ls.outcome = $%d", argIdx)
-		args = append(args, f.Outcome)
-		argIdx++
-	}
-	switch f.AssignedTo {
-	case "none":
-		where += " AND l.assigned_to IS NULL"
-	case "":
-	default:
-		where += fmt.Sprintf(" AND l.assigned_to = $%d", argIdx)
-		args = append(args, f.AssignedTo)
-		argIdx++
+		w.Add("l.pipeline_id = $?", f.PipelineID)
 	}
 	if f.From != nil {
-		where += fmt.Sprintf(" AND l.created_at >= $%d", argIdx)
-		args = append(args, *f.From)
-		argIdx++
+		w.Add("l.created_at >= $?", *f.From)
 	}
 	if f.To != nil {
-		where += fmt.Sprintf(" AND l.created_at <= $%d", argIdx)
-		args = append(args, *f.To)
-		argIdx++
+		w.Add("l.created_at <= $?", *f.To)
 	}
+	whereSQL := w.SQL()
 
 	// One pass: windowed rows per stage (ROW_NUMBER newest-first, capped at
 	// BoardWindow) joined with the true per-stage count. The stage_leads CTE
@@ -261,32 +241,19 @@ func (s *Service) board(f BoardFilters) (*Board, error) {
 		LEFT JOIN contacts c ON l.contact_id = c.id
 		LEFT JOIN programs p ON l.program_id = p.id`
 	if f.Search != "" {
-		filterFrom += `
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
-		) pcp ON true
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
-		) pce ON true`
+		filterFrom += leadSearchFrom
 	}
 	rows, err := s.db.Query(`
 		WITH stage_leads AS (
 			SELECT l.*,
 				ROW_NUMBER() OVER (PARTITION BY l.stage_id ORDER BY l.created_at DESC) AS rn
 			`+filterFrom+`
-			WHERE `+where+`
+			WHERE `+whereSQL+`
 		),
 		counts AS (
 			SELECT stage_id, COUNT(*) AS total FROM stage_leads GROUP BY stage_id
 		)
-		SELECT sl.stage_id, c.total, sl.id, COALESCE(sl.nickname, ''), COALESCE(ct.name, ''),
-			sl.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
-			sl.pipeline_id, sl.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
-			COALESCE(sl.outcome, ''),
-			COALESCE(sl.lost_reason, ''), sl.value,
-			sl.program_id, COALESCE(p.name, ''), COALESCE(sl.notes, ''), sl.assigned_to, sl.created_at, sl.updated_at,
-			COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
-		FROM stage_leads sl
+		SELECT sl.stage_id, c.total`+strings.Replace(leadSelect, "\n\tFROM leads l", "\n\tFROM stage_leads sl", 1)+`
 		JOIN counts c ON c.stage_id = sl.stage_id
 		LEFT JOIN lead_stages ls ON sl.stage_id = ls.id
 		LEFT JOIN contacts ct ON sl.contact_id = ct.id
@@ -309,7 +276,7 @@ func (s *Service) board(f BoardFilters) (*Board, error) {
 		) lt ON true
 		WHERE sl.rn <= `+strconv.Itoa(BoardWindow)+`
 		ORDER BY sl.stage_id, sl.created_at DESC`,
-		args...,
+		w.Args()...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("load board: %w", err)
@@ -321,17 +288,10 @@ func (s *Service) board(f BoardFilters) (*Board, error) {
 	for rows.Next() {
 		var stageID string
 		var total int
-		var l Lead
-		if err := rows.Scan(
-			&stageID, &total,
-			&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
-			&l.PipelineID, &l.StageID, &l.StageName, &l.StageOutcome, &l.Outcome, &l.LostReason, &l.Value,
-			&l.ProgramID, &l.ProgramName, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
-			&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
-		); err != nil {
+		l, err := scanLead(rows)
+		if err != nil {
 			return nil, fmt.Errorf("load board: scan: %w", err)
 		}
-		l.DisplayName = l.displayName()
 		if _, ok := stages[stageID]; !ok {
 			stages[stageID] = &BoardStage{StageID: stageID, Count: total}
 			order = append(order, stageID)
@@ -349,49 +309,14 @@ func (s *Service) board(f BoardFilters) (*Board, error) {
 }
 
 func (s *Service) get(id string) (*Lead, error) {
-	var l Lead
-	err := s.db.QueryRow(
-		`SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
-			l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
-			l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
-			COALESCE(l.outcome, ''),
-			COALESCE(l.lost_reason, ''), l.value,
-			l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at,
-			COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
-		FROM leads l
-		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
-		LEFT JOIN contacts c ON l.contact_id = c.id
-		LEFT JOIN programs p ON l.program_id = p.id
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
-		) pcp ON true
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
-		) pce ON true
-		LEFT JOIN LATERAL (
-			SELECT type, scheduled_at FROM lead_activities
-			WHERE lead_id = l.id AND NOT is_done AND NOT is_cancelled AND scheduled_at IS NOT NULL
-			ORDER BY scheduled_at ASC LIMIT 1
-		) nt ON true
-		LEFT JOIN LATERAL (
-			SELECT type, COALESCE(occurred_at, responded_at) AS touched_at FROM lead_activities
-			WHERE lead_id = l.id AND COALESCE(occurred_at, responded_at) IS NOT NULL
-			ORDER BY COALESCE(occurred_at, responded_at) DESC LIMIT 1
-		) lt ON true
-		WHERE l.id = $1 AND l.deleted_at IS NULL`, id,
-	).Scan(
-		&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
-		&l.PipelineID, &l.StageID, &l.StageName, &l.StageOutcome, &l.Outcome, &l.LostReason, &l.Value, &l.ProgramID, &l.ProgramName,
-		&l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
-		&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
-	)
+	l, err := scanLead(s.db.QueryRow(leadSelect+`
+		WHERE l.id = $1 AND l.deleted_at IS NULL`, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("get lead: %w", err)
 	}
-	l.DisplayName = l.displayName()
 	return &l, nil
 }
 

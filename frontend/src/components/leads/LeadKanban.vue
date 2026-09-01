@@ -212,6 +212,13 @@ function isClosedLead(lead: Lead): boolean {
   return lead.stage_outcome === 'won' || lead.stage_outcome === 'lost'
 }
 
+// selectableLeads is the subset of a column's cards that bulk selection
+// applies to — open leads only. All selection logic derives from this one
+// collection so the closed-lead rule is defined once.
+function selectableLeads(col: { leads: Lead[] }): Lead[] {
+  return col.leads.filter((l) => !isClosedLead(l))
+}
+
 function isSelected(id: string): boolean {
   return selectedIds.value.has(id)
 }
@@ -224,12 +231,12 @@ function toggleSelect(id: string) {
 }
 
 function columnAllSelected(col: Stage & { leads: Lead[]; count: number }): boolean {
-  const selectable = col.leads.filter((l) => !isClosedLead(l))
+  const selectable = selectableLeads(col)
   return selectable.length > 0 && selectable.every((l) => selectedIds.value.has(l.id!))
 }
 
 function columnSomeSelected(col: Stage & { leads: Lead[]; count: number }): boolean {
-  return col.leads.some((l) => !isClosedLead(l) && selectedIds.value.has(l.id!))
+  return selectableLeads(col).some((l) => selectedIds.value.has(l.id!))
 }
 
 function columnCheckState(col: Stage & { leads: Lead[]; count: number }): boolean | 'indeterminate' {
@@ -240,7 +247,7 @@ function columnCheckState(col: Stage & { leads: Lead[]; count: number }): boolea
 
 function toggleColumnSelect(col: Stage & { leads: Lead[]; count: number }) {
   const next = new Set(selectedIds.value)
-  const selectable = col.leads.filter((l) => !isClosedLead(l))
+  const selectable = selectableLeads(col)
   if (columnAllSelected(col)) {
     for (const l of selectable) next.delete(l.id!)
   } else {
@@ -339,7 +346,7 @@ function showField(key: string): boolean {
       >
         <div class="mb-2 flex items-center gap-1.5 px-1">
           <Checkbox
-            v-if="rbac.can('lead:write') && col.leads.some((l) => !isClosedLead(l))"
+            v-if="rbac.can('lead:write') && selectableLeads(col).length > 0"
             :model-value="columnCheckState(col)"
             class="size-4"
             :aria-label="`Select all in ${col.name}`"

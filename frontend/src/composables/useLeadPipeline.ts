@@ -64,33 +64,31 @@ export function useLeadPipeline() {
   }
 
   // moveStage moves an open lead; a closed lead dragged to an open stage
-  // spawns a new cycle server-side and returns the new row, so the response
-  // lead replaces the old one in the board.
-  async function moveStage(leadId: string, newStageId: string, previousStageId?: string) {
+  // spawns a new cycle server-side (updateLead reports spawned), so the
+  // response lead replaces the old one in the board. announce: false runs the
+  // move without success/error toasts (used by Undo, which was silent before
+  // the refactor).
+  async function moveStage(leadId: string, newStageId: string, previousStageId?: string, opts?: { announce?: boolean }) {
+    const announce = opts?.announce ?? true
     try {
-      const res = await updateLead(leadId, { stage_id: newStageId })
-      const moved = res.data
-      // If a new cycle was spawned, the old card is gone and the new one
-      // appears in the target column after the reload.
-      if (moved?.id && moved.id !== leadId) {
+      const { data } = await updateLead(leadId, { stage_id: newStageId })
+      if (!announce) return
+      if (data.spawned) {
         toast.success('New lead cycle started')
       } else {
         toast.success('Lead moved', {
           action: previousStageId
             ? {
                 label: 'Undo',
-                onClick: async () => {
-                  await updateLead(leadId, { stage_id: previousStageId })
-                  await loadLeads()
-                },
+                onClick: () => moveStage(leadId, previousStageId!, undefined, { announce: false }),
               }
             : undefined,
           duration: 5000,
         })
       }
-      loadLeads()
     } catch (e) {
-      toast.error(errorMessage(e, 'Failed to move lead'))
+      if (announce) toast.error(errorMessage(e, 'Failed to move lead'))
+    } finally {
       loadLeads()
     }
   }

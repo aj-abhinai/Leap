@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 var (
@@ -71,7 +70,7 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 				OR EXISTS (SELECT 1 FROM contact_emails ce WHERE ce.contact_id = contacts.id AND ce.value ILIKE $%d ESCAPE '\'))`,
 			argIdx, argIdx+1, argIdx+2, argIdx+3,
 		)
-		searchTerm := "%" + escapeLike(search) + "%"
+		searchTerm := util.LikePattern(search)
 		args = append(args, searchTerm, searchTerm, searchTerm, searchTerm)
 		argIdx += 4
 	}
@@ -498,15 +497,6 @@ func (s *Service) duplicateMatches(phone, email string) ([]DuplicateMatch, error
 		return nil, fmt.Errorf("find duplicate contacts: iterate: %w", err)
 	}
 	return matches, nil
-}
-
-// escapeLike escapes LIKE/ILIKE metacharacters in user input so a query such
-// as q=% cannot widen the pattern into an unfiltered scan.
-func escapeLike(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `%`, `\%`)
-	s = strings.ReplaceAll(s, `_`, `\_`)
-	return s
 }
 
 // validateCollectionLimits enforces the per-contact caps on phones, emails,
