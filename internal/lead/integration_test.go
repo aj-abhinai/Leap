@@ -419,6 +419,7 @@ func TestCreateLeadRejectsForeignStageIntegration(t *testing.T) {
 func TestDeleteActivityScopedToLeadIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
+	userID := seedTestUser(t, db, "delete-activity@example.com")
 
 	pipelineID, stageID := seedPipelineAndStage(t, db)
 	created, err := svc.create(CreateRequest{
@@ -434,12 +435,71 @@ func TestDeleteActivityScopedToLeadIntegration(t *testing.T) {
 		t.Fatalf("create activity: %v", err)
 	}
 
-	if err := svc.deleteActivity("00000000-0000-0000-0000-000000000000", activity.ID); !errors.Is(err, ErrNotFound) {
+	if err := svc.deleteActivity("00000000-0000-0000-0000-000000000000", activity.ID, userID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("delete via wrong lead = %v, want ErrNotFound", err)
 	}
 
-	if err := svc.deleteActivity(created.ID, activity.ID); err != nil {
+	if err := svc.deleteActivity(created.ID, activity.ID, userID); err != nil {
 		t.Errorf("delete via owning lead = %v, want nil", err)
+	}
+
+	// The delete writes an audit entry with the lead identity and actor.
+	var auditAction, auditResourceID, auditUserID string
+	err = db.QueryRow(
+		`SELECT action, resource_id, user_id::text FROM audit_logs
+		WHERE resource_type = 'lead' AND action = 'activity/delete'`,
+	).Scan(&auditAction, &auditResourceID, &auditUserID)
+	if err != nil {
+		t.Fatalf("query audit_logs: %v", err)
+	}
+	if auditAction != "activity/delete" || auditResourceID != created.ID {
+		t.Errorf("audit = %q/%q, want activity/delete for lead %q", auditAction, auditResourceID, created.ID)
+	}
+	if auditUserID != userID {
+		t.Errorf("audit user_id = %q, want %q", auditUserID, userID)
+	}
+}
+
+func TestDeleteLeadCancelsOpenActivitiesIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	userID := seedTestUser(t, db, "delete-lead@example.com")
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	open, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "call", Description: "open task"})
+	if err != nil {
+		t.Fatalf("create open activity: %v", err)
+	}
+	doneFlag := true
+	done, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "call", Description: "done task", IsDone: &doneFlag})
+	if err != nil {
+		t.Fatalf("create done activity: %v", err)
+	}
+
+	if err := svc.delete(created.ID, userID); err != nil {
+		t.Fatalf("delete lead: %v", err)
+	}
+
+	var openCancelled, doneCancelled bool
+	if err := db.QueryRow(`SELECT is_cancelled FROM lead_activities WHERE id = $1`, open.ID).Scan(&openCancelled); err != nil {
+		t.Fatalf("query open activity: %v", err)
+	}
+	if err := db.QueryRow(`SELECT is_cancelled FROM lead_activities WHERE id = $1`, done.ID).Scan(&doneCancelled); err != nil {
+		t.Fatalf("query done activity: %v", err)
+	}
+	if !openCancelled {
+		t.Error("open activity should be cancelled on lead delete")
+	}
+	if doneCancelled {
+		t.Error("done activity should stay uncancelled on lead delete")
 	}
 }
 

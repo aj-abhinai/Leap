@@ -318,7 +318,8 @@ func (h *Handler) CreateActivity(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteActivity(w http.ResponseWriter, r *http.Request) {
 	leadID := chi.URLParam(r, "id")
 	activityID := chi.URLParam(r, "activity_id")
-	if err := h.svc.deleteActivity(leadID, activityID); err != nil {
+	userID := ctxutil.GetUserID(r)
+	if err := h.svc.deleteActivity(leadID, activityID, userID); err != nil {
 		respondLeadMutationError(w, err)
 		return
 	}

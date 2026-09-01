@@ -651,14 +651,27 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		}
 		desc = fmt.Sprintf("Moved lead from %q to %q", oldStage, l.StageName)
 	} else if old.ContactID != "" && old.ContactID != l.ContactID {
-		desc = fmt.Sprintf("Reassigned contact from %q to %q", old.ContactID, l.ContactID)
+		oldName, newName := old.ContactName, l.ContactName
+		if oldName == "" {
+			oldName = old.ContactID
+		}
+		if newName == "" {
+			newName = l.ContactID
+		}
+		desc = fmt.Sprintf("Reassigned contact from %q to %q", oldName, newName)
 	}
 	s.logActivity(l.ID, "lead", action, desc, userID)
 	return &l, nil
 }
 
 func (s *Service) delete(id string, userID string) error {
-	res, err := s.db.Exec(`UPDATE leads SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("delete lead: %w", err)
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`UPDATE leads SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
 		return fmt.Errorf("delete lead: %w", err)
 	}
@@ -668,6 +681,18 @@ func (s *Service) delete(id string, userID string) error {
 	}
 	if affected == 0 {
 		return ErrNotFound
+	}
+	// Cancel open tasks in the same transaction, mirroring the close path, so
+	// a soft-deleted lead stops generating reminders.
+	if _, err := tx.Exec(
+		`UPDATE lead_activities SET is_cancelled = true
+		WHERE lead_id = $1 AND NOT is_done AND NOT is_cancelled`,
+		id,
+	); err != nil {
+		return fmt.Errorf("delete lead: cancel open tasks: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit lead delete: %w", err)
 	}
 	s.logActivity(id, "lead", "delete", "deleted", userID)
 	return nil

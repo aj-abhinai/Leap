@@ -408,7 +408,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	return &a, nil
 }
 
-func (s *Service) deleteActivity(leadID, activityID string) error {
+func (s *Service) deleteActivity(leadID, activityID, userID string) error {
 	res, err := s.db.Exec(`DELETE FROM lead_activities WHERE id = $1 AND lead_id = $2`, activityID, leadID)
 	if err != nil {
 		return fmt.Errorf("delete activity: %w", err)
@@ -420,6 +420,7 @@ func (s *Service) deleteActivity(leadID, activityID string) error {
 	if affected == 0 {
 		return ErrNotFound
 	}
+	s.logActivity(leadID, "lead", "activity/delete", "Deleted activity "+activityID, userID)
 	return nil
 }
 
@@ -615,8 +616,11 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 		add("la.type = $?", f.Type)
 	}
 	if f.Search != "" {
-		pat := "%" + f.Search + "%"
-		add("(la.description ILIKE $? OR COALESCE(c.name, '') ILIKE $? OR COALESCE(l.nickname, '') ILIKE $?)", pat, pat, pat)
+		// Escape ILIKE wildcards so a literal '%' or '_' in the query is
+		// matched literally instead of matching everything.
+		escape := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+		pat := "%" + escape.Replace(f.Search) + "%"
+		add("(la.description ILIKE $? ESCAPE '\\' OR COALESCE(c.name, '') ILIKE $? ESCAPE '\\' OR COALESCE(l.nickname, '') ILIKE $? ESCAPE '\\')", pat, pat, pat)
 	}
 	if f.From != nil {
 		add("COALESCE(la.occurred_at, la.responded_at, la.scheduled_at, la.created_at) >= $?", *f.From)
