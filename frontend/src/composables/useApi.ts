@@ -1,5 +1,4 @@
 import { useAuthStore } from '@/stores/auth'
-import { useRouter } from 'vue-router'
 
 interface ApiErrorPayload {
   code: string
@@ -40,7 +39,6 @@ async function request<T = any>(
   options: RequestOptions = {},
 ): Promise<ApiResponse<T>> {
   const auth = useAuthStore()
-  const router = useRouter()
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -67,6 +65,9 @@ async function request<T = any>(
       })
     } catch {
       await auth.logout()
+      // The router is imported lazily to avoid a cycle (router → auth store →
+      // api/auth → useApi); the 401 redirect only happens on session expiry.
+      const { default: router } = await import('@/router')
       router.push('/login')
       throw new Error('Session expired')
     }
@@ -89,7 +90,6 @@ async function request<T = any>(
 // response as a Blob, for file downloads (e.g. CSV export).
 export async function apiDownload(url: string): Promise<Blob> {
   const auth = useAuthStore()
-  const router = useRouter()
 
   const headers: Record<string, string> = {}
   if (auth.accessToken) {
@@ -105,6 +105,8 @@ export async function apiDownload(url: string): Promise<Blob> {
       res = await fetch(url, { headers })
     } catch {
       await auth.logout()
+      // See request(): lazy import breaks the router → auth → useApi cycle.
+      const { default: router } = await import('@/router')
       router.push('/login')
       throw new Error('Session expired')
     }

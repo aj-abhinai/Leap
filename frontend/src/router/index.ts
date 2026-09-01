@@ -90,25 +90,25 @@ const router = createRouter({
   },
 })
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach((to, _from) => {
   const auth = useAuthStore()
   if (!to.meta.public && !auth.isAuthenticated) {
-    return next({ name: 'Login' })
+    return { name: 'Login' }
   }
   if (to.meta.public && auth.isAuthenticated) {
     if (auth.mustChangePassword) {
-      return next({ name: 'ChangePassword' })
+      return { name: 'ChangePassword' }
     }
-    return next({ name: 'Dashboard' })
+    return { name: 'Dashboard' }
   }
   if (
     to.name !== 'ChangePassword' &&
     auth.isAuthenticated &&
     auth.mustChangePassword
   ) {
-    return next({ name: 'ChangePassword' })
+    return { name: 'ChangePassword' }
   }
-  next()
+  return true
 })
 
 export default router

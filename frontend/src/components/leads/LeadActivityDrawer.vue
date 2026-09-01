@@ -9,7 +9,7 @@ import { useLeadPipeline } from '@/composables/useLeadPipeline'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 import { useLeadsStore } from '@/stores/leads'
 import { getLead, type Lead } from '@/api/leads'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -87,6 +87,9 @@ function newLeadForContact() {
   <Sheet v-model:open="drawerOpen">
     <SheetContent class="p-0 sm:max-w-lg">
       <SheetHeader class="border-b px-6 py-4">
+        <SheetDescription class="sr-only">
+          Lead activities, timeline, and stage history for this lead.
+        </SheetDescription>
         <div v-if="loading" class="space-y-2">
           <Skeleton class="h-5 w-40" />
           <Skeleton class="h-4 w-64" />

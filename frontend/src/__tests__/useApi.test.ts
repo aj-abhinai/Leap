@@ -5,8 +5,11 @@ import { apiClient } from '@/composables/useApi'
 
 const pushMock = vi.fn()
 
-vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: pushMock }),
+// The apiClient redirects to /login on session expiry via a lazy import of the
+// router module; mock it so the real router (and its createRouter dependency)
+// is not loaded in the unit test.
+vi.mock('@/router', () => ({
+  default: { push: pushMock },
 }))
 
 describe('useApi', () => {
