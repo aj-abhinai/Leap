@@ -221,9 +221,13 @@ async function handleSave() {
     toast.success(hasNext ? 'Attempt logged, next task created' : showNextFields.value ? 'Attempt logged' : 'Activity logged')
     lastActivityType.value = activityType.value
     clearForm()
-    emit('saved')
+    // A close_lost save emits only closeLost: the drawer's handleCloseLost
+    // already reloads the board and closes, so emitting saved as well would
+    // double-fire both. Plain saves emit saved.
     if (wasCloseLost) {
       emit('closeLost')
+    } else {
+      emit('saved')
     }
   } catch (e) {
     error.value = errorMessage(e, 'Failed to save')

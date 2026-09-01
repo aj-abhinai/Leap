@@ -28,7 +28,6 @@ const { drawerOpen, drawerLeadId, drawerLead, closeLeadDrawer } = useLeadDrawerG
 
 const lead = shallowRef<Lead | null>(null)
 const loading = shallowRef(false)
-const activityRef = shallowRef<InstanceType<typeof LeadActivity> | null>(null)
 
 // Fetch the lead when opened without a preloaded object.
 watch(
@@ -70,6 +69,20 @@ async function handleCloseLost() {
     await leadsStore.fetchAllLeads({ pipelineId: pipelineStore.pipelines[0].id })
   }
   closeLeadDrawer()
+}
+
+// Saving a task closes the drawer and reloads the board so the kanban card's
+// next-task/last-touch preview reflects the new activity immediately.
+function handleSaved() {
+  pipeline.loadLeads()
+  closeLeadDrawer()
+}
+
+// Inline task mutations (mark done, snooze, edit, delete) keep the drawer
+// open so the user can keep working, but the board must reload so the card's
+// next-task/last-touch preview is not stale.
+function handleTasksChanged() {
+  pipeline.loadLeads()
 }
 
 // Repeat business: a closed contact may re-enquire any time (same day, next
@@ -130,10 +143,10 @@ function newLeadForContact() {
         <LeadActivityForm
           v-if="rbac.can('lead:write')"
           :lead-id="lead.id!"
-          @saved="activityRef?.fetchActivities()"
+          @saved="handleSaved"
           @close-lost="handleCloseLost"
         />
-        <LeadActivity ref="activityRef" :lead-id="lead.id!" @close-lost="handleCloseLost" />
+        <LeadActivity :lead-id="lead.id!" @close-lost="handleCloseLost" @tasks-changed="handleTasksChanged" />
         <LeadStageHistory :lead-id="lead.id!" />
       </div>
     </SheetContent>

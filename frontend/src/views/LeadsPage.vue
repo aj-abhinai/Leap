@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Input } from '@/components/ui/input'
@@ -33,6 +33,7 @@ import { debounce } from '@/utils/debounce'
 import { getContact } from '@/api/contacts'
 
 const route = useRoute()
+const router = useRouter()
 const rbac = useRBACStore()
 const users = useUsersStore()
 
@@ -107,6 +108,9 @@ async function handleContactPrefill(contactId?: string) {
       initialStageId.value = pipelineStore.pipelines[0].stages[0].id
     }
     drawerOpen.value = true
+    // Consume the query so refresh (or navigating back) does not re-open the
+    // create drawer with the same prefill.
+    router.replace({ query: {} })
   } catch {}
 }
 

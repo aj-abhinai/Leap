@@ -22,6 +22,7 @@ const props = defineProps<{ leadId: string }>()
 
 const emit = defineEmits<{
   closeLost: []
+  tasksChanged: []
 }>()
 
 const activities = shallowRef<LeadActivity[]>([])
@@ -109,6 +110,7 @@ async function deleteActivity(id: string) {
     await deleteLeadActivity(props.leadId, id)
     toast.success('Activity deleted')
     await fetchActivities()
+    emit('tasksChanged')
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to delete'))
   }
@@ -119,6 +121,7 @@ async function markDone(a: LeadActivity) {
     await updateLeadActivity(props.leadId, a.id, { is_done: true })
     toast.success('Marked as done')
     await fetchActivities()
+    emit('tasksChanged')
     // Completing a task whose quick reply closes lost moves the lead server
     // side; signal the drawer so it refreshes the kanban and closes. The tag
     // catalog may still be loading, so fetch it before the behavior lookup.
@@ -139,6 +142,7 @@ async function snooze(a: LeadActivity, minutes: number) {
     await remindersStore.snoozeReminder(props.leadId, a.id, snoozeRemindAt(minutes))
     toast.success('Reminder snoozed')
     await fetchActivities()
+    emit('tasksChanged')
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to snooze'))
   }
@@ -233,7 +237,7 @@ defineExpose({ fetchActivities })
             overdue
             :quick-replies="settings.quickReplies"
             :activity-types="settings.activityTypes"
-            @changed="fetchActivities"
+            @changed="() => { fetchActivities(); emit('tasksChanged') }"
             @mark-done="markDone(a)"
             @snooze="snooze(a, $event)"
             @delete="deleteActivity(a.id)"
@@ -252,7 +256,7 @@ defineExpose({ fetchActivities })
             :activity="a"
             :quick-replies="settings.quickReplies"
             :activity-types="settings.activityTypes"
-            @changed="fetchActivities"
+            @changed="() => { fetchActivities(); emit('tasksChanged') }"
             @mark-done="markDone(a)"
             @snooze="snooze(a, $event)"
             @delete="deleteActivity(a.id)"

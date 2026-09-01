@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 )
 
 var (
@@ -96,17 +95,19 @@ const leadSelect = `
 		ORDER BY COALESCE(occurred_at, responded_at) DESC LIMIT 1
 	) lt ON true`
 
-// scanLead scans one row produced by leadSelect into a Lead.
+// scanLead scans one row produced by leadSelect (or a prefix of extra columns
+// followed by the 23 lead columns, as the board query does) into a Lead.
 func scanLead(scan interface {
 	Scan(dest ...any) error
-}) (Lead, error) {
+}, prefix ...any) (Lead, error) {
 	var l Lead
-	err := scan.Scan(
+	dests := append(prefix,
 		&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
 		&l.PipelineID, &l.StageID, &l.StageName, &l.StageOutcome, &l.Outcome, &l.LostReason, &l.Value,
 		&l.ProgramID, &l.ProgramName, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
 		&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
 	)
+	err := scan.Scan(dests...)
 	if err != nil {
 		return l, err
 	}
@@ -142,6 +143,14 @@ func leadFilters(search, outcome, assignedTo string) *util.WhereBuilder {
 	return w
 }
 
+// leadBaseFrom is the plain joins shared by every lead query: the stage
+// (for outcome/name), the contact (for display name) and the program. It is
+// the FROM of the outer board query (over stage_leads) as well as the CTE.
+const leadBaseFrom = `
+	LEFT JOIN lead_stages ls ON l.stage_id = ls.id
+	LEFT JOIN contacts c ON l.contact_id = c.id
+	LEFT JOIN programs p ON l.program_id = p.id`
+
 // leadSearchFrom is the extra FROM fragment (phone/email laterals) that the
 // search clause references; it is appended only when a search is present.
 const leadSearchFrom = `
@@ -151,6 +160,18 @@ const leadSearchFrom = `
 	LEFT JOIN LATERAL (
 		SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
 	) pce ON true`
+
+// leadSelectOuter is the board query's column list over the stage_leads CTE
+// (aliased sl, contact aliased ct); it joins the leading stage_id/count
+// columns, and the outer FROM/joins follow it.
+const leadSelectOuter = `
+	sl.id, COALESCE(sl.nickname, ''), COALESCE(ct.name, ''),
+		sl.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
+		sl.pipeline_id, sl.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
+		COALESCE(sl.outcome, ''),
+		COALESCE(sl.lost_reason, ''), sl.value,
+		sl.program_id, COALESCE(p.name, ''), COALESCE(sl.notes, ''), sl.assigned_to, sl.created_at, sl.updated_at,
+		COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at`
 
 func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 	w := leadFilters(f.Search, f.Outcome, f.AssignedTo)
@@ -239,10 +260,7 @@ func (s *Service) board(f BoardFilters) (*Board, error) {
 	// BoardWindow) joined with the true per-stage count. The stage_leads CTE
 	// carries the filter joins (contacts, stage, phones/emails, program) so the
 	// WHERE can reference them; the outer query adds the display joins.
-	filterFrom := `FROM leads l
-		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
-		LEFT JOIN contacts c ON l.contact_id = c.id
-		LEFT JOIN programs p ON l.program_id = p.id`
+	filterFrom := `FROM leads l` + leadBaseFrom
 	if f.Search != "" {
 		filterFrom += leadSearchFrom
 	}
@@ -256,7 +274,8 @@ func (s *Service) board(f BoardFilters) (*Board, error) {
 		counts AS (
 			SELECT stage_id, COUNT(*) AS total FROM stage_leads GROUP BY stage_id
 		)
-		SELECT sl.stage_id, c.total`+strings.Replace(leadSelect, "\n\tFROM leads l", "\n\tFROM stage_leads sl", 1)+`
+		SELECT sl.stage_id, c.total,`+leadSelectOuter+`
+		FROM stage_leads sl
 		JOIN counts c ON c.stage_id = sl.stage_id
 		LEFT JOIN lead_stages ls ON sl.stage_id = ls.id
 		LEFT JOIN contacts ct ON sl.contact_id = ct.id
@@ -291,7 +310,7 @@ func (s *Service) board(f BoardFilters) (*Board, error) {
 	for rows.Next() {
 		var stageID string
 		var total int
-		l, err := scanLead(rows)
+		l, err := scanLead(rows, &stageID, &total)
 		if err != nil {
 			return nil, fmt.Errorf("load board: scan: %w", err)
 		}

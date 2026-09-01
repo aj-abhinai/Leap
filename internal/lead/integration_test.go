@@ -1175,6 +1175,69 @@ func TestPatchLeadClosedToClosedReturns422Integration(t *testing.T) {
 	}
 }
 
+// TestBoardReturnsStageCountsIntegration seeds two stages, spreads leads
+// across them, then asserts the kanban board groups by stage with the true
+// per-stage count — this covers the board query, which had no prior test and
+// regressed to a duplicate-FROM syntax error.
+func TestBoardReturnsStageCountsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var pipelineID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Board Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	var stageA, stageB string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'New', 0) RETURNING id`, pipelineID).Scan(&stageA); err != nil {
+		t.Fatalf("seed stage A: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'Contacted', 1) RETURNING id`, pipelineID).Scan(&stageB); err != nil {
+		t.Fatalf("seed stage B: %v", err)
+	}
+
+	// Two leads in stage A, one in stage B.
+	for _, st := range []struct {
+		stage string
+		name  string
+		phone string
+	}{{stageA, "Alice", "1111111111"}, {stageA, "Bob", "2222222222"}, {stageB, "Carol", "3333333333"}} {
+		if _, err := svc.create(CreateRequest{
+			NewContact: &NewContact{Name: st.name, Phone: st.phone},
+			PipelineID: pipelineID,
+			StageID:    st.stage,
+		}, ""); err != nil {
+			t.Fatalf("create lead %s: %v", st.name, err)
+		}
+	}
+
+	board, err := svc.board(BoardFilters{PipelineID: pipelineID})
+	if err != nil {
+		t.Fatalf("board: %v", err)
+	}
+
+	if len(board.Stages) != 2 {
+		t.Fatalf("stages = %d, want 2", len(board.Stages))
+	}
+	counts := map[string]int{}
+	leadsByStage := map[string][]Lead{}
+	for _, s := range board.Stages {
+		counts[s.StageID] = s.Count
+		leadsByStage[s.StageID] = s.Leads
+	}
+	if counts[stageA] != 2 {
+		t.Errorf("count[stage A] = %d, want 2", counts[stageA])
+	}
+	if counts[stageB] != 1 {
+		t.Errorf("count[stage B] = %d, want 1", counts[stageB])
+	}
+	if len(leadsByStage[stageA]) != 2 {
+		t.Errorf("leads in stage A = %d, want 2", len(leadsByStage[stageA]))
+	}
+	if len(leadsByStage[stageB]) != 1 {
+		t.Errorf("leads in stage B = %d, want 1", len(leadsByStage[stageB]))
+	}
+}
+
 func seedProgram(t *testing.T, db *sql.DB, name string, price float64) string {
 	t.Helper()
 	var id string

@@ -378,6 +378,7 @@ function showField(key: string): boolean {
 
         <div v-if="!isCollapsed(col.id)">
           <draggable
+            :key="`${col.id}-${col.leads.map((l) => l.id).join(',')}-${col.leads.length}`"
             :list="col.leads"
             :group="{ name: 'leads', pull: true, put: true }"
             item-key="id"
