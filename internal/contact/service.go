@@ -394,7 +394,17 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 	// create whose primary phone or email collides with a live contact is
 	// rejected with a 409 unless the caller confirms the duplicate. The match
 	// lookup runs before the insert so the new contact itself is not flagged.
-	matches, err := s.duplicateMatches(req.Phone, req.Email)
+	// The effective primary is the first marked-primary list value, else the
+	// first value, so list-only creates (no scalar) are guarded too.
+	phone := req.Phone
+	if phone == "" && len(req.Phones) > 0 {
+		phone = primaryValue(req.Phones)
+	}
+	email := req.Email
+	if email == "" && len(req.Emails) > 0 {
+		email = primaryValue(req.Emails)
+	}
+	matches, err := s.duplicateMatches(phone, email)
 	if err != nil {
 		return nil, err
 	}
@@ -409,6 +419,30 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 		created.Warnings = append(created.Warnings, "phone or email matches an existing contact")
 	}
 	return created, nil
+}
+
+// valueEntry is satisfied by PhoneValue and EmailValue so primaryValue can
+// serve both phone and email lists.
+type valueEntry interface {
+	Primary() bool
+	Val() string
+}
+
+func (p PhoneValue) Primary() bool  { return p.IsPrimary }
+func (p PhoneValue) Val() string    { return p.Value }
+func (e EmailValue) Primary() bool  { return e.IsPrimary }
+func (e EmailValue) Val() string    { return e.Value }
+
+// primaryValue returns the first marked-primary entry's value, else the first
+// entry's value, mirroring the insert's primary promotion so the duplicate
+// check looks at the value that will actually be primary.
+func primaryValue[T valueEntry](entries []T) string {
+	for _, e := range entries {
+		if e.Primary() {
+			return e.Val()
+		}
+	}
+	return entries[0].Val()
 }
 
 // duplicateMatches returns the live contacts whose primary phone or email

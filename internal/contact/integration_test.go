@@ -752,6 +752,42 @@ func TestCreateContactRejectsDuplicateUntilConfirmedIntegration(t *testing.T) {
 	}
 }
 
+func TestCreateContactRejectsListOnlyDuplicateIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "Existing", Phone: "98765 43210"}); err != nil {
+		t.Fatalf("create existing: %v", err)
+	}
+
+	// A list-only create (no scalar phone) must still hit the duplicate guard
+	// via the list's primary value.
+	_, err := svc.create(CreateRequest{
+		Name:  "Alice",
+		Phones: []PhoneValue{{Value: "9876543210", IsPrimary: true}},
+	})
+	var dupErr *DuplicateError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("expected DuplicateError for list-only create, got %v", err)
+	}
+	if len(dupErr.Matches) != 1 || dupErr.Matches[0].Name != "Existing" {
+		t.Errorf("matches = %+v, want the existing contact", dupErr.Matches)
+	}
+
+	// The same list-only create with confirmation succeeds.
+	created, err := svc.create(CreateRequest{
+		Name:              "Alice",
+		Phones:            []PhoneValue{{Value: "9876543210", IsPrimary: true}},
+		ConfirmDuplicates: true,
+	})
+	if err != nil {
+		t.Fatalf("list-only create with confirm_duplicates: %v", err)
+	}
+	if len(created.Warnings) != 1 {
+		t.Errorf("warnings = %+v, want duplicate warning", created.Warnings)
+	}
+}
+
 func TestBulkCreateRejectsOver500RowsHandlerIntegration(t *testing.T) {
 	db := testdb.New(t)
 	h := NewHandler(NewService(db), stubPerms{can: true})
