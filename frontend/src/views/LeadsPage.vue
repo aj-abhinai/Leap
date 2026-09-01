@@ -174,9 +174,9 @@ watch(
         </Select>
 
         <div class="flex items-center gap-1.5">
-          <Input v-model="fromDate" type="date" class="h-9 w-40" aria-label="From date" title="From date" />
+          <Input id="from-date" v-model="fromDate" type="date" class="h-9 w-40" aria-label="From date" title="From date" />
           <span class="text-muted-foreground">–</span>
-          <Input v-model="toDate" type="date" class="h-9 w-40" aria-label="To date" title="To date" />
+          <Input id="to-date" v-model="toDate" type="date" class="h-9 w-40" aria-label="To date" title="To date" />
         </div>
 
         <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">

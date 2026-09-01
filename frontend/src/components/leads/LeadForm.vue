@@ -400,7 +400,7 @@ function createNewPersonInstead() {
     <div class="space-y-2">
       <Label for="lprogram">Program</Label>
       <Select v-model="formProgramId">
-        <SelectTrigger>
+        <SelectTrigger id="lprogram">
           <SelectValue placeholder="Select program" />
         </SelectTrigger>
         <SelectContent>

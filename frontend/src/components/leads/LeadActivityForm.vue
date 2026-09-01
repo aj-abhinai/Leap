@@ -365,12 +365,12 @@ async function handleSave() {
           </div>
           <div class="grid grid-cols-2 gap-2">
             <div class="space-y-1.5">
-              <Label class="text-xs">Until date (optional)</Label>
-              <Input v-model="endDate" type="date" />
+              <Label class="text-xs" for="until-date">Until date (optional)</Label>
+              <Input id="until-date" v-model="endDate" type="date" />
             </div>
             <div class="space-y-1.5">
-              <Label class="text-xs">Until time</Label>
-              <Input v-model="endTime" type="time" />
+              <Label class="text-xs" for="until-time">Until time</Label>
+              <Input id="until-time" v-model="endTime" type="time" />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-2">
