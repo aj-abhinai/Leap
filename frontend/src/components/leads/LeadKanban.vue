@@ -47,7 +47,7 @@ const rbac = useRBACStore()
 const users = useUsersStore()
 
 const props = defineProps<{
-  columns: (Stage & { leads: Lead[] })[]
+  columns: (Stage & { leads: Lead[]; count: number })[]
   stages: Stage[]
   pipelineId: string
 }>()
@@ -205,6 +205,13 @@ function applyCardFields() {
 // ---- bulk move ----
 const selectedIds = shallowRef<Set<string>>(new Set())
 
+// A closed lead (one in a closing stage) is terminal and cannot be bulk-moved
+// (ADR 002): bulk move is for open work; dragging a closed card spawns a new
+// cycle instead.
+function isClosedLead(lead: Lead): boolean {
+  return lead.stage_outcome === 'won' || lead.stage_outcome === 'lost'
+}
+
 function isSelected(id: string): boolean {
   return selectedIds.value.has(id)
 }
@@ -216,26 +223,28 @@ function toggleSelect(id: string) {
   selectedIds.value = next
 }
 
-function columnAllSelected(col: Stage & { leads: Lead[] }): boolean {
-  return col.leads.length > 0 && col.leads.every((l) => selectedIds.value.has(l.id!))
+function columnAllSelected(col: Stage & { leads: Lead[]; count: number }): boolean {
+  const selectable = col.leads.filter((l) => !isClosedLead(l))
+  return selectable.length > 0 && selectable.every((l) => selectedIds.value.has(l.id!))
 }
 
-function columnSomeSelected(col: Stage & { leads: Lead[] }): boolean {
-  return col.leads.some((l) => selectedIds.value.has(l.id!))
+function columnSomeSelected(col: Stage & { leads: Lead[]; count: number }): boolean {
+  return col.leads.some((l) => !isClosedLead(l) && selectedIds.value.has(l.id!))
 }
 
-function columnCheckState(col: Stage & { leads: Lead[] }): boolean | 'indeterminate' {
+function columnCheckState(col: Stage & { leads: Lead[]; count: number }): boolean | 'indeterminate' {
   if (columnAllSelected(col)) return true
   if (columnSomeSelected(col)) return 'indeterminate'
   return false
 }
 
-function toggleColumnSelect(col: Stage & { leads: Lead[] }) {
+function toggleColumnSelect(col: Stage & { leads: Lead[]; count: number }) {
   const next = new Set(selectedIds.value)
+  const selectable = col.leads.filter((l) => !isClosedLead(l))
   if (columnAllSelected(col)) {
-    for (const l of col.leads) next.delete(l.id!)
+    for (const l of selectable) next.delete(l.id!)
   } else {
-    for (const l of col.leads) next.add(l.id!)
+    for (const l of selectable) next.add(l.id!)
   }
   selectedIds.value = next
 }
@@ -330,7 +339,7 @@ function showField(key: string): boolean {
       >
         <div class="mb-2 flex items-center gap-1.5 px-1">
           <Checkbox
-            v-if="rbac.can('lead:write')"
+            v-if="rbac.can('lead:write') && col.leads.some((l) => !isClosedLead(l))"
             :model-value="columnCheckState(col)"
             class="size-4"
             :aria-label="`Select all in ${col.name}`"
@@ -346,7 +355,9 @@ function showField(key: string): boolean {
             <ChevronDown v-if="isCollapsed(col.id)" class="size-3.5 shrink-0 text-muted-foreground" />
             <ChevronUp v-else class="size-3.5 shrink-0 text-muted-foreground" />
             <span class="truncate text-sm font-medium">{{ col.name }}</span>
-            <Badge variant="secondary" class="text-xs px-1.5">{{ col.leads.length }}</Badge>
+            <Badge variant="secondary" class="text-xs px-1.5" :title="col.count > col.leads.length ? `${col.count} total in this stage` : undefined">
+              {{ col.count }}
+            </Badge>
           </button>
           <Button
             v-if="rbac.can('lead:write')"
@@ -380,7 +391,7 @@ function showField(key: string): boolean {
               >
                 <div class="absolute left-2 top-2 z-10">
                   <Checkbox
-                    v-if="rbac.can('lead:write')"
+                    v-if="rbac.can('lead:write') && !isClosedLead(lead)"
                     :model-value="isSelected(lead.id!)"
                     class="size-4 opacity-0 transition-opacity group-hover:opacity-100"
                     :class="{ 'opacity-100': isSelected(lead.id!) }"

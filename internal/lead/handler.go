@@ -88,6 +88,73 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+// Board returns the kanban payload: per-stage newest-window leads plus true
+// counts, with an optional created_at from/to filter. The pipeline is
+// required; without one there is no meaningful board.
+func (h *Handler) Board(w http.ResponseWriter, r *http.Request) {
+	pipelineID := r.URL.Query().Get("pipeline_id")
+	if pipelineID == "" {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "pipeline_id is required"},
+			nil,
+		)
+		return
+	}
+	if !util.IsUUID(pipelineID) {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "pipeline_id must be a valid id"},
+			nil,
+		)
+		return
+	}
+	f := BoardFilters{
+		PipelineID: pipelineID,
+		Search:     r.URL.Query().Get("q"),
+		Outcome:    r.URL.Query().Get("outcome"),
+		AssignedTo: r.URL.Query().Get("assigned_to"),
+	}
+	if v := r.URL.Query().Get("from"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: "from must be an RFC3339 timestamp"},
+				nil,
+			)
+			return
+		}
+		f.From = &t
+	}
+	if v := r.URL.Query().Get("to"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: "to must be an RFC3339 timestamp"},
+				nil,
+			)
+			return
+		}
+		f.To = &t
+	}
+	board, err := h.svc.board(f)
+	if err != nil {
+		respond.ServerError(w, err)
+		return
+	}
+	respond.JSON(w, http.StatusOK, board, nil, nil)
+}
+
 func respondLeadMutationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive),

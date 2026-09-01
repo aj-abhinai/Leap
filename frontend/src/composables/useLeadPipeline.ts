@@ -1,25 +1,27 @@
 import { computed, shallowRef } from 'vue'
 import { usePipelineStore } from '@/stores/pipeline'
-import { useLeadsStore } from '@/stores/leads'
-import { updateLead } from '@/api/leads'
+import { fetchBoard, updateLead, type Lead, type BoardStage } from '@/api/leads'
 import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
 
 // Module-level singleton state so LeadsPage and the app-level lead drawer
-// share the same pipeline selection and lead store: a stage move made from
-// the drawer refreshes the kanban without extra wiring.
+// share the same pipeline selection and board: a stage move made from the
+// drawer refreshes the kanban without extra wiring.
 const selectedPipelineId = shallowRef('')
 const search = shallowRef('')
 const outcomeFilter = shallowRef<'open' | 'won' | 'lost' | ''>('')
 // '__all__' = no assignee filter; 'none' = unassigned; otherwise a user id.
 const assigneeFilter = shallowRef('__all__')
-// Remembers the last query that hit the fetch-all cap so the warning toast
-// appears once per distinct query, not on every loadLeads call.
-let lastCappedQuery = ''
+// Date range (RFC3339 or '') narrows the board window by created_at.
+const fromDate = shallowRef('')
+const toDate = shallowRef('')
 
 export function useLeadPipeline() {
   const pipelineStore = usePipelineStore()
-  const leadsStore = useLeadsStore()
+
+  // Stage id → (capped window leads + true count) from the board endpoint.
+  const boardStages = shallowRef<BoardStage[]>([])
+  const loading = shallowRef(false)
 
   const selectedPipeline = computed(() =>
     pipelineStore.pipelines.find((p) => p.id === selectedPipelineId.value)
@@ -27,48 +29,65 @@ export function useLeadPipeline() {
 
   const kanbanColumns = computed(() => {
     if (!selectedPipeline.value?.stages) return []
-    return selectedPipeline.value.stages.map((stage) => ({
-      ...stage,
-      leads: leadsStore.leads.filter((l) => l.stage_id === stage.id),
-    }))
+    const byStage = new Map(boardStages.value.map((s) => [s.stage_id, s]))
+    return selectedPipeline.value.stages.map((stage) => {
+      const col = byStage.get(stage.id)
+      return {
+        ...stage,
+        count: col?.count ?? 0,
+        leads: col?.leads ?? [],
+      }
+    })
   })
 
   async function loadLeads() {
     if (!selectedPipelineId.value) return
+    loading.value = true
     try {
-      await leadsStore.fetchAllLeads({
+      // The date inputs are YYYY-MM-DD; the board filter expects RFC3339.
+      const from = fromDate.value ? `${fromDate.value}T00:00:00Z` : undefined
+      const to = toDate.value ? `${toDate.value}T23:59:59Z` : undefined
+      const res = await fetchBoard({
         pipelineId: selectedPipelineId.value,
         q: search.value.trim() || undefined,
         outcome: outcomeFilter.value || undefined,
         assignedTo: assigneeFilter.value === '__all__' ? undefined : assigneeFilter.value || undefined,
+        from,
+        to,
       })
-      // Warn once per distinct capped query so repeated calls (debounced
-      // keystrokes, filter toggles) don't spam the toast.
-      const sig = `${selectedPipelineId.value}|${search.value}|${outcomeFilter.value}|${assigneeFilter.value}`
-      if (leadsStore.capped && lastCappedQuery !== sig) {
-        lastCappedQuery = sig
-        toast.warning('Showing first 2000 leads — narrow the search or filters')
-      }
+      boardStages.value = res.data?.stages ?? []
     } catch {
       toast.error('Failed to load leads')
+    } finally {
+      loading.value = false
     }
   }
 
+  // moveStage moves an open lead; a closed lead dragged to an open stage
+  // spawns a new cycle server-side and returns the new row, so the response
+  // lead replaces the old one in the board.
   async function moveStage(leadId: string, newStageId: string, previousStageId?: string) {
     try {
-      await updateLead(leadId, { stage_id: newStageId })
-      toast.success('Lead moved', {
-        action: previousStageId
-          ? {
-              label: 'Undo',
-              onClick: async () => {
-                await updateLead(leadId, { stage_id: previousStageId })
-                await loadLeads()
-              },
-            }
-          : undefined,
-        duration: 5000,
-      })
+      const res = await updateLead(leadId, { stage_id: newStageId })
+      const moved = res.data
+      // If a new cycle was spawned, the old card is gone and the new one
+      // appears in the target column after the reload.
+      if (moved?.id && moved.id !== leadId) {
+        toast.success('New lead cycle started')
+      } else {
+        toast.success('Lead moved', {
+          action: previousStageId
+            ? {
+                label: 'Undo',
+                onClick: async () => {
+                  await updateLead(leadId, { stage_id: previousStageId })
+                  await loadLeads()
+                },
+              }
+            : undefined,
+          duration: 5000,
+        })
+      }
       loadLeads()
     } catch (e) {
       toast.error(errorMessage(e, 'Failed to move lead'))
@@ -100,13 +119,15 @@ export function useLeadPipeline() {
 
   return {
     pipelineStore,
-    leadsStore,
     selectedPipelineId,
     selectedPipeline,
     kanbanColumns,
+    loading,
     search,
     outcomeFilter,
     assigneeFilter,
+    fromDate,
+    toDate,
     loadLeads,
     moveStage,
     bulkMoveStage,

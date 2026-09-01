@@ -192,6 +192,7 @@ func main() {
 			)
 
 			r.Get("/api/leads", middleware.RequirePermission(rbacSvc, "lead:read", leadH.List))
+			r.Get("/api/leads/board", middleware.RequirePermission(rbacSvc, "lead:read", leadH.Board))
 			r.Post("/api/leads", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Create))
 			r.Get("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:read", leadH.Get))
 			r.Patch("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Update))

@@ -91,6 +91,37 @@ type ListFilters struct {
 	AssignedTo string
 }
 
+// BoardFilters drives the kanban board (GET /api/leads/board): each stage
+// returns only its newest BoardWindow leads, plus the true per-stage count.
+// Search/Outcome/AssignedTo mirror the list filters so the board toolbar can
+// narrow columns; From/To bound the window by created_at.
+type BoardFilters struct {
+	PipelineID string
+	Search     string
+	Outcome    string
+	AssignedTo string
+	From       *time.Time
+	To         *time.Time
+}
+
+// BoardStage is one kanban column: the capped lead window plus the true total
+// count of matching leads in that stage.
+type BoardStage struct {
+	StageID string `json:"stage_id"`
+	Count   int    `json:"count"`
+	Leads   []Lead `json:"leads"`
+}
+
+// Board is the kanban payload: one entry per stage, each with its newest
+// BoardWindow leads and the true count.
+type Board struct {
+	Stages []BoardStage `json:"stages"`
+}
+
+// BoardWindow caps how many leads render per kanban column (ADR 002 "kanban
+// operational surface"): older cards are never deleted, just not rendered.
+const BoardWindow = 200
+
 // Activity is a task on a lead with a lifecycle: scheduled, done, cancelled,
 // or responded via a quick reply.
 type Activity struct {

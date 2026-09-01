@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 )
 
@@ -45,6 +46,10 @@ var (
 	// not remain assignable and malformed values must not surface as server
 	// errors.
 	ErrInvalidAssignee = errors.New("assigned_to must reference an active user")
+	// ErrClosedToClosedMove marks a stage move from one closing stage to
+	// another (e.g. lost → won). A closed lead is terminal; a mislabel is fixed
+	// by starting a new cycle, not by re-closing the old row (ADR 002).
+	ErrClosedToClosedMove = errors.New("a closed lead cannot move to another closing stage")
 )
 
 // Service provides database-backed lead operations: list/get/create/update/
@@ -201,6 +206,148 @@ func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 	return leads, total, nil
 }
 
+// board returns the kanban payload: for every stage in the pipeline, the true
+// count of live leads in that stage plus only the newest BoardWindow leads
+// (ADR 002 "kanban operational surface"). Older leads are never deleted, just
+// not rendered; a created_at from/to filter brings them back into the window.
+func (s *Service) board(f BoardFilters) (*Board, error) {
+	args := []any{}
+	argIdx := 1
+	where := "l.deleted_at IS NULL"
+	if f.PipelineID != "" {
+		where += fmt.Sprintf(" AND l.pipeline_id = $%d", argIdx)
+		args = append(args, f.PipelineID)
+		argIdx++
+	}
+	if f.Search != "" {
+		escape := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+		pat := "%" + escape.Replace(f.Search) + "%"
+		where += fmt.Sprintf(` AND (COALESCE(l.nickname, '') ILIKE $%d ESCAPE '\' OR c.name ILIKE $%d ESCAPE '\' OR pcp.value ILIKE $%d ESCAPE '\' OR pce.value ILIKE $%d ESCAPE '\' OR COALESCE(p.name, '') ILIKE $%d ESCAPE '\')`, argIdx, argIdx, argIdx, argIdx, argIdx)
+		args = append(args, pat)
+		argIdx++
+	}
+	switch f.Outcome {
+	case "open", "won", "lost":
+		where += fmt.Sprintf(" AND ls.outcome = $%d", argIdx)
+		args = append(args, f.Outcome)
+		argIdx++
+	}
+	switch f.AssignedTo {
+	case "none":
+		where += " AND l.assigned_to IS NULL"
+	case "":
+	default:
+		where += fmt.Sprintf(" AND l.assigned_to = $%d", argIdx)
+		args = append(args, f.AssignedTo)
+		argIdx++
+	}
+	if f.From != nil {
+		where += fmt.Sprintf(" AND l.created_at >= $%d", argIdx)
+		args = append(args, *f.From)
+		argIdx++
+	}
+	if f.To != nil {
+		where += fmt.Sprintf(" AND l.created_at <= $%d", argIdx)
+		args = append(args, *f.To)
+		argIdx++
+	}
+
+	// One pass: windowed rows per stage (ROW_NUMBER newest-first, capped at
+	// BoardWindow) joined with the true per-stage count. The stage_leads CTE
+	// carries the filter joins (contacts, stage, phones/emails, program) so the
+	// WHERE can reference them; the outer query adds the display joins.
+	filterFrom := `FROM leads l
+		LEFT JOIN lead_stages ls ON l.stage_id = ls.id
+		LEFT JOIN contacts c ON l.contact_id = c.id
+		LEFT JOIN programs p ON l.program_id = p.id`
+	if f.Search != "" {
+		filterFrom += `
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_phones WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+		) pcp ON true
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
+		) pce ON true`
+	}
+	rows, err := s.db.Query(`
+		WITH stage_leads AS (
+			SELECT l.*,
+				ROW_NUMBER() OVER (PARTITION BY l.stage_id ORDER BY l.created_at DESC) AS rn
+			`+filterFrom+`
+			WHERE `+where+`
+		),
+		counts AS (
+			SELECT stage_id, COUNT(*) AS total FROM stage_leads GROUP BY stage_id
+		)
+		SELECT sl.stage_id, c.total, sl.id, COALESCE(sl.nickname, ''), COALESCE(ct.name, ''),
+			sl.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
+			sl.pipeline_id, sl.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
+			COALESCE(sl.outcome, ''),
+			COALESCE(sl.lost_reason, ''), sl.value,
+			sl.program_id, COALESCE(p.name, ''), COALESCE(sl.notes, ''), sl.assigned_to, sl.created_at, sl.updated_at,
+			COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
+		FROM stage_leads sl
+		JOIN counts c ON c.stage_id = sl.stage_id
+		LEFT JOIN lead_stages ls ON sl.stage_id = ls.id
+		LEFT JOIN contacts ct ON sl.contact_id = ct.id
+		LEFT JOIN programs p ON sl.program_id = p.id
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_phones WHERE contact_id = sl.contact_id AND is_primary LIMIT 1
+		) pcp ON true
+		LEFT JOIN LATERAL (
+			SELECT value FROM contact_emails WHERE contact_id = sl.contact_id AND is_primary LIMIT 1
+		) pce ON true
+		LEFT JOIN LATERAL (
+			SELECT type, scheduled_at FROM lead_activities
+			WHERE lead_id = sl.id AND NOT is_done AND NOT is_cancelled AND scheduled_at IS NOT NULL
+			ORDER BY scheduled_at ASC LIMIT 1
+		) nt ON true
+		LEFT JOIN LATERAL (
+			SELECT type, COALESCE(occurred_at, responded_at) AS touched_at FROM lead_activities
+			WHERE lead_id = sl.id AND COALESCE(occurred_at, responded_at) IS NOT NULL
+			ORDER BY COALESCE(occurred_at, responded_at) DESC LIMIT 1
+		) lt ON true
+		WHERE sl.rn <= `+strconv.Itoa(BoardWindow)+`
+		ORDER BY sl.stage_id, sl.created_at DESC`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load board: %w", err)
+	}
+	defer rows.Close()
+
+	stages := map[string]*BoardStage{}
+	order := []string{}
+	for rows.Next() {
+		var stageID string
+		var total int
+		var l Lead
+		if err := rows.Scan(
+			&stageID, &total,
+			&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
+			&l.PipelineID, &l.StageID, &l.StageName, &l.StageOutcome, &l.Outcome, &l.LostReason, &l.Value,
+			&l.ProgramID, &l.ProgramName, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+			&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
+		); err != nil {
+			return nil, fmt.Errorf("load board: scan: %w", err)
+		}
+		l.DisplayName = l.displayName()
+		if _, ok := stages[stageID]; !ok {
+			stages[stageID] = &BoardStage{StageID: stageID, Count: total}
+			order = append(order, stageID)
+		}
+		stages[stageID].Leads = append(stages[stageID].Leads, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load board: iterate: %w", err)
+	}
+	board := &Board{Stages: make([]BoardStage, 0, len(order))}
+	for _, id := range order {
+		board.Stages = append(board.Stages, *stages[id])
+	}
+	return board, nil
+}
+
 func (s *Service) get(id string) (*Lead, error) {
 	var l Lead
 	err := s.db.QueryRow(
@@ -277,6 +424,62 @@ func (s *Service) validateAssignedToTx(tx *sql.Tx, assignedTo *string) error {
 		return ErrInvalidAssignee
 	}
 	return nil
+}
+
+// spawnCycle starts a new lead row for a closed lead's contact when the user
+// drags the closed card back to an open stage (ADR 002 "one row, one cycle").
+// The new row carries the contact (always), a fresh program price snapshot,
+// and the nickname; the assignee starts unassigned and notes/tasks do not
+// carry. The old row stays terminal and untouched.
+func (s *Service) spawnCycle(old *Lead, targetStageID, userID string) (*Lead, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("spawn cycle: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Validate the target stage belongs to the old lead's pipeline.
+	if err := s.validateStageForPipelineTx(tx, old.PipelineID, targetStageID); err != nil {
+		return nil, err
+	}
+
+	// A fresh price snapshot from the program catalog (may be nil if the lead
+	// has no program).
+	var price *float64
+	if old.ProgramID != nil && *old.ProgramID != "" {
+		p, err := s.activeProgramPriceTx(tx, *old.ProgramID)
+		if err != nil {
+			return nil, err
+		}
+		price = &p
+	}
+
+	var l Lead
+	err = tx.QueryRow(
+		`INSERT INTO leads (nickname, contact_id, pipeline_id, stage_id, program_id, value)
+		VALUES (NULLIF($1, ''), $2, $3, $4, NULLIF($5, '')::uuid, $6)
+		RETURNING id, COALESCE(nickname, ''), contact_id, pipeline_id, stage_id,
+			(SELECT COALESCE(outcome, 'open') FROM lead_stages WHERE id = leads.stage_id),
+			COALESCE(outcome, ''), COALESCE(lost_reason, ''),
+			program_id, value, COALESCE(notes, ''), assigned_to, created_at, updated_at`,
+		old.Nickname, old.ContactID, old.PipelineID, targetStageID, old.ProgramID, price,
+	).Scan(
+		&l.ID, &l.Nickname, &l.ContactID, &l.PipelineID, &l.StageID, &l.StageOutcome, &l.Outcome, &l.LostReason,
+		&l.ProgramID, &l.Value, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("spawn cycle: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("spawn cycle: commit: %w", err)
+	}
+
+	if err := s.populateNames(&l); err != nil {
+		return nil, err
+	}
+	l.DisplayName = l.displayName()
+	s.logActivity(l.ID, "lead", "create", "Started new cycle from closed lead "+old.ID, userID)
+	return &l, nil
 }
 
 func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
@@ -482,6 +685,33 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		return nil, fmt.Errorf("update lead: load current: %w", err)
 	}
 
+	// ADR 002 "lead lifecycle: one row, one cycle": a closed lead (one in a
+	// closing stage) is terminal. Dragging it to an open stage must not mutate
+	// the row — it spawns a new lead row for the same contact in the target
+	// stage, carrying the contact, a fresh program price snapshot, and the
+	// nickname; the assignee starts unassigned and notes/tasks do not carry.
+	// Moving a closed lead into another closing stage (lost → won) is rejected:
+	// a mislabel is fixed by a new cycle, not by re-closing the old row.
+	if req.StageID != nil && *req.StageID != "" && *req.StageID != old.StageID &&
+		old.StageOutcome != "open" {
+		// The target stage's closing flag decides: closed → open spawns a new
+		// cycle; closed → closed is rejected.
+		var targetClosing bool
+		if err := s.db.QueryRow(
+			`SELECT is_closing FROM lead_stages WHERE id = $1`,
+			*req.StageID,
+		).Scan(&targetClosing); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrStageNotInPipeline
+			}
+			return nil, fmt.Errorf("update lead: load target stage: %w", err)
+		}
+		if targetClosing {
+			return nil, ErrClosedToClosedMove
+		}
+		return s.spawnCycle(old, *req.StageID, userID)
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("update lead: %w", err)
@@ -552,12 +782,9 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 			if req.LostReason != nil && info.Outcome == "lost" {
 				lostReason = req.LostReason
 			}
-		} else {
-			// Moving out of a closing stage clears the outcome.
-			empty := ""
-			outcome = &empty
-			lostReason = &empty
 		}
+		// Moving out of a closing stage never reaches here: the top-of-update
+		// check spawns a new cycle or rejects the move (ADR 002).
 	}
 
 	var programPrice *float64

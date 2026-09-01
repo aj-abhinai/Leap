@@ -653,7 +653,7 @@ func TestStageMoveSetsOutcomeAndHistoryIntegration(t *testing.T) {
 	}
 }
 
-func TestStageMoveOutOfClosingClearsOutcomeIntegration(t *testing.T) {
+func TestStageMoveOutOfClosingSpawnsCycleIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
@@ -673,6 +673,7 @@ func TestStageMoveOutOfClosingClearsOutcomeIntegration(t *testing.T) {
 		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
 		PipelineID: pipelineID,
 		StageID:    openStage,
+		Nickname:   "Cycle One",
 	}, "")
 	if err != nil {
 		t.Fatalf("create lead: %v", err)
@@ -686,13 +687,69 @@ func TestStageMoveOutOfClosingClearsOutcomeIntegration(t *testing.T) {
 		t.Errorf("outcome = %q, want won", won.Outcome)
 	}
 
-	// Move back out — outcome should clear.
-	back, err := svc.update(created.ID, UpdateRequest{StageID: &openStage}, "")
+	// Drag the closed card back to the open stage: a NEW row is spawned for
+	// the same contact; the old row stays terminal.
+	spawned, err := svc.update(created.ID, UpdateRequest{StageID: &openStage}, "")
 	if err != nil {
-		t.Fatalf("move back: %v", err)
+		t.Fatalf("spawn cycle: %v", err)
 	}
-	if back.Outcome != "" || back.LostReason != "" {
-		t.Errorf("outcome/lost_reason = %q/%q, want cleared", back.Outcome, back.LostReason)
+	if spawned.ID == created.ID {
+		t.Error("expected a new lead row, got the same id")
+	}
+	if spawned.StageID != openStage {
+		t.Errorf("new cycle stage = %q, want open stage", spawned.StageID)
+	}
+	if spawned.ContactID != created.ContactID {
+		t.Errorf("new cycle contact = %q, want %q", spawned.ContactID, created.ContactID)
+	}
+	if spawned.Nickname != "Cycle One" {
+		t.Errorf("new cycle nickname = %q, want Cycle One (carried over)", spawned.Nickname)
+	}
+	if spawned.AssignedTo != nil {
+		t.Errorf("new cycle assignee = %+v, want unassigned", spawned.AssignedTo)
+	}
+	if spawned.Outcome != "" || spawned.LostReason != "" {
+		t.Errorf("new cycle outcome/lost_reason = %q/%q, want empty", spawned.Outcome, spawned.LostReason)
+	}
+
+	// The old row is unchanged: still won, still in the closed stage.
+	oldRow, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get old lead: %v", err)
+	}
+	if oldRow.StageID != closedStage || oldRow.Outcome != "won" {
+		t.Errorf("old row = stage %q outcome %q, want terminal won", oldRow.StageID, oldRow.Outcome)
+	}
+}
+
+func TestStageMoveClosedToClosedRejectedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var pipelineID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Closed Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	var lostStage, wonStage string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Lost', 0, true, 'lost') RETURNING id`, pipelineID).Scan(&lostStage); err != nil {
+		t.Fatalf("seed lost stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 1, true, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
+		t.Fatalf("seed won stage: %v", err)
+	}
+
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Bob", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    lostStage,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	// A closed lead cannot be re-closed into another closing stage.
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &wonStage}, ""); !errors.Is(err, ErrClosedToClosedMove) {
+		t.Errorf("lost → won = %v, want ErrClosedToClosedMove", err)
 	}
 }
 

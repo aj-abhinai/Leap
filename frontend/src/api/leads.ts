@@ -78,6 +78,36 @@ export function listLeads(params: {
   return apiClient.get(`/api/leads?${p}`)
 }
 
+// BoardStage is one kanban column: the newest-window leads plus the true
+// count of matching leads in the stage.
+export interface BoardStage {
+  stage_id: string
+  count: number
+  leads: Lead[]
+}
+
+// Board is the kanban payload (GET /api/leads/board).
+export interface Board {
+  stages: BoardStage[]
+}
+
+export function fetchBoard(params: {
+  pipelineId: string
+  q?: string
+  outcome?: string
+  assignedTo?: string
+  from?: string
+  to?: string
+}): Promise<ApiResponse<Board>> {
+  const p = new URLSearchParams({ pipeline_id: params.pipelineId })
+  if (params.q) p.set('q', params.q)
+  if (params.outcome) p.set('outcome', params.outcome)
+  if (params.assignedTo) p.set('assigned_to', params.assignedTo)
+  if (params.from) p.set('from', params.from)
+  if (params.to) p.set('to', params.to)
+  return apiClient.get(`/api/leads/board?${p}`)
+}
+
 export function getLead(id: string): Promise<ApiResponse<Lead>> {
   return apiClient.get(`/api/leads/${id}`)
 }

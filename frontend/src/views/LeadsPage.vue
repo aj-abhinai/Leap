@@ -38,16 +38,18 @@ const users = useUsersStore()
 
 const {
   pipelineStore,
-  leadsStore,
   selectedPipelineId,
   selectedPipeline,
   kanbanColumns,
+  loading,
   loadLeads,
   moveStage,
   bulkMoveStage,
   search,
   outcomeFilter,
   assigneeFilter,
+  fromDate,
+  toDate,
 } = useLeadPipeline()
 
 const {
@@ -73,10 +75,10 @@ const outcomeOptions = [
   { value: 'lost', label: 'Lost' },
 ] as const
 
-// Debounce the text search; outcome/assignee filters apply immediately.
+// Debounce the text search; outcome/assignee/date filters apply immediately.
 const debouncedLoad = debounce(() => loadLeads(), 300)
 watch(search, debouncedLoad)
-watch([outcomeFilter, assigneeFilter], () => loadLeads())
+watch([outcomeFilter, assigneeFilter, fromDate, toDate], () => loadLeads())
 
 async function onLeadSaved(body: LeadSaveBody) {
   await handleSave(body)
@@ -135,9 +137,8 @@ watch(
         <p v-if="selectedPipeline" class="mt-0.5 text-sm text-muted-foreground">
           {{ selectedPipeline.name }}
           <span class="tabular-nums text-muted-foreground/70">
-            {{ totalShown }}<template v-if="leadsStore.total !== totalShown"> of {{ leadsStore.total }}</template> leads
+            {{ totalShown }} leads shown
           </span>
-          <span v-if="leadsStore.capped" class="ml-1 text-xs text-warning">(cap reached — narrow filters)</span>
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -171,6 +172,12 @@ watch(
             </SelectItem>
           </SelectContent>
         </Select>
+
+        <div class="flex items-center gap-1.5">
+          <Input v-model="fromDate" type="date" class="h-9 w-40" aria-label="From date" title="From date" />
+          <span class="text-muted-foreground">–</span>
+          <Input v-model="toDate" type="date" class="h-9 w-40" aria-label="To date" title="To date" />
+        </div>
 
         <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">
           <SelectTrigger class="w-48">
@@ -213,7 +220,7 @@ watch(
       </div>
     </div>
 
-    <div v-if="leadsStore.loading" class="flex gap-4 overflow-x-auto pb-4">
+    <div v-if="loading" class="flex gap-4 overflow-x-auto pb-4">
       <div v-for="i in 4" :key="i" class="min-w-64 flex-1 rounded-lg border bg-muted/30 p-4 space-y-3">
         <Skeleton class="h-5 w-24" />
         <Skeleton class="h-4 w-full" />
