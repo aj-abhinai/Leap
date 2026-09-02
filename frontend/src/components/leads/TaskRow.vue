@@ -62,6 +62,8 @@ const editType = shallowRef('')
 const editDescription = shallowRef('')
 const editScheduledDate = shallowRef('')
 const editScheduledTime = shallowRef('')
+const editEndDate = shallowRef('')
+const editEndTime = shallowRef('')
 const editRemindDate = shallowRef('')
 const editRemindTime = shallowRef('')
 const savingEdit = shallowRef(false)
@@ -72,6 +74,8 @@ function startEdit() {
   editDescription.value = props.activity.description
   editScheduledDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
   editScheduledTime.value = props.activity.scheduled_at ? toLocalTimeInput(props.activity.scheduled_at) : ''
+  editEndDate.value = props.activity.scheduled_end_at ? toLocalDateInput(props.activity.scheduled_end_at) : ''
+  editEndTime.value = props.activity.scheduled_end_at ? toLocalTimeInput(props.activity.scheduled_end_at) : ''
   editRemindDate.value = props.activity.remind_at ? toLocalDateInput(props.activity.remind_at) : ''
   editRemindTime.value = props.activity.remind_at ? toLocalTimeInput(props.activity.remind_at) : ''
 }
@@ -91,6 +95,7 @@ async function saveEdit() {
       type: editType.value,
       description: editDescription.value.trim(),
       scheduled_at: mergeDateTime(editScheduledDate.value, editScheduledTime.value),
+      scheduled_end_at: mergeDateTime(editEndDate.value, editEndTime.value),
       remind_at: mergeDateTime(editRemindDate.value, editRemindTime.value),
     })
     toast.success('Activity updated')
@@ -230,6 +235,16 @@ const selectedReschedulePreset = computed(() =>
         </div>
         <div class="grid grid-cols-2 gap-2">
           <div class="space-y-1.5">
+            <Label class="text-xs">Until date (optional)</Label>
+            <Input v-model="editEndDate" type="date" />
+          </div>
+          <div class="space-y-1.5">
+            <Label class="text-xs">Until time</Label>
+            <Input v-model="editEndTime" type="time" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="space-y-1.5">
             <Label class="text-xs">Remind date</Label>
             <Input v-model="editRemindDate" type="date" />
           </div>
@@ -337,7 +352,10 @@ const selectedReschedulePreset = computed(() =>
             </div>
             <p v-if="activity.description" class="text-sm mt-0.5">{{ activity.description }}</p>
             <div class="flex flex-wrap gap-2 mt-1">
-              <span v-if="activity.scheduled_at" class="text-xs text-muted-foreground">
+              <span v-if="activity.scheduled_at && activity.scheduled_end_at" class="text-xs text-muted-foreground">
+                Scheduled: {{ formatDateTime(activity.scheduled_at) }} – {{ formatDateTime(activity.scheduled_end_at) }}
+              </span>
+              <span v-else-if="activity.scheduled_at" class="text-xs text-muted-foreground">
                 Scheduled: {{ formatDateTime(activity.scheduled_at) }}
               </span>
               <span v-if="activity.remind_at" class="text-xs" :class="overdue ? 'text-warning' : 'text-muted-foreground'">

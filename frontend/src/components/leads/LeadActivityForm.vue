@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { ChevronDown, ChevronUp, Check } from '@lucide/vue'
 import { nextPresets, groupQuickReplies, findSelectedPreset, type NextPreset } from '@/utils/reminders'
 import { toLocalDateInput, toLocalTimeInput, mergeDateTime } from '@/utils/time'
+import { getNudgeLeadMinutes } from '@/api/settings'
 import { errorMessage } from '@/utils/errors'
 
 const props = defineProps<{ leadId: string }>()
@@ -84,8 +85,20 @@ const showMoreScheduleFields = computed(() => !showNextFields.value && !showClos
 const hasNextTime = computed(() => !!mergeDateTime(schedule.next.date, schedule.next.time))
 const moreOptions = ref(false)
 
-onMounted(() => {
+// Nudge lead minutes: how many minutes before the start time the reminder
+// defaults to when the user does not set one explicitly. Mirrors the backend
+// default (settings.nudge_lead_minutes) so the prefill matches what gets
+// stored.
+const nudgeLeadMinutes = ref(5)
+
+onMounted(async () => {
   if (settings.activityTypes.length === 0) settings.fetchTags()
+  try {
+    const res = await getNudgeLeadMinutes()
+    nudgeLeadMinutes.value = res.data.minutes
+  } catch {
+    // Keep the default; the backend still applies its own value on save.
+  }
 })
 
 // Pre-fill the type with the last successfully logged one (per browser) so a
@@ -116,14 +129,19 @@ watch(
 )
 
 // When a schedule is entered and the reminder is untouched, default the
-// reminder to the scheduled time — a reminder is the nudge for a task.
+// reminder to nudge lead minutes before the start — a reminder is the nudge
+// for a task, and you want to be ready before 3pm, not at 3pm. The backend
+// applies the same default on save, so the prefill is just a hint.
 watch(
   () => [schedule.start.date, schedule.start.time],
   () => {
     if (!schedule.start.date || !schedule.start.time) return
     if (!schedule.remind.date && !schedule.remind.time) {
-      schedule.remind.date = schedule.start.date
-      schedule.remind.time = schedule.start.time
+      const start = mergeDateTime(schedule.start.date, schedule.start.time)
+      if (!start) return
+      const remind = new Date(new Date(start).getTime() - nudgeLeadMinutes.value * 60_000)
+      schedule.remind.date = toLocalDateInput(remind.toISOString())
+      schedule.remind.time = toLocalTimeInput(remind.toISOString())
     }
   },
 )

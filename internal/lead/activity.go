@@ -472,16 +472,26 @@ func (s *Service) deleteActivity(leadID, activityID, userID string) error {
 // actually changed. Only open, non-cancelled activities that carry a reminder
 // or schedule are eligible, so dismiss stays aligned with reminder semantics;
 // a missing, already-reminded, done, cancelled, or reminder-less id is a clean
-// (false, nil) instead of an error.
-func (s *Service) dismissReminder(leadID, activityID string) (bool, error) {
+// (false, nil) instead of an error. The recipient predicate matches the bell
+// (getPendingReminders): a user may dismiss only the tasks they are
+// responsible for — the lead's assignee, the task's creator on an unassigned
+// lead, or genuinely unowned work — so a user cannot act on someone else's
+// nudge through the API directly.
+func (s *Service) dismissReminder(leadID, activityID, userID string) (bool, error) {
 	res, err := s.db.Exec(
 		`UPDATE lead_activities SET is_reminded = true
-		WHERE id = $1 AND lead_id = $2
-			AND NOT is_reminded
-			AND NOT is_done
-			AND NOT is_cancelled
-			AND (remind_at IS NOT NULL OR scheduled_at IS NOT NULL)`,
-		activityID, leadID,
+		FROM leads l
+		WHERE lead_activities.id = $1 AND lead_activities.lead_id = $2 AND l.id = $2
+			AND NOT lead_activities.is_reminded
+			AND NOT lead_activities.is_done
+			AND NOT lead_activities.is_cancelled
+			AND (lead_activities.remind_at IS NOT NULL OR lead_activities.scheduled_at IS NOT NULL)
+			AND (
+				l.assigned_to = $3
+				OR (l.assigned_to IS NULL AND lead_activities.user_id = $3)
+				OR (l.assigned_to IS NULL AND lead_activities.user_id IS NULL)
+			)`,
+		activityID, leadID, userID,
 	)
 	if err != nil {
 		return false, fmt.Errorf("dismiss reminder: %w", err)
@@ -499,8 +509,11 @@ func (s *Service) dismissReminder(leadID, activityID string) (bool, error) {
 // reschedule of an open task. The new time must be future-only and
 // within the snooze horizon. Only open, non-cancelled activities that carry a
 // reminder or schedule are eligible — matching dismissReminder — so a missing
-// or reminder-less id is a clean (false, nil) instead of an error.
-func (s *Service) snoozeReminder(leadID, activityID string, remindAt time.Time) (bool, error) {
+// or reminder-less id is a clean (false, nil) instead of an error. The
+// recipient predicate matches the bell (getPendingReminders): a user may
+// snooze only the tasks they are responsible for, so a user cannot act on
+// someone else's nudge through the API directly.
+func (s *Service) snoozeReminder(leadID, activityID, userID string, remindAt time.Time) (bool, error) {
 	now := time.Now()
 	if !remindAt.After(now) {
 		return false, ErrSnoozePast
@@ -516,9 +529,16 @@ func (s *Service) snoozeReminder(leadID, activityID string, remindAt time.Time) 
 				WHEN scheduled_at IS NOT NULL AND remind_at IS NOT NULL THEN scheduled_at + ($2 - remind_at)
 				ELSE scheduled_at
 			END
-		WHERE id = $1 AND lead_id = $3 AND NOT is_done AND NOT is_cancelled
-			AND (remind_at IS NOT NULL OR scheduled_at IS NOT NULL)`,
-		activityID, remindAt, leadID,
+		FROM leads l
+		WHERE lead_activities.id = $1 AND lead_activities.lead_id = $3 AND l.id = $3
+			AND NOT lead_activities.is_done AND NOT lead_activities.is_cancelled
+			AND (lead_activities.remind_at IS NOT NULL OR lead_activities.scheduled_at IS NOT NULL)
+			AND (
+				l.assigned_to = $4
+				OR (l.assigned_to IS NULL AND lead_activities.user_id = $4)
+				OR (l.assigned_to IS NULL AND lead_activities.user_id IS NULL)
+			)`,
+		activityID, remindAt, leadID, userID,
 	)
 	if err != nil {
 		return false, fmt.Errorf("snooze reminder: %w", err)

@@ -517,7 +517,8 @@ func (h *Handler) ListAllActivities(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DismissReminder(w http.ResponseWriter, r *http.Request) {
 	leadID := chi.URLParam(r, "lead_id")
 	id := chi.URLParam(r, "id")
-	dismissed, err := h.svc.dismissReminder(leadID, id)
+	userID := ctxutil.GetUserID(r)
+	dismissed, err := h.svc.dismissReminder(leadID, id, userID)
 	if err != nil {
 		respond.ServerError(w, err)
 		return
@@ -565,7 +566,7 @@ func (h *Handler) SnoozeReminder(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	snoozed, err := h.svc.snoozeReminder(leadID, id, req.RemindAt)
+	snoozed, err := h.svc.snoozeReminder(leadID, id, ctxutil.GetUserID(r), req.RemindAt)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrSnoozePast), errors.Is(err, ErrSnoozeTooFar):

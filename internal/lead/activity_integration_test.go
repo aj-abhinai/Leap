@@ -12,7 +12,7 @@ func TestDismissReminderMissingIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	dismissed, err := svc.dismissReminder("00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000")
+	dismissed, err := svc.dismissReminder("00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000", "")
 	if err != nil {
 		t.Fatalf("dismissReminder missing: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestDismissReminderFoundIntegration(t *testing.T) {
 		t.Fatalf("seed activity: %v", err)
 	}
 
-	dismissed, err := svc.dismissReminder(leadID, activityID)
+	dismissed, err := svc.dismissReminder(leadID, activityID, "")
 	if err != nil {
 		t.Fatalf("dismissReminder: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestDismissReminderFoundIntegration(t *testing.T) {
 		t.Error("expected (true, nil) for an existing reminder")
 	}
 
-	dismissed, err = svc.dismissReminder(leadID, activityID)
+	dismissed, err = svc.dismissReminder(leadID, activityID, "")
 	if err != nil {
 		t.Fatalf("second dismiss: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestDismissReminderWrongLeadScopedIntegration(t *testing.T) {
 		t.Fatalf("seed activity: %v", err)
 	}
 
-	dismissed, err := svc.dismissReminder(leadB, activityID)
+	dismissed, err := svc.dismissReminder(leadB, activityID, "")
 	if err != nil {
 		t.Fatalf("dismissReminder wrong lead: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestDismissReminderRequiresOpenReminderIntegration(t *testing.T) {
 	).Scan(&noReminderID); err != nil {
 		t.Fatalf("seed reminder-less activity: %v", err)
 	}
-	if dismissed, err := svc.dismissReminder(created.ID, noReminderID); err != nil || dismissed {
+	if dismissed, err := svc.dismissReminder(created.ID, noReminderID, ""); err != nil || dismissed {
 		t.Errorf("dismiss reminder-less = %v, %v; want false, nil", dismissed, err)
 	}
 
@@ -138,7 +138,7 @@ func TestDismissReminderRequiresOpenReminderIntegration(t *testing.T) {
 	).Scan(&doneID); err != nil {
 		t.Fatalf("seed done activity: %v", err)
 	}
-	if dismissed, err := svc.dismissReminder(created.ID, doneID); err != nil || dismissed {
+	if dismissed, err := svc.dismissReminder(created.ID, doneID, ""); err != nil || dismissed {
 		t.Errorf("dismiss done = %v, %v; want false, nil", dismissed, err)
 	}
 
@@ -151,7 +151,7 @@ func TestDismissReminderRequiresOpenReminderIntegration(t *testing.T) {
 	).Scan(&cancelledID); err != nil {
 		t.Fatalf("seed cancelled activity: %v", err)
 	}
-	if dismissed, err := svc.dismissReminder(created.ID, cancelledID); err != nil || dismissed {
+	if dismissed, err := svc.dismissReminder(created.ID, cancelledID, ""); err != nil || dismissed {
 		t.Errorf("dismiss cancelled = %v, %v; want false, nil", dismissed, err)
 	}
 }
@@ -178,19 +178,108 @@ func TestSnoozeReminderBoundsIntegration(t *testing.T) {
 		t.Fatalf("seed activity: %v", err)
 	}
 
-	if _, err := svc.snoozeReminder(created.ID, activityID, time.Now().Add(-time.Minute)); !errors.Is(err, ErrSnoozePast) {
+	if _, err := svc.snoozeReminder(created.ID, activityID, "", time.Now().Add(-time.Minute)); !errors.Is(err, ErrSnoozePast) {
 		t.Errorf("snooze to the past = %v, want ErrSnoozePast", err)
 	}
 
 	tooFar := time.Now().Add(maxSnoozeHorizon + 24*time.Hour)
-	if _, err := svc.snoozeReminder(created.ID, activityID, tooFar); !errors.Is(err, ErrSnoozeTooFar) {
+	if _, err := svc.snoozeReminder(created.ID, activityID, "", tooFar); !errors.Is(err, ErrSnoozeTooFar) {
 		t.Errorf("snooze beyond horizon = %v, want ErrSnoozeTooFar", err)
 	}
 
 	// The row is untouched by the rejected attempts.
-	snoozed, err := svc.snoozeReminder(created.ID, activityID, time.Now().Add(2*time.Hour).UTC().Truncate(time.Second))
+	snoozed, err := svc.snoozeReminder(created.ID, activityID, "", time.Now().Add(2*time.Hour).UTC().Truncate(time.Second))
 	if err != nil || !snoozed {
 		t.Errorf("valid snooze = %v, %v; want true, nil", snoozed, err)
+	}
+}
+
+// A user may dismiss or snooze only the reminders they are responsible for:
+// the lead's assignee, the task's creator on an unassigned lead, or genuinely
+// unowned work (both null). An unrelated user gets a clean (false, nil) — the
+// same recipient predicate as the bell's pending fetch, so the bell and the
+// API can never disagree about whose nudge it is.
+func TestReminderActionsScopedToResponsibleUserIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	assigneeID := seedTestUser(t, db, "assignee2@example.com")
+	creatorID := seedTestUser(t, db, "creator2@example.com")
+	otherID := seedTestUser(t, db, "other2@example.com")
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+
+	// Lead assigned to assignee; task created by creator.
+	assignedLead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+		AssignedTo: &assigneeID,
+	}, creatorID)
+	if err != nil {
+		t.Fatalf("create assigned lead: %v", err)
+	}
+	// Unassigned lead; task created by creator.
+	unassignedLead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Bob", Phone: "0987654321"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, creatorID)
+	if err != nil {
+		t.Fatalf("create unassigned lead: %v", err)
+	}
+	// Unowned lead: no assignee, task created by nobody (system).
+	unownedLead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Carol", Phone: "1112223333"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create unowned lead: %v", err)
+	}
+
+	// Seed one open reminder per lead. The unowned lead's task has no creator.
+	reminderIDs := map[string]string{}
+	for _, leadID := range []string{assignedLead.ID, unassignedLead.ID, unownedLead.ID} {
+		var id string
+		if err := db.QueryRow(
+			`INSERT INTO lead_activities (lead_id, stage_id, user_id, type, remind_at)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, 'call', $4) RETURNING id`,
+			leadID, stageID, creatorID, time.Now().Add(time.Hour),
+		).Scan(&id); err != nil {
+			t.Fatalf("seed reminder: %v", err)
+		}
+		reminderIDs[leadID] = id
+	}
+	if _, err := db.Exec(`UPDATE lead_activities SET user_id = NULL WHERE lead_id = $1`, unownedLead.ID); err != nil {
+		t.Fatalf("clear unowned task creator: %v", err)
+	}
+
+	// An unrelated user cannot dismiss or snooze anyone's task.
+	for _, leadID := range []string{assignedLead.ID, unassignedLead.ID, unownedLead.ID} {
+		if dismissed, err := svc.dismissReminder(leadID, reminderIDs[leadID], otherID); err != nil || dismissed {
+			t.Errorf("dismiss by other on %s = %v, %v; want false, nil", leadID, dismissed, err)
+		}
+		if snoozed, err := svc.snoozeReminder(leadID, reminderIDs[leadID], otherID, time.Now().Add(time.Hour)); err != nil || snoozed {
+			t.Errorf("snooze by other on %s = %v, %v; want false, nil", leadID, snoozed, err)
+		}
+	}
+
+	// The assignee can act on the assigned lead's task and the unowned one,
+	// but not the unassigned lead's task (created by someone else).
+	if dismissed, err := svc.dismissReminder(assignedLead.ID, reminderIDs[assignedLead.ID], assigneeID); err != nil || !dismissed {
+		t.Errorf("dismiss by assignee on assigned lead = %v, %v; want true, nil", dismissed, err)
+	}
+	if dismissed, err := svc.dismissReminder(unassignedLead.ID, reminderIDs[unassignedLead.ID], assigneeID); err != nil || dismissed {
+		t.Errorf("dismiss by assignee on unassigned lead = %v, %v; want false, nil", dismissed, err)
+	}
+
+	// The creator can act on their unassigned-lead task (and the unowned one).
+	if snoozed, err := svc.snoozeReminder(unassignedLead.ID, reminderIDs[unassignedLead.ID], creatorID, time.Now().Add(2*time.Hour).UTC().Truncate(time.Second)); err != nil || !snoozed {
+		t.Errorf("snooze by creator on unassigned lead = %v, %v; want true, nil", snoozed, err)
+	}
+	if dismissed, err := svc.dismissReminder(unownedLead.ID, reminderIDs[unownedLead.ID], creatorID); err != nil || !dismissed {
+		t.Errorf("dismiss unowned by creator = %v, %v; want true, nil", dismissed, err)
 	}
 }
 

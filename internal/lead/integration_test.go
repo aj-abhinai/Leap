@@ -950,12 +950,12 @@ func TestSnoozeReminderReopensIntegration(t *testing.T) {
 		t.Fatalf("create activity: %v", err)
 	}
 	// Mark reminded so it drops out of pending; snoozing should re-open it.
-	if _, err := svc.dismissReminder(lead.ID, activity.ID); err != nil {
+	if _, err := svc.dismissReminder(lead.ID, activity.ID, ""); err != nil {
 		t.Fatalf("dismiss: %v", err)
 	}
 
 	future := time.Now().Add(24 * time.Hour).Truncate(time.Microsecond)
-	changed, err := svc.snoozeReminder(lead.ID, activity.ID, future)
+	changed, err := svc.snoozeReminder(lead.ID, activity.ID, "", future)
 	if err != nil {
 		t.Fatalf("snooze: %v", err)
 	}
@@ -984,7 +984,7 @@ func TestSnoozeMissingReminderIsCleanNoopIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	changed, err := svc.snoozeReminder("00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000", time.Now().Add(time.Hour))
+	changed, err := svc.snoozeReminder("00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000", "", time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("snooze missing: %v", err)
 	}
@@ -1018,7 +1018,7 @@ func TestSnoozeReminderLessOpenTaskIsCleanNoopIntegration(t *testing.T) {
 		t.Fatalf("seed activity: %v", err)
 	}
 
-	changed, err := svc.snoozeReminder(created.ID, activityID, time.Now().Add(2*time.Hour).UTC().Truncate(time.Second))
+	changed, err := svc.snoozeReminder(created.ID, activityID, "", time.Now().Add(2*time.Hour).UTC().Truncate(time.Second))
 	if err != nil {
 		t.Fatalf("snooze reminder-less: %v", err)
 	}
