@@ -189,7 +189,7 @@ async function handleSave() {
       <Label>Phones</Label>
       <div class="space-y-1.5">
         <div v-for="(p, idx) in phones" :key="p.key" class="flex items-center gap-2">
-          <Input v-model="p.value" type="tel" :placeholder="`Phone ${idx + 1}`" />
+          <Input v-model="p.value" type="tel" :placeholder="`Phone ${idx + 1} — 98765 43210 or +971 50 123 4567`" />
           <Button
             variant="ghost"
             size="icon-sm"

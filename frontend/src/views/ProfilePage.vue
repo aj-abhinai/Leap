@@ -65,7 +65,7 @@ async function handleSave() {
           </div>
           <div class="space-y-2">
             <Label for="pphone">Phone</Label>
-            <Input id="pphone" v-model="formPhone" placeholder="Phone number" />
+            <Input id="pphone" v-model="formPhone" placeholder="98765 43210 or +971 50 123 4567" />
           </div>
           <div v-if="error" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{{ error }}</div>
           <div class="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">

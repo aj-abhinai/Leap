@@ -495,7 +495,7 @@ function createNewPersonInstead() {
         </div>
         <div class="space-y-2">
           <Label for="nc-phone">Phone</Label>
-          <Input id="nc-phone" v-model="newContactPhone" placeholder="Phone" />
+          <Input id="nc-phone" v-model="newContactPhone" placeholder="98765 43210 or +971 50 123 4567" />
         </div>
         <div class="space-y-2">
           <Label for="nc-email">Email</Label>
