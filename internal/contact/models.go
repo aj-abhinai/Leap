@@ -1,6 +1,9 @@
 package contact
 
-import "time"
+import (
+	"crm/internal/lead"
+	"time"
+)
 
 // PhoneValue is a single phone on a contact. Exactly one per contact is primary.
 type PhoneValue struct {
@@ -107,10 +110,12 @@ type CreateNoteRequest struct {
 }
 
 // ResolveMatch is a compact contact result for the lead-entry phone resolve
-// endpoint: id, name, and the primary phone/email for display.
+// endpoint: id, name, primary phone/email for display, and the contact's open
+// leads so the UI can offer the resolve-or-log path without a second fetch.
 type ResolveMatch struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Phone string `json:"phone,omitempty"`
-	Email string `json:"email,omitempty"`
+	ID        string           `json:"id"`
+	Name      string           `json:"name"`
+	Phone     string           `json:"phone,omitempty"`
+	Email     string           `json:"email,omitempty"`
+	OpenLeads []lead.OpenLeadRef `json:"open_leads"`
 }

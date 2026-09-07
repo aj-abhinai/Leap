@@ -2,6 +2,7 @@ package contact
 
 import (
 	"crm/internal/audit"
+	"crm/internal/lead"
 	"crm/internal/util"
 	"database/sql"
 	"encoding/json"
@@ -350,7 +351,62 @@ func (s *Service) resolveByPhone(phone string) ([]ResolveMatch, error) {
 		}
 		matches = append(matches, m)
 	}
-	return matches, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("resolve contact by phone: iterate: %w", err)
+	}
+	if len(matches) > 0 {
+		if err := s.attachOpenLeads(matches); err != nil {
+			return nil, err
+		}
+	}
+	return matches, nil
+}
+
+// attachOpenLeads fills each match's OpenLeads with the live leads whose
+// linked stage declares outcome 'open' — the same stage-metadata signal the
+// rest of the product reads. Matches without an open lead keep an empty list.
+func (s *Service) attachOpenLeads(matches []ResolveMatch) error {
+	ids := make([]string, 0, len(matches))
+	for _, m := range matches {
+		ids = append(ids, m.ID)
+	}
+	rows, err := s.db.Query(
+		`SELECT l.contact_id, l.id, COALESCE(l.nickname, c.name, ''), COALESCE(ls.name, ''),
+			COALESCE(p.name, ''), l.program_id, l.pipeline_id, COALESCE(pl.name, '')
+		FROM leads l
+		JOIN contacts c ON c.id = l.contact_id
+		JOIN lead_stages ls ON ls.id = l.stage_id AND ls.outcome = 'open'
+		LEFT JOIN programs p ON p.id = l.program_id
+		LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
+		WHERE l.contact_id = ANY($1) AND l.deleted_at IS NULL
+		ORDER BY l.created_at ASC`,
+		ids,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve open leads: %w", err)
+	}
+	defer rows.Close()
+	openByContact := map[string][]lead.OpenLeadRef{}
+	for rows.Next() {
+		var contactID string
+		var ref lead.OpenLeadRef
+		if err := rows.Scan(&contactID, &ref.ID, &ref.DisplayName, &ref.StageName,
+			&ref.ProgramName, &ref.ProgramID, &ref.PipelineID, &ref.PipelineName); err != nil {
+			return fmt.Errorf("resolve open leads: scan: %w", err)
+		}
+		openByContact[contactID] = append(openByContact[contactID], ref)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("resolve open leads: iterate: %w", err)
+	}
+	for i := range matches {
+		open := openByContact[matches[i].ID]
+		if open == nil {
+			open = []lead.OpenLeadRef{}
+		}
+		matches[i].OpenLeads = open
+	}
+	return nil
 }
 
 func (s *Service) get(id string) (*Contact, error) {
