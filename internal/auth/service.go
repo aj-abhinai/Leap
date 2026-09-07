@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crm/internal/config"
+	"crm/internal/settings"
 	"crm/internal/util"
 	"crypto/sha256"
 	"database/sql"
@@ -236,12 +237,18 @@ func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*User,
 		req.Name = &name
 	}
 	if req.Phone != nil {
-		// Count runes, matching the name check: a phone with multibyte
-		// formatting characters must not be rejected below the 20-character
-		// limit just because its byte length is larger.
-		if len([]rune(*req.Phone)) > 20 {
+		// Phones are canonicalized to one stored form ('+' + digits) at every
+		// entry point. The length contract bounds the stored value, so the
+		// canonical form is checked, not the raw input.
+		defaultCC, err := settings.DefaultCountryCode(s.db)
+		if err != nil {
+			return nil, err
+		}
+		canonical := util.CanonicalPhone(*req.Phone, defaultCC)
+		if len([]rune(canonical)) > 20 {
 			return nil, ErrPhoneTooLong
 		}
+		req.Phone = &canonical
 	}
 	var u User
 	err := s.db.QueryRow(`

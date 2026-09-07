@@ -2,6 +2,7 @@ package lead
 
 import (
 	"crm/internal/audit"
+	"crm/internal/settings"
 	"crm/internal/util"
 	"database/sql"
 	"errors"
@@ -562,35 +563,48 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	if nc == nil || nc.Name == "" {
 		return "", ErrContactRequired
 	}
-	if nc.Phone == "" && nc.Email == "" {
+	// The "at least one contact detail" invariant is checked on the canonical
+	// forms, like the contact module does: a phone that carries no digits
+	// ("+", "call me") does not count as a detail.
+	defaultCC, err := settings.DefaultCountryCode(tx)
+	if err != nil {
+		return "", fmt.Errorf("resolve contact: %w", err)
+	}
+	phoneKey, codedKey := util.PhoneLookupKeys(nc.Phone, defaultCC)
+	emailKey := util.NormalizeEmail(nc.Email)
+	if phoneKey == "" && emailKey == "" {
 		return "", ErrNoContactDetail
 	}
 
 	// Serialize concurrent lead entries that could create a duplicate contact
-	// for the same phone/email. The lock is namespaced by the lookup key and
-	// released automatically at commit/rollback.
-	key := util.NormalizePhone(nc.Phone)
-	if key == "" {
-		key = util.NormalizeEmail(nc.Email)
+	// for the same phone/email. The lock is namespaced by the national-form
+	// lookup key (both storage generations collapse to it) and released
+	// automatically at commit/rollback.
+	lookupKey := phoneKey
+	if lookupKey == "" {
+		lookupKey = emailKey
 	}
-	if key != "" {
-		if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext($1))`, "lead_resolve:"+key); err != nil {
+	if lookupKey != "" {
+		if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext($1))`, "lead_resolve:"+lookupKey); err != nil {
 			return "", fmt.Errorf("lock contact resolve: %w", err)
 		}
 	}
 
-	// Phone primary, email secondary. The child tables store the raw
-	// value for display, so the lookup normalizes both sides: the incoming value
-	// is stripped to digits and matched against the stored value with the same
-	// transformation. Any phone/email on a contact counts as a match (not just
-	// the primary), so an alternate number still resolves to the contact.
-	if phone := util.NormalizePhone(nc.Phone); phone != "" {
+	// Phone primary, email secondary. The child tables store the canonical
+	// value ('+' + digits), so the lookup compares both storage generations:
+	// the incoming value is keyed in national form and matched against the
+	// stored value with the same transformation. Any phone/email on a contact
+	// counts as a match (not just the primary), so an alternate number still
+	// resolves to the contact.
+	if phoneKey != "" {
 		var found string
 		err := tx.QueryRow(
 			`SELECT cp.contact_id FROM contact_phones cp
 			JOIN contacts c ON c.id = cp.contact_id AND c.deleted_at IS NULL
-			WHERE regexp_replace(cp.value, '\D', '', 'g') IN ($1, '91' || $1) LIMIT 1`,
-			phone,
+			WHERE regexp_replace(cp.value, '\D', '', 'g') IN ($1, $2)
+			   OR ltrim(regexp_replace(cp.value, '\D', '', 'g'), '0') = $1
+			LIMIT 1`,
+			phoneKey, codedKey,
 		).Scan(&found)
 		if err == nil {
 			return found, nil
@@ -616,18 +630,20 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	}
 
 	// No match — create the contact and link the lead in the same transaction.
+	// The phone is canonicalized to one stored form ('+' + digits), matching
+	// every other entry point.
 	var id string
-	err := tx.QueryRow(
+	err = tx.QueryRow(
 		`INSERT INTO contacts (name) VALUES ($1) RETURNING id`,
 		nc.Name,
 	).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("create contact from lead: %w", err)
 	}
-	if nc.Phone != "" {
+	if phoneKey != "" {
 		if _, err := tx.Exec(
 			`INSERT INTO contact_phones (contact_id, value, is_primary) VALUES ($1, $2, true)`,
-			id, nc.Phone,
+			id, util.CanonicalPhone(nc.Phone, defaultCC),
 		); err != nil {
 			return "", fmt.Errorf("insert lead contact phone: %w", err)
 		}

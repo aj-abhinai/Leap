@@ -1,6 +1,7 @@
 package contact
 
 import (
+	"crm/internal/settings"
 	"crm/internal/util"
 	"fmt"
 	"strings"
@@ -30,12 +31,20 @@ type BulkRowError struct {
 }
 
 type contactKeys struct {
+	// cc is the org's default country code, applied to every key so both
+	// storage generations (canonical country-coded, legacy national) collapse
+	// to one national-form key.
+	cc     string
 	phones map[string]bool
 	emails map[string]bool
 }
 
 func (s *Service) loadContactKeys() (contactKeys, error) {
-	keys := contactKeys{phones: map[string]bool{}, emails: map[string]bool{}}
+	cc, err := settings.DefaultCountryCode(s.db)
+	if err != nil {
+		return contactKeys{}, err
+	}
+	keys := contactKeys{cc: cc, phones: map[string]bool{}, emails: map[string]bool{}}
 	rows, err := s.db.Query(`
 		SELECT cp.value FROM contact_phones cp
 		JOIN contacts c ON c.id = cp.contact_id AND c.deleted_at IS NULL`)
@@ -48,7 +57,7 @@ func (s *Service) loadContactKeys() (contactKeys, error) {
 		if err := rows.Scan(&phone); err != nil {
 			return keys, fmt.Errorf("scan contact phone: %w", err)
 		}
-		if p := util.NormalizePhone(phone); p != "" {
+		if p := util.NormalizePhoneKey(phone, cc); p != "" {
 			keys.phones[p] = true
 		}
 	}
@@ -82,7 +91,7 @@ func (s *Service) loadContactKeys() (contactKeys, error) {
 // recordMatch registers a successfully imported row so later rows in the same
 // file are caught as same-file duplicates.
 func (k *contactKeys) recordMatch(phone, email string) {
-	if p := util.NormalizePhone(phone); p != "" {
+	if p := util.NormalizePhoneKey(phone, k.cc); p != "" {
 		k.phones[p] = true
 	}
 	if e := util.NormalizeEmail(email); e != "" {
@@ -91,7 +100,7 @@ func (k *contactKeys) recordMatch(phone, email string) {
 }
 
 func (k contactKeys) duplicateReason(phone, email string) string {
-	phoneMatch := util.NormalizePhone(phone) != "" && k.phones[util.NormalizePhone(phone)]
+	phoneMatch := util.NormalizePhoneKey(phone, k.cc) != "" && k.phones[util.NormalizePhoneKey(phone, k.cc)]
 	emailMatch := util.NormalizeEmail(email) != "" && k.emails[util.NormalizeEmail(email)]
 	switch {
 	case phoneMatch && emailMatch:
@@ -123,6 +132,9 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 		return nil, fmt.Errorf("bulk create: load duplicate keys: %w", err)
 	}
 
+	// Phones are canonicalized to one stored form ('+' + digits) at every
+	// entry point; the duplicate keys (loaded with the same default country
+	// code) compare the national form, so both storage generations collide.
 	pending := []pendingContact{}
 
 	for i, c := range req.Contacts {
@@ -131,6 +143,7 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "name is required"})
 			continue
 		}
+		c.Phone = util.CanonicalPhone(c.Phone, keys.cc)
 		if len(c.Phone) > maxValueLength || len(c.Email) > maxValueLength {
 			resp.Failed++
 			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "phone or email value is too long"})

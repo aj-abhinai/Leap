@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // DefaultNudgeLeadMinutes is the nudge lead time when no setting is stored
@@ -16,6 +17,14 @@ const DefaultNudgeLeadMinutes = 5
 
 // NudgeLeadMinutesKey is the settings row key for the nudge lead time.
 const NudgeLeadMinutesKey = "nudge_lead_minutes"
+
+// DefaultCountryCodeKey is the settings row key for the org's default
+// country code.
+const DefaultCountryCodeKey = "default_country_code"
+
+// DefaultDefaultCountryCode is the country code assumed when no setting is
+// stored.
+const DefaultDefaultCountryCode = "+91"
 
 // Service provides database-backed org settings.
 type Service struct {
@@ -57,6 +66,36 @@ func NudgeLeadMinutes(q Queryer) (int, error) {
 // defaulting to DefaultNudgeLeadMinutes when unset or malformed.
 func (s *Service) GetNudgeLeadMinutes() (int, error) {
 	return NudgeLeadMinutes(s.db)
+}
+
+// DefaultCountryCode returns the org's default country code — a '+' followed
+// by digits — defaulting to DefaultDefaultCountryCode when the setting is
+// absent or malformed. It runs on any Queryer so every phone entry point
+// canonicalizes with the same code; a database failure is reported, not
+// silently defaulted, so a wrong country code is never stamped on stored
+// numbers.
+func DefaultCountryCode(q Queryer) (string, error) {
+	var raw string
+	err := q.QueryRow(`SELECT value FROM settings WHERE key = $1`, DefaultCountryCodeKey).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DefaultDefaultCountryCode, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get default country code: %w", err)
+	}
+	if !strings.HasPrefix(raw, "+") {
+		return DefaultDefaultCountryCode, nil
+	}
+	digits := raw[1:]
+	if digits == "" {
+		return DefaultDefaultCountryCode, nil
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return DefaultDefaultCountryCode, nil
+		}
+	}
+	return raw, nil
 }
 
 // SetNudgeLeadMinutes stores the org-wide nudge lead time in minutes. Negative

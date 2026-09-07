@@ -397,7 +397,7 @@ func TestHandlerUpdateProfile(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &u); err != nil {
 		t.Fatalf("decode data: %v", err)
 	}
-	if u.Name != "Alice Renamed" || u.Phone != "1234567890" {
+	if u.Name != "Alice Renamed" || u.Phone != "+911234567890" {
 		t.Errorf("expected updated profile, got name=%q phone=%q", u.Name, u.Phone)
 	}
 }

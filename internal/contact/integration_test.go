@@ -35,8 +35,8 @@ func TestCreateContactIntegration(t *testing.T) {
 	if created.Email != "alice@example.com" {
 		t.Errorf("email = %q, want %q", created.Email, "alice@example.com")
 	}
-	if created.Phone != "9876543210" {
-		t.Errorf("phone = %q, want %q", created.Phone, "9876543210")
+	if created.Phone != "+919876543210" {
+		t.Errorf("phone = %q, want %q", created.Phone, "+919876543210")
 	}
 	if created.Location != "Pune" {
 		t.Errorf("location = %q, want %q", created.Location, "Pune")
@@ -137,8 +137,8 @@ func TestUpdateContactIntegration(t *testing.T) {
 	if updated.Name != "Alice Updated" {
 		t.Errorf("name = %q, want %q", updated.Name, "Alice Updated")
 	}
-	if updated.Phone != "9876543210" {
-		t.Errorf("phone = %q, want %q", updated.Phone, "9876543210")
+	if updated.Phone != "+919876543210" {
+		t.Errorf("phone = %q, want %q", updated.Phone, "+919876543210")
 	}
 
 	assertAuditRow(t, db, created.ID, "update")
@@ -395,8 +395,8 @@ func TestBulkCreateImportsFreshRowsIntegration(t *testing.T) {
 	).Scan(&phone); err != nil {
 		t.Fatalf("find alice phone: %v", err)
 	}
-	if phone != "9876543210" {
-		t.Errorf("alice phone = %q, want 9876543210", phone)
+	if phone != "+919876543210" {
+		t.Errorf("alice phone = %q, want +919876543210", phone)
 	}
 	var email string
 	if err := db.QueryRow(
@@ -882,8 +882,137 @@ func TestResolveByPhoneMatchesFormattedDifferentlyIntegration(t *testing.T) {
 	if matches[0].Name != "Alice Example" {
 		t.Errorf("name = %q, want Alice Example", matches[0].Name)
 	}
-	if matches[0].Phone != "9876543210" {
-		t.Errorf("phone = %q, want 9876543210", matches[0].Phone)
+	if matches[0].Phone != "+919876543210" {
+		t.Errorf("phone = %q, want +919876543210", matches[0].Phone)
+	}
+}
+
+// Every typed variant of the same number lands in one canonical stored form
+// ('+' + digits) and still collides as a duplicate — the create guard and the
+// stored value both follow the canonicalization rule.
+func TestPhoneVariantsCanonicalizeAndCollideIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "Alice", Phone: "09876543210"}); err != nil {
+		t.Fatalf("create with leading zero: %v", err)
+	}
+	var stored string
+	if err := db.QueryRow(
+		`SELECT value FROM contact_phones WHERE is_primary`,
+	).Scan(&stored); err != nil {
+		t.Fatalf("load stored phone: %v", err)
+	}
+	if stored != "+919876543210" {
+		t.Fatalf("stored phone = %q, want +919876543210", stored)
+	}
+
+	// The same number typed differently must collide as a duplicate.
+	_, err := svc.create(CreateRequest{Name: "Bob", Phone: "+91 98765 43210"})
+	if err == nil {
+		t.Fatal("duplicate create with a differently-typed variant succeeded")
+	}
+	var dup *DuplicateError
+	if !errors.As(err, &dup) {
+		t.Fatalf("create variant = %v, want DuplicateError", err)
+	}
+
+	// Resolve matches the variant too.
+	matches, err := svc.resolveByPhone("98765 43210")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Name != "Alice" {
+		t.Errorf("matches = %+v, want Alice", matches)
+	}
+
+	// The leading-zero variant resolves too — the canonicalization runs on
+	// the read side as well, so staff typing "09876543210" still find the
+	// contact instead of silently creating a duplicate.
+	matches, err = svc.resolveByPhone("09876543210")
+	if err != nil {
+		t.Fatalf("resolve leading-zero variant: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Name != "Alice" {
+		t.Errorf("leading-zero matches = %+v, want Alice", matches)
+	}
+
+	// A number carrying its own country code is never double-coded.
+	if _, err := svc.create(CreateRequest{Name: "Carol", Phone: "+971501234567"}); err != nil {
+		t.Fatalf("create with foreign code: %v", err)
+	}
+	if err := db.QueryRow(
+		`SELECT value FROM contact_phones WHERE is_primary AND value LIKE '+971%'`,
+	).Scan(&stored); err != nil {
+		t.Fatalf("load foreign-coded phone: %v", err)
+	}
+	if stored != "+971501234567" {
+		t.Errorf("foreign phone = %q, want +971501234567", stored)
+	}
+}
+
+// Rows written before canonicalization stored the bare national form (with
+// or without a leading zero, as staff typed it); every lookup and duplicate
+// guard must still see them, in any typed variant.
+func TestLegacyRawPhoneRowsStillMatchIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	for name, raw := range map[string]string{"Legacy": "9876543210", "ZeroLegacy": "09876543210"} {
+		if _, err := db.Exec(`INSERT INTO contacts (name) VALUES ($1)`, name); err != nil {
+			t.Fatalf("insert legacy contact: %v", err)
+		}
+		if _, err := db.Exec(
+			`INSERT INTO contact_phones (contact_id, value, is_primary)
+			SELECT id, $2, true FROM contacts WHERE name = $1`,
+			name, raw,
+		); err != nil {
+			t.Fatalf("insert legacy raw phone: %v", err)
+		}
+	}
+
+	// The create duplicate guard sees the legacy rows from either variant.
+	for _, variant := range []string{"98765 43210", "+91 98765 43210", "09876543210"} {
+		_, err := svc.create(CreateRequest{Name: "Newcomer", Phone: variant})
+		var dup *DuplicateError
+		if !errors.As(err, &dup) {
+			t.Fatalf("create %q = %v, want DuplicateError against the legacy rows", variant, err)
+		}
+	}
+
+	// Resolve sees them too.
+	matches, err := svc.resolveByPhone("+91 98765 43210")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("matches = %d, want 2 (both storage generations)", len(matches))
+	}
+}
+
+func TestBulkImportStoresCanonicalPhonesIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Phone: "09876543210"},
+		{Name: "Bob", Phone: "+91 22222 22222"},
+	}})
+	if err != nil {
+		t.Fatalf("bulkCreate: %v", err)
+	}
+	if resp.Imported != 2 || resp.Failed != 0 {
+		t.Fatalf("import = %+v, want 2 imported", resp)
+	}
+
+	var count int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM contact_phones WHERE value IN ('+919876543210', '+912222222222')`,
+	).Scan(&count); err != nil {
+		t.Fatalf("count canonical phones: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("canonical stored phones = %d, want 2", count)
 	}
 }
 
@@ -1015,7 +1144,7 @@ func TestPartialUpdateKeepsUnsentPhoneEmailTypeIntegration(t *testing.T) {
 	if len(updated.Emails) != 1 || updated.Emails[0].Value != "alice@example.com" {
 		t.Errorf("phones-only update wiped emails: %+v", updated.Emails)
 	}
-	if len(updated.Phones) != 1 || updated.Phones[0].Value != "2222222222" || !updated.Phones[0].IsPrimary {
+	if len(updated.Phones) != 1 || updated.Phones[0].Value != "+912222222222" || !updated.Phones[0].IsPrimary {
 		t.Errorf("phones not replaced by update: %+v", updated.Phones)
 	}
 
@@ -1025,7 +1154,7 @@ func TestPartialUpdateKeepsUnsentPhoneEmailTypeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("emails-only update: %v", err)
 	}
-	if len(updated.Phones) != 1 || updated.Phones[0].Value != "2222222222" {
+	if len(updated.Phones) != 1 || updated.Phones[0].Value != "+912222222222" {
 		t.Errorf("emails-only update wiped phones: %+v", updated.Phones)
 	}
 	if len(updated.Emails) != 1 || updated.Emails[0].Value != "bob@example.com" {
@@ -1068,7 +1197,7 @@ func TestExactlyOnePrimaryEnforcedOnInsertIntegration(t *testing.T) {
 	).Scan(&firstPrimary); err != nil {
 		t.Fatalf("read primary phone: %v", err)
 	}
-	if firstPrimary != "1111111111" {
+	if firstPrimary != "+911111111111" {
 		t.Errorf("primary phone = %q, want the first marked entry", firstPrimary)
 	}
 

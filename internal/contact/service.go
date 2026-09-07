@@ -3,6 +3,7 @@ package contact
 import (
 	"crm/internal/audit"
 	"crm/internal/lead"
+	"crm/internal/settings"
 	"crm/internal/util"
 	"database/sql"
 	"encoding/json"
@@ -316,10 +317,16 @@ func (s *Service) populateTagsAndStatus(contacts []Contact, contactIDs []string)
 }
 
 // resolveByPhone returns the contacts whose stored phone matches the given
-// number after normalization (digits only). Used by lead entry to ask the
-// user whether to link or create — phone is the duplicate signal.
+// number after normalization. Used by lead entry to ask the user whether to
+// link or create — phone is the duplicate signal. Both storage generations
+// match: canonical rows store country-coded digits, legacy rows the national
+// form.
 func (s *Service) resolveByPhone(phone string) ([]ResolveMatch, error) {
-	key := util.NormalizePhone(phone)
+	defaultCC, err := settings.DefaultCountryCode(s.db)
+	if err != nil {
+		return nil, err
+	}
+	key, codedKey := util.PhoneLookupKeys(phone, defaultCC)
 	if key == "" {
 		return []ResolveMatch{}, nil
 	}
@@ -335,9 +342,12 @@ func (s *Service) resolveByPhone(phone string) ([]ResolveMatch, error) {
 			SELECT value FROM contact_emails WHERE contact_id = c.id AND is_primary LIMIT 1
 		) ece ON true
 		WHERE c.deleted_at IS NULL
-		  AND regexp_replace(cp.value, '\D', '', 'g') IN ($1, '91' || $1)
+		  AND (
+			regexp_replace(cp.value, '\D', '', 'g') IN ($1, $2)
+			OR ltrim(regexp_replace(cp.value, '\D', '', 'g'), '0') = $1
+		  )
 		ORDER BY c.id, c.updated_at DESC`,
-		key,
+		key, codedKey,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resolve contact by phone: %w", err)
@@ -438,6 +448,18 @@ func (s *Service) get(id string) (*Contact, error) {
 }
 
 func (s *Service) create(req CreateRequest) (*Contact, error) {
+	// Phones are canonicalized to one stored form ('+' + digits) at every
+	// entry point, so duplicates and lookups compare canonical values.
+	defaultCC, err := settings.DefaultCountryCode(s.db)
+	if err != nil {
+		return nil, err
+	}
+	if req.Phone != "" {
+		req.Phone = util.CanonicalPhone(req.Phone, defaultCC)
+	}
+	for i := range req.Phones {
+		req.Phones[i].Value = util.CanonicalPhone(req.Phones[i].Value, defaultCC)
+	}
 	// Fold the scalar phone/email form fields into the child-row lists so the
 	// rest of the create path deals with lists only.
 	if req.Phone != "" && len(req.Phones) == 0 {
@@ -508,9 +530,18 @@ func primaryValue[T valueEntry](entries []T) string {
 // collides with the given phone/email after normalization, using targeted
 // indexed lookups rather than scanning the whole contact table.
 func (s *Service) duplicateMatches(phone, email string) ([]DuplicateMatch, error) {
-	p := util.NormalizePhone(phone)
 	e := util.NormalizeEmail(email)
-	if p == "" && e == "" {
+	// The phone is matched in both storage generations: canonical rows store
+	// country-coded digits, legacy rows store the national form.
+	phoneKey, codedKey := "", ""
+	if phone != "" {
+		defaultCC, err := settings.DefaultCountryCode(s.db)
+		if err != nil {
+			return nil, err
+		}
+		phoneKey, codedKey = util.PhoneLookupKeys(phone, defaultCC)
+	}
+	if phoneKey == "" && e == "" {
 		return nil, nil
 	}
 	// Match on the primary phone/email of existing live contacts, plus any
@@ -530,16 +561,19 @@ func (s *Service) duplicateMatches(phone, email string) ([]DuplicateMatch, error
 			($1 <> '' AND EXISTS (
 				SELECT 1 FROM contact_phones cp
 				WHERE cp.contact_id = c.id
-				  AND regexp_replace(cp.value, '\D', '', 'g') IN ($1, '91' || $1)
+				  AND (
+					regexp_replace(cp.value, '\D', '', 'g') IN ($1, $2)
+					OR ltrim(regexp_replace(cp.value, '\D', '', 'g'), '0') = $1
+				  )
 			))
 			OR
-			($2 <> '' AND EXISTS (
+			($3 <> '' AND EXISTS (
 				SELECT 1 FROM contact_emails ce
 				WHERE ce.contact_id = c.id
-				  AND lower(trim(ce.value)) = $2
+				  AND lower(trim(ce.value)) = $3
 			))
 		  )`,
-		p, e,
+		phoneKey, codedKey, e,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("find duplicate contacts: %w", err)
@@ -729,6 +763,21 @@ func insertEmailRows(q queryer, contactID string, emails []EmailValue) error {
 
 func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact, error) {
 	if req.Phones != nil || req.Emails != nil || req.TagIDs != nil || req.Phone != nil || req.Email != nil {
+		// Phones are canonicalized to one stored form ('+' + digits) at every
+		// entry point, so duplicates and lookups compare canonical values.
+		defaultCC, err := settings.DefaultCountryCode(s.db)
+		if err != nil {
+			return nil, err
+		}
+		if req.Phone != nil {
+			canonical := util.CanonicalPhone(*req.Phone, defaultCC)
+			req.Phone = &canonical
+		}
+		if req.Phones != nil {
+			for i := range *req.Phones {
+				(*req.Phones)[i].Value = util.CanonicalPhone((*req.Phones)[i].Value, defaultCC)
+			}
+		}
 		var phones []PhoneValue
 		if req.Phones != nil {
 			phones = *req.Phones

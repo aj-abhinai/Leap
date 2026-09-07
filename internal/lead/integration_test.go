@@ -47,6 +47,71 @@ func TestCreateLeadStoresActorIntegration(t *testing.T) {
 	}
 }
 
+// The contact created through lead entry stores the phone in the same
+// canonical form ('+' + digits) as every other entry point.
+func TestLeadEntryContactStoresCanonicalPhoneIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	if _, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice Example", Phone: "98765 43210"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, ""); err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	var stored string
+	if err := db.QueryRow(`SELECT value FROM contact_phones`).Scan(&stored); err != nil {
+		t.Fatalf("load stored phone: %v", err)
+	}
+	if stored != "+919876543210" {
+		t.Errorf("stored phone = %q, want +919876543210", stored)
+	}
+}
+
+// A phone with no digits at all is not a contact detail: lead entry rejects
+// it exactly like the contact module, instead of storing an empty row. A
+// valid email alongside it keeps the create legal and simply skips the phone.
+func TestLeadEntryRejectsDigitslessPhoneIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	_, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice Example", Phone: "+"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if !errors.Is(err, ErrNoContactDetail) {
+		t.Fatalf("create lead = %v, want ErrNoContactDetail", err)
+	}
+	var contacts int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM contacts`).Scan(&contacts); err != nil {
+		t.Fatalf("count contacts: %v", err)
+	}
+	if contacts != 0 {
+		t.Errorf("contacts = %d, want 0 (no empty phone rows)", contacts)
+	}
+
+	// With an email present the same create is legal and stores no phone.
+	if _, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Bob Example", Phone: "+", Email: "bob@example.com"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, ""); err != nil {
+		t.Fatalf("create lead with email: %v", err)
+	}
+	var phoneRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM contact_phones`).Scan(&phoneRows); err != nil {
+		t.Fatalf("count phone rows: %v", err)
+	}
+	if phoneRows != 0 {
+		t.Errorf("phone rows = %d, want 0 (digitsless phone must be skipped)", phoneRows)
+	}
+}
+
 func TestCreateLeadWithoutActorStoresNullActorIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
