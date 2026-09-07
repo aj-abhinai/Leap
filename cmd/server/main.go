@@ -218,6 +218,8 @@ func main() {
 			r.Get("/api/activities", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListAllActivities))
 			r.Get("/api/settings/nudge-lead-minutes", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.GetNudgeLeadMinutes))
 			r.Put("/api/settings/nudge-lead-minutes", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.SetNudgeLeadMinutes))
+			r.Get("/api/settings/default-country-code", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.GetDefaultCountryCode))
+			r.Put("/api/settings/default-country-code", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.SetDefaultCountryCode))
 			r.Patch("/api/leads/{lead_id}/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
 			r.Post("/api/leads/{lead_id}/reminders/{id}/snooze", middleware.RequirePermission(rbacSvc, "lead:write", leadH.SnoozeReminder))
 

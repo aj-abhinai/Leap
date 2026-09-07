@@ -10,3 +10,11 @@ export function getNudgeLeadMinutes(): Promise<ApiResponse<{ minutes: number }>>
 export function setNudgeLeadMinutes(minutes: number): Promise<ApiResponse<{ minutes: number }>> {
   return apiClient.put('/api/settings/nudge-lead-minutes', { minutes })
 }
+
+export function getDefaultCountryCode(): Promise<ApiResponse<{ country_code: string }>> {
+  return apiClient.get('/api/settings/default-country-code')
+}
+
+export function setDefaultCountryCode(countryCode: string): Promise<ApiResponse<{ country_code: string }>> {
+  return apiClient.put('/api/settings/default-country-code', { country_code: countryCode })
+}

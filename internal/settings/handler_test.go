@@ -1,0 +1,113 @@
+package settings
+
+import (
+	"crm/internal/testdb"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+)
+
+func TestDefaultCountryCodeGetDefaultsAndPersists(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	h := NewHandler(svc)
+
+	r := chi.NewRouter()
+	r.Get("/api/settings/default-country-code", h.GetDefaultCountryCode)
+	r.Put("/api/settings/default-country-code", h.SetDefaultCountryCode)
+
+	// No row → the code default.
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/default-country-code", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET default = %d, want 200", rr.Code)
+	}
+	var env struct {
+		Data struct {
+			CountryCode string `json:"country_code"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.Data.CountryCode != "+91" {
+		t.Errorf("default = %q, want +91", env.Data.CountryCode)
+	}
+
+	// PUT persists; GET returns the stored value.
+	req = httptest.NewRequest(
+		http.MethodPut,
+		"/api/settings/default-country-code",
+		strings.NewReader(`{"country_code":"+971"}`),
+	)
+	rr = httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT = %d, want 200", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/settings/default-country-code", nil)
+	rr = httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	env = struct {
+		Data struct {
+			CountryCode string `json:"country_code"`
+		} `json:"data"`
+	}{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.Data.CountryCode != "+971" {
+		t.Errorf("stored = %q, want +971", env.Data.CountryCode)
+	}
+}
+
+// A malformed code is rejected so a bad row can never be stamped onto stored
+// phone numbers by the canonicalization paths.
+func TestDefaultCountryCodeRejectsMalformed(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	for _, raw := range []string{"", "91", "+", "+9a1", "++91", "+91 234", "+1234"} {
+		err := svc.SetDefaultCountryCode(raw)
+		if err == nil {
+			t.Errorf("SetDefaultCountryCode(%q) accepted, want rejection", raw)
+		}
+	}
+
+	if err := svc.SetDefaultCountryCode("+971"); err != nil {
+		t.Fatalf("SetDefaultCountryCode(+971): %v", err)
+	}
+	cc, err := DefaultCountryCode(db)
+	if err != nil {
+		t.Fatalf("read stored code: %v", err)
+	}
+	if cc != "+971" {
+		t.Errorf("stored code = %q, want +971", cc)
+	}
+}
+
+// The handler surfaces a malformed code as a 400 so the UI shows the
+// validation message rather than a server error.
+func TestDefaultCountryCodeHandlerRejectsMalformed(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	r := chi.NewRouter()
+	r.Put("/api/settings/default-country-code", h.SetDefaultCountryCode)
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/settings/default-country-code",
+		strings.NewReader(`{"country_code":"9 1"}`),
+	)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("PUT malformed = %d, want 400", rr.Code)
+	}
+}

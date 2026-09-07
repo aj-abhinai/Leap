@@ -114,3 +114,35 @@ func (s *Service) SetNudgeLeadMinutes(minutes int) error {
 	}
 	return nil
 }
+
+// GetDefaultCountryCode returns the org's default country code, defaulting to
+// DefaultDefaultCountryCode when unset or malformed.
+func (s *Service) GetDefaultCountryCode() (string, error) {
+	return DefaultCountryCode(s.db)
+}
+
+// SetDefaultCountryCode stores the org's default country code. The value must
+// be a '+' followed by one to three digits (ITU calling codes); anything else
+// is rejected so a malformed code can never be stamped onto stored numbers.
+func (s *Service) SetDefaultCountryCode(code string) error {
+	code = strings.TrimSpace(code)
+	if len(code) < 2 || code[0] != '+' {
+		return errors.New("country code must be '+' followed by 1 to 3 digits")
+	}
+	for _, r := range code[1:] {
+		if r < '0' || r > '9' {
+			return errors.New("country code must be '+' followed by 1 to 3 digits")
+		}
+	}
+	if len(code) > 4 {
+		return errors.New("country code must be '+' followed by 1 to 3 digits")
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, now())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+		DefaultCountryCodeKey, code,
+	); err != nil {
+		return fmt.Errorf("set default country code: %w", err)
+	}
+	return nil
+}

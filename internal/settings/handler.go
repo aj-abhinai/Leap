@@ -54,3 +54,41 @@ func (h *Handler) SetNudgeLeadMinutes(w http.ResponseWriter, r *http.Request) {
 	}
 	respond.JSON(w, http.StatusOK, map[string]int{"minutes": req.Minutes}, nil, nil)
 }
+
+// GetDefaultCountryCode serves GET /api/settings/default-country-code.
+func (h *Handler) GetDefaultCountryCode(w http.ResponseWriter, r *http.Request) {
+	code, err := h.svc.GetDefaultCountryCode()
+	if err != nil {
+		respond.ServerError(w, err)
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]string{"country_code": code}, nil, nil)
+}
+
+// SetDefaultCountryCode serves PUT /api/settings/default-country-code.
+func (h *Handler) SetDefaultCountryCode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CountryCode string `json:"country_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	if err := h.svc.SetDefaultCountryCode(req.CountryCode); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+			nil,
+		)
+		return
+	}
+	respond.JSON(w, http.StatusOK, map[string]string{"country_code": req.CountryCode}, nil, nil)
+}
