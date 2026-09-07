@@ -390,9 +390,13 @@ func (s *Service) attachOpenLeads(matches []ResolveMatch) error {
 	for rows.Next() {
 		var contactID string
 		var ref lead.OpenLeadRef
+		var programIDNull sql.NullString
 		if err := rows.Scan(&contactID, &ref.ID, &ref.DisplayName, &ref.StageName,
-			&ref.ProgramName, &ref.ProgramID, &ref.PipelineID, &ref.PipelineName); err != nil {
+			&ref.ProgramName, &programIDNull, &ref.PipelineID, &ref.PipelineName); err != nil {
 			return fmt.Errorf("resolve open leads: scan: %w", err)
+		}
+		if programIDNull.Valid {
+			ref.ProgramID = &programIDNull.String
 		}
 		openByContact[contactID] = append(openByContact[contactID], ref)
 	}

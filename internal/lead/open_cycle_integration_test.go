@@ -407,6 +407,60 @@ func TestUpdateSlotKeyIntoClosingStageAllowedIntegration(t *testing.T) {
 	}
 }
 
+func TestClosedLeadSlotKeyEditAllowedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var pipelineID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Terminal Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	var openStage, wonStage string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'Open', 0) RETURNING id`, pipelineID).Scan(&openStage); err != nil {
+		t.Fatalf("seed open stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 1, true, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
+		t.Fatalf("seed won stage: %v", err)
+	}
+	programX := seedProgram(t, db, "Coaching", 25000)
+	programY := seedProgram(t, db, "Mentorship", 40000)
+
+	// The slot (contact, pipeline, program X) is held by an OPEN lead.
+	if _, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+		ProgramID:  &programX,
+	}, ""); err != nil {
+		t.Fatalf("create holder lead: %v", err)
+	}
+	closed, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+		ProgramID:  &programY,
+	}, "")
+	if err != nil {
+		t.Fatalf("create second lead: %v", err)
+	}
+	if _, err := svc.update(closed.ID, UpdateRequest{StageID: &wonStage}, ""); err != nil {
+		t.Fatalf("close second lead: %v", err)
+	}
+
+	// A closed (terminal) lead holds no slot, so re-sloting it into a held
+	// program cannot create a duplicate open deal.
+	updated, err := svc.update(closed.ID, UpdateRequest{ProgramID: &programX}, "")
+	if err != nil {
+		t.Fatalf("re-slot closed lead = %v, want allowed", err)
+	}
+	if updated.ProgramID == nil || *updated.ProgramID != programX {
+		t.Errorf("closed lead program = %+v, want %q", updated.ProgramID, programX)
+	}
+	if updated.Outcome != "won" {
+		t.Errorf("closed lead outcome = %q, want won (still terminal)", updated.Outcome)
+	}
+}
+
 func TestConcurrentCreatesOneOpenLeadWinsIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
