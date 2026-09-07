@@ -5,6 +5,7 @@ import (
 	"crm/internal/config"
 	"crm/internal/util"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 )
@@ -29,6 +30,9 @@ func Seed(db *sql.DB, authCfg config.Auth, superadmin config.Superadmin) error {
 	}
 	if err := seedSuperadminRole(db, superadmin); err != nil {
 		return fmt.Errorf("seed superadmin role: %w", err)
+	}
+	if err := seedSystemRoles(db); err != nil {
+		return fmt.Errorf("seed system roles: %w", err)
 	}
 	if err := seedDefaultPipeline(db); err != nil {
 		return fmt.Errorf("seed default pipeline: %w", err)
@@ -95,7 +99,6 @@ func seedPermissions(db *sql.DB) error {
 		{Name: "lead:read", Desc: "View leads and pipelines"},
 		{Name: "lead:write", Desc: "Create, update, move and delete leads"},
 		{Name: "settings:manage", Desc: "Manage settings: pipelines, programs, tags, users, roles, permissions"},
-		{Name: "activity:read", Desc: "View audit log"},
 		{Name: "data:export", Desc: "Export contacts and leads to CSV"},
 	}
 	for _, p := range perms {
@@ -106,6 +109,12 @@ func seedPermissions(db *sql.DB) error {
 		if err != nil {
 			return fmt.Errorf("seed permission %s: %w", p.Name, err)
 		}
+	}
+	// The retired permission is removed by migration; this sweep keeps the
+	// catalog clean on databases that booted an intermediate build that still
+	// seeded it (links cascade away).
+	if _, err := db.Exec(`DELETE FROM permissions WHERE name = 'activity:read'`); err != nil {
+		return fmt.Errorf("sweep retired permission: %w", err)
 	}
 	slog.Info("default permissions seeded")
 	return nil
@@ -132,7 +141,7 @@ func ensureSuperadminRole(q querier, email string, assign bool) error {
 		return fmt.Errorf("check existing superadmin role: %w", err)
 	}
 	if !exists {
-		if _, err := q.Exec(`INSERT INTO roles (name, description) VALUES ('superadmin', 'Full system access')`); err != nil {
+		if _, err := q.Exec(`INSERT INTO roles (name, description, is_system) VALUES ('superadmin', 'Full system access', true)`); err != nil {
 			return fmt.Errorf("insert superadmin role: %w", err)
 		}
 	}
@@ -162,6 +171,77 @@ func ensureSuperadminRole(q querier, email string, assign bool) error {
 			return fmt.Errorf("assign superadmin role: %w", err)
 		}
 	}
+	return nil
+}
+
+// seedSystemRoles seeds the Sales and Viewer roles (idempotent, every boot).
+// They carry the permission sets the product was designed around, so the
+// owner picks one from the new-user form instead of building a role from
+// scratch. The roles are marked is_system: the delete and rename guards keep
+// them permanent, so this seed never resurrects a deleted role — the
+// migration that introduced the flag backfilled it for every pre-existing
+// row with these names. Only the fresh insert carries the canonical
+// permission set — later permission edits by an admin are the admin's to
+// keep, and are never re-asserted on restart. The insert and its links
+// commit in one transaction, so an interrupted boot cannot leave a permanent
+// role with no permissions.
+func seedSystemRoles(db *sql.DB) error {
+	systemRoles := []struct {
+		Name        string
+		Description string
+		Permissions []string
+	}{
+		{
+			Name:        "Sales",
+			Description: "Full contact and lead workflow",
+			Permissions: []string{"contact:read", "contact:write", "lead:read", "lead:write"},
+		},
+		{
+			Name:        "Viewer",
+			Description: "Read-only access to contacts and leads",
+			Permissions: []string{"contact:read", "lead:read"},
+		},
+	}
+	for _, role := range systemRoles {
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("seed role %s: %w", role.Name, err)
+		}
+		var roleID string
+		err = tx.QueryRow(
+			`INSERT INTO roles (name, description, is_system) VALUES ($1, $2, true)
+			ON CONFLICT (name) DO NOTHING
+			RETURNING id`,
+			role.Name, role.Description,
+		).Scan(&roleID)
+		if errors.Is(err, sql.ErrNoRows) {
+			// The role already exists — either seeded on an earlier boot or a
+			// pre-migration custom role with the same name (which the flag
+			// migration promoted to system). It is left exactly as it is: an
+			// admin's edits to a system role are never overwritten.
+			tx.Rollback()
+			continue
+		}
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("seed role %s: %w", role.Name, err)
+		}
+		for _, perm := range role.Permissions {
+			if _, err := tx.Exec(
+				`INSERT INTO role_permissions (role_id, permission_id)
+				SELECT $1, id FROM permissions WHERE name = $2
+				ON CONFLICT DO NOTHING`,
+				roleID, perm,
+			); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("seed role permission %s/%s: %w", role.Name, perm, err)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("seed role %s: %w", role.Name, err)
+		}
+	}
+	slog.Info("system roles seeded")
 	return nil
 }
 

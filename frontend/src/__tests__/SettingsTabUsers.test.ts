@@ -53,6 +53,7 @@ describe('SettingsTabUsers', () => {
             { id: 'r1', name: 'editor' },
             { id: 'r2', name: 'manager' },
             { id: 'r3', name: 'superadmin' },
+            { id: 'r4', name: 'Sales' },
           ],
         }
       }
@@ -75,7 +76,7 @@ describe('SettingsTabUsers', () => {
     const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
-    const select = wrapper.find('select')
+    const select = wrapper.find('select[aria-label="Role for Alice"]')
     await select.setValue('r2')
     await flushPromises()
 
@@ -86,11 +87,38 @@ describe('SettingsTabUsers', () => {
     const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
-    const select = wrapper.find('select')
+    const select = wrapper.find('select[aria-label="Role for Alice"]')
     await select.setValue('')
     await flushPromises()
 
     expect(putMock).toHaveBeenCalledWith('/api/users/u1/role', { role_id: '' })
+  })
+
+  it('preselects Sales in the create form and sends it with the user', async () => {
+    const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
+    await flushPromises()
+
+    const createRole = wrapper.find('select[aria-label^="Role for"]')
+    // Sales is preselected by default — no interaction needed.
+    expect((createRole.element as HTMLSelectElement).value).toBe('r4')
+    const options = createRole.findAll('option').map((o) => o.text())
+    expect(options).toContain('Sales')
+
+    await wrapper.find('input[placeholder="Name"]').setValue('New Rep')
+    await wrapper.find('input[placeholder="Email"]').setValue('rep@example.com')
+    await wrapper.find('input[placeholder*="Password"]').setValue('Strong-Pass-123')
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+
+    expect(postMock).toHaveBeenCalledWith('/api/users', {
+      name: 'New Rep',
+      email: 'rep@example.com',
+      password: 'Strong-Pass-123',
+      role_id: 'r4',
+    })
+
+    // A second user starts from the Sales preselect again.
+    expect((createRole.element as HTMLSelectElement).value).toBe('r4')
   })
 
   it('hides the superadmin option from non-wildcard users', async () => {
@@ -99,7 +127,8 @@ describe('SettingsTabUsers', () => {
 
     const selects = wrapper.findAll('select')
     // The first user (editor) and the second (no role) are not superadmins,
-    // so neither dropdown may offer the superadmin option.
+    // so neither dropdown may offer the superadmin option. The create form
+    // is equally restricted.
     for (const select of selects) {
       const options = select.findAll('option').map((o) => o.text())
       expect(options).not.toContain('superadmin')

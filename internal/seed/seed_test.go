@@ -187,6 +187,121 @@ func TestSeedSeedsTagCatalog(t *testing.T) {
 	}
 }
 
+func TestSeedSeedsSystemRoles(t *testing.T) {
+	db := testdb.New(t)
+	superadmin := config.Superadmin{Email: "admin@admin.com", Password: "admin"}
+
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+
+	// The seeded trio is permanent (is_system): superadmin from the bootstrap
+	// path, Sales and Viewer from the system-role catalog.
+	want := map[string]struct {
+		permissions map[string]bool
+	}{
+		"superadmin": {permissions: map[string]bool{"*": true}},
+		"Sales":      {permissions: map[string]bool{"contact:read": true, "contact:write": true, "lead:read": true, "lead:write": true}},
+		"Viewer":     {permissions: map[string]bool{"contact:read": true, "lead:read": true}},
+	}
+	for name, spec := range want {
+		var isSystem bool
+		if err := db.QueryRow(`SELECT is_system FROM roles WHERE name = $1`, name).Scan(&isSystem); err != nil {
+			t.Fatalf("load role %s: %v", name, err)
+		}
+		if !isSystem {
+			t.Errorf("role %s is_system = false, want true", name)
+		}
+		rows, err := db.Query(
+			`SELECT p.name FROM role_permissions rp
+			JOIN roles r ON r.id = rp.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE r.name = $1`,
+			name,
+		)
+		if err != nil {
+			t.Fatalf("load role permissions %s: %v", name, err)
+		}
+		got := map[string]bool{}
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err != nil {
+				t.Fatalf("scan role permission %s: %v", name, err)
+			}
+			got[p] = true
+		}
+		rows.Close()
+		for perm := range spec.permissions {
+			if !got[perm] {
+				t.Errorf("role %s missing permission %s", name, perm)
+			}
+		}
+		for perm := range got {
+			if !spec.permissions[perm] {
+				t.Errorf("role %s carries unexpected permission %s", name, perm)
+			}
+		}
+	}
+
+	// The retired permission must not exist after seeding.
+	var retired int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM permissions WHERE name = 'activity:read'`).Scan(&retired); err != nil {
+		t.Fatalf("count activity:read: %v", err)
+	}
+	if retired != 0 {
+		t.Errorf("activity:read count = %d, want 0 (retired)", retired)
+	}
+
+	// A second boot must not duplicate roles or add stray permissions.
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("second Seed: %v", err)
+	}
+	var roles int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM roles WHERE name IN ('Sales', 'Viewer')`).Scan(&roles); err != nil {
+		t.Fatalf("count seeded roles: %v", err)
+	}
+	if roles != 2 {
+		t.Errorf("Sales/Viewer rows = %d, want 2 (idempotent)", roles)
+	}
+}
+
+// The system-role catalog seeds the canonical permission set only on the
+// fresh insert; a permission edit by an admin must survive every later boot.
+func TestSeedNeverReassertsEditedSystemRolePermissions(t *testing.T) {
+	db := testdb.New(t)
+	superadmin := config.Superadmin{Email: "admin@admin.com", Password: "admin"}
+
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if _, err := db.Exec(
+		`DELETE FROM role_permissions rp
+		USING roles r, permissions p
+		WHERE rp.role_id = r.id AND rp.permission_id = p.id
+		  AND r.name = 'Sales' AND p.name = 'lead:write'`,
+	); err != nil {
+		t.Fatalf("remove lead:write from Sales: %v", err)
+	}
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("second Seed: %v", err)
+	}
+
+	var linked bool
+	if err := db.QueryRow(
+		`SELECT EXISTS(
+			SELECT 1 FROM role_permissions rp
+			JOIN roles r ON r.id = rp.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE r.name = 'Sales' AND p.name = 'lead:write'
+		)`,
+	).Scan(&linked); err != nil {
+		t.Fatalf("check lead:write link: %v", err)
+	}
+	if linked {
+		t.Error("lead:write was re-asserted on Sales after the admin removed it")
+	}
+}
+
 func assertBootstrapAdmin(t *testing.T, db *sql.DB, email string, wantChangePassword bool) {
 	t.Helper()
 

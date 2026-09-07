@@ -407,6 +407,192 @@ func TestRemoveLastManagePermissionBlocked(t *testing.T) {
 	_ = managerID
 }
 
+func TestDeleteSystemRoleBlocked(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var roleID string
+	if err := db.QueryRow(
+		`INSERT INTO roles (name, description, is_system) VALUES ('Sales', 'Seeded', true) RETURNING id`,
+	).Scan(&roleID); err != nil {
+		t.Fatalf("insert system role: %v", err)
+	}
+
+	err := svc.deleteRole(roleID, "")
+	if !errors.Is(err, ErrSystemRoleProtected) {
+		t.Fatalf("deleteRole(system) = %v, want ErrSystemRoleProtected", err)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM roles WHERE id = $1`, roleID).Scan(&count); err != nil {
+		t.Fatalf("count roles: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("system role count = %d, want 1", count)
+	}
+
+	// The flag — not the name — is the guard: a custom role is deletable
+	// even when it carries the same permission set.
+	var customID string
+	if err := db.QueryRow(
+		`INSERT INTO roles (name, description) VALUES ('Custom Sales', 'Custom') RETURNING id`,
+	).Scan(&customID); err != nil {
+		t.Fatalf("insert custom role: %v", err)
+	}
+	if err := svc.deleteRole(customID, ""); err != nil {
+		t.Fatalf("deleteRole(custom) = %v, want allowed", err)
+	}
+}
+
+func TestListRolesIncludesIsSystem(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var systemID string
+	if err := db.QueryRow(
+		`INSERT INTO roles (name, description, is_system) VALUES ('Viewer', 'Seeded', true) RETURNING id`,
+	).Scan(&systemID); err != nil {
+		t.Fatalf("insert system role: %v", err)
+	}
+	insertRole(t, db, "ops")
+
+	roles, err := svc.listRoles()
+	if err != nil {
+		t.Fatalf("listRoles: %v", err)
+	}
+	byID := map[string]Role{}
+	for _, r := range roles {
+		byID[r.ID] = r
+	}
+	if !byID[systemID].IsSystem {
+		t.Errorf("Viewer role is_system = false, want true")
+	}
+	for _, r := range roles {
+		if r.ID != systemID && r.IsSystem {
+			t.Errorf("role %s is_system = true, want false", r.Name)
+		}
+	}
+}
+
+func TestCreateUserWithRoleAssigned(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	salesID := insertRole(t, db, "Sales")
+	u, err := svc.createUser("Rep", "rep@example.com", "Password-123", salesID, "")
+	if err != nil {
+		t.Fatalf("createUser with role: %v", err)
+	}
+	if u.Role == nil || u.Role.ID != salesID {
+		t.Errorf("created user role = %+v, want Sales role", u.Role)
+	}
+
+	var mustChange bool
+	if err := db.QueryRow(`SELECT must_change_password FROM users WHERE id = $1`, u.ID).Scan(&mustChange); err != nil {
+		t.Fatalf("load must_change_password: %v", err)
+	}
+	if !mustChange {
+		t.Error("admin-created user must be forced to change password at first login")
+	}
+}
+
+func TestCreateUserWithMissingRoleReturnsNotFound(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	_, err := svc.createUser(
+		"Rep", "rep@example.com", "Password-123",
+		"00000000-0000-0000-0000-000000000000", "",
+	)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("createUser(missing role) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateUserSuperadminRoleRestricted(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	managerID, _ := seedManager(t, db, "manager@example.com")
+	superRoleID := insertRole(t, db, "superadmin")
+	wildcardID := insertPermission(t, db, "*")
+	if _, err := db.Exec(
+		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)`,
+		superRoleID, wildcardID,
+	); err != nil {
+		t.Fatalf("assign wildcard: %v", err)
+	}
+
+	// A settings:manage holder cannot mint a superadmin via user creation.
+	_, err := svc.createUser("Puppet", "puppet@example.com", "Password-123", superRoleID, managerID)
+	if !errors.Is(err, ErrSuperadminAssignmentRestricted) {
+		t.Fatalf("createUser(superadmin by manager) = %v, want ErrSuperadminAssignmentRestricted", err)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE email = 'puppet@example.com'`).Scan(&count); err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("users after blocked create = %d, want 0 (no partial write)", count)
+	}
+
+	// A wildcard holder may assign the superadmin role at creation.
+	actorRoleID := insertRole(t, db, "boss-superadmin")
+	var actorID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Super', 'super@example.com', 'hash', $1) RETURNING id`,
+		actorRoleID,
+	).Scan(&actorID); err != nil {
+		t.Fatalf("insert superadmin actor: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)`,
+		actorRoleID, wildcardID,
+	); err != nil {
+		t.Fatalf("assign wildcard to actor role: %v", err)
+	}
+	u, err := svc.createUser("Puppet2", "puppet2@example.com", "Password-123", superRoleID, actorID)
+	if err != nil {
+		t.Fatalf("createUser(superadmin by superadmin): %v", err)
+	}
+	if u.Role == nil || u.Role.ID != superRoleID {
+		t.Errorf("created user role = %+v, want superadmin role", u.Role)
+	}
+}
+
+func TestRenameSystemRoleBlocked(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var systemID string
+	if err := db.QueryRow(
+		`INSERT INTO roles (name, description, is_system) VALUES ('Sales', 'Seeded', true) RETURNING id`,
+	).Scan(&systemID); err != nil {
+		t.Fatalf("insert system role: %v", err)
+	}
+
+	_, err := svc.updateRole(systemID, UpdateRoleRequest{Name: strPtr("Sales Team")}, "")
+	if !errors.Is(err, ErrSystemRoleProtected) {
+		t.Fatalf("updateRole(rename system) = %v, want ErrSystemRoleProtected", err)
+	}
+
+	// Description edits stay allowed on system roles.
+	role, err := svc.updateRole(systemID, UpdateRoleRequest{Description: strPtr("Full contact and lead workflow")}, "")
+	if err != nil {
+		t.Fatalf("updateRole(description) = %v, want allowed", err)
+	}
+	if role.Name != "Sales" {
+		t.Errorf("role name = %q, want Sales (rename must be refused)", role.Name)
+	}
+	if role.Description != "Full contact and lead workflow" {
+		t.Errorf("description = %q, want updated", role.Description)
+	}
+	if !role.IsSystem {
+		t.Error("updated system role lost its is_system flag")
+	}
+}
+
 func TestDeleteRoleInUseBlocked(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

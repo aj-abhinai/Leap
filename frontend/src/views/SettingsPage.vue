@@ -40,7 +40,7 @@ onMounted(async () => {
   } finally {
     // Permissions resolve in every path so tabs never stay stuck visible.
     permissionsLoaded.value = true
-    if (rbac.can('activity:read')) loadActivity()
+    if (rbac.can('settings:manage')) loadActivity()
   }
 })
 
@@ -115,7 +115,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
           <BookOpen class="size-4" />
           <span class="hidden sm:inline">Programs</span>
         </TabsTrigger>
-        <TabsTrigger v-show="canOrLoading('activity:read')" value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
+        <TabsTrigger v-show="canOrLoading('settings:manage')" value="activity" class="gap-2 rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">
           <Activity class="size-4" />
           <span class="hidden sm:inline">Activity</span>
         </TabsTrigger>
@@ -145,7 +145,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
         <SettingsTabPrograms />
       </TabsContent>
 
-      <TabsContent v-if="canOrLoading('activity:read')" value="activity" class="mt-0">
+      <TabsContent v-if="canOrLoading('settings:manage')" value="activity" class="mt-0">
         <Card>
           <CardHeader class="flex flex-row items-center justify-between">
             <CardTitle>Activity Log</CardTitle>

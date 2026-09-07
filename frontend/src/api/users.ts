@@ -6,7 +6,7 @@ export interface User {
   id: string
   name: string
   email: string
-  role?: { id: string; name: string } | null
+  role?: { id: string; name: string; is_system?: boolean } | null
   protected?: boolean
   created_at: string
 }
@@ -24,7 +24,12 @@ export function listUserOptions(): Promise<ApiResponse<UserOption[]>> {
   return apiClient.get('/api/users/options')
 }
 
-export function createUser(body: { name: string; email: string; password: string }): Promise<ApiResponse<User>> {
+export function createUser(body: {
+  name: string
+  email: string
+  password: string
+  role_id?: string
+}): Promise<ApiResponse<User>> {
   return apiClient.post('/api/users', body)
 }
 

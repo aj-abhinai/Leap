@@ -45,6 +45,11 @@ var (
 	// hold; deleting it would silently strip those users of their role.
 	ErrRoleInUse = errors.New("role is assigned to one or more users")
 
+	// ErrSystemRoleProtected is returned when deleting or renaming a seeded
+	// role (is_system). System roles are permanent by name; their description
+	// and permissions stay editable.
+	ErrSystemRoleProtected = errors.New("system roles are permanent and cannot be renamed or deleted")
+
 	// ErrNotFound marks mutations targeting a role or user that does not
 	// exist.
 	ErrNotFound = errors.New("role or user not found")
@@ -97,7 +102,7 @@ func (s *Service) listPermissions() ([]Permission, error) {
 }
 
 func (s *Service) listRoles() ([]Role, error) {
-	rows, err := s.db.Query(`SELECT id, name, COALESCE(description, ''), created_at, updated_at FROM roles ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, COALESCE(description, ''), is_system, created_at, updated_at FROM roles ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list roles: %w", err)
 	}
@@ -106,7 +111,7 @@ func (s *Service) listRoles() ([]Role, error) {
 	roleIDs := []string{}
 	for rows.Next() {
 		var r Role
-		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.IsSystem, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		roles = append(roles, r)
@@ -159,9 +164,9 @@ func (s *Service) createRole(req CreateRoleRequest, actorID string) (*Role, erro
 	var r Role
 	err := s.db.QueryRow(
 		`INSERT INTO roles (name, description) VALUES ($1, $2)
-		RETURNING id, name, COALESCE(description, ''), created_at, updated_at`,
+		RETURNING id, name, COALESCE(description, ''), is_system, created_at, updated_at`,
 		req.Name, req.Description,
-	).Scan(&r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt)
+	).Scan(&r.ID, &r.Name, &r.Description, &r.IsSystem, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		if respond.IsDuplicate(err) {
 			return nil, ErrDuplicate
@@ -178,10 +183,11 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest, actorID string) (
 		return nil, ErrNotFound
 	}
 	var currentName, currentDesc string
+	var isSystem bool
 	if err := s.db.QueryRow(
-		`SELECT name, COALESCE(description, '') FROM roles WHERE id = $1`,
+		`SELECT name, COALESCE(description, ''), is_system FROM roles WHERE id = $1`,
 		id,
-	).Scan(&currentName, &currentDesc); err != nil {
+	).Scan(&currentName, &currentDesc, &isSystem); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -190,6 +196,12 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest, actorID string) (
 	if req.Name != nil && currentName == "superadmin" && *req.Name != "superadmin" {
 		return nil, ErrSuperadminRoleProtected
 	}
+	// System roles are permanent by name: the boot seed keys its guarantee on
+	// the name, so renaming one would let a fresh role with the original name
+	// appear at the next boot. Description and permissions stay editable.
+	if isSystem && req.Name != nil && *req.Name != currentName {
+		return nil, ErrSystemRoleProtected
+	}
 	var r Role
 	err := s.db.QueryRow(
 		`UPDATE roles SET
@@ -197,11 +209,11 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest, actorID string) (
 			description = COALESCE($3, description),
 			updated_at = now()
 		WHERE id = $1
-		RETURNING id, name, COALESCE(description, ''), created_at, updated_at`,
+		RETURNING id, name, COALESCE(description, ''), is_system, created_at, updated_at`,
 		id,
 		req.Name,
 		req.Description,
-	).Scan(&r.ID, &r.Name, &r.Description, &r.CreatedAt, &r.UpdatedAt)
+	).Scan(&r.ID, &r.Name, &r.Description, &r.IsSystem, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -238,7 +250,8 @@ func (s *Service) deleteRole(id, actorID string) error {
 	}
 
 	var name string
-	err = tx.QueryRow(`SELECT name FROM roles WHERE id = $1`, id).Scan(&name)
+	var isSystem bool
+	err = tx.QueryRow(`SELECT name, is_system FROM roles WHERE id = $1`, id).Scan(&name, &isSystem)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -247,6 +260,11 @@ func (s *Service) deleteRole(id, actorID string) error {
 	}
 	if name == "superadmin" {
 		return ErrSuperadminRoleProtected
+	}
+	// Seeded roles are permanent: deleting one would let the boot seed
+	// resurrect it (or, pre-flag, silently re-create it) on every restart.
+	if isSystem {
+		return ErrSystemRoleProtected
 	}
 
 	var assigned int
@@ -408,11 +426,12 @@ func (s *Service) setRolePermissions(roleID string, permissionIDs []string, acto
 	}
 
 	var roleName, description string
+	var isSystem bool
 	var createdAt, updatedAt time.Time
 	if err := tx.QueryRow(
-		`SELECT name, COALESCE(description, ''), created_at, updated_at FROM roles WHERE id = $1`,
+		`SELECT name, COALESCE(description, ''), is_system, created_at, updated_at FROM roles WHERE id = $1`,
 		roleID,
-	).Scan(&roleName, &description, &createdAt, &updatedAt); err != nil {
+	).Scan(&roleName, &description, &isSystem, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -567,6 +586,7 @@ func (s *Service) setRolePermissions(roleID string, permissionIDs []string, acto
 		ID:          roleID,
 		Name:        roleName,
 		Description: description,
+		IsSystem:    isSystem,
 		Permissions: perms,
 		CreatedAt:   createdAt,
 		UpdatedAt:   updatedAt,
@@ -744,7 +764,7 @@ func (s *Service) UserCan(userID, permission string) (bool, error) {
 func (s *Service) listUsers() ([]UserInfo, error) {
 	rows, err := s.db.Query(
 		`SELECT u.id, u.name, u.email, COALESCE(u.avatar_url, ''), u.created_at,
-			r.id, r.name, COALESCE(r.description, ''), r.created_at, r.updated_at
+			r.id, r.name, COALESCE(r.description, ''), r.is_system, r.created_at, r.updated_at
 		FROM users u
 		LEFT JOIN roles r ON r.id = u.role_id
 		WHERE u.deleted_at IS NULL
@@ -758,10 +778,11 @@ func (s *Service) listUsers() ([]UserInfo, error) {
 	for rows.Next() {
 		var u UserInfo
 		var roleID, roleName, roleDesc sql.NullString
+		var roleIsSystem sql.NullBool
 		var roleCreatedAt, roleUpdatedAt sql.NullTime
 		if err := rows.Scan(
 			&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt,
-			&roleID, &roleName, &roleDesc, &roleCreatedAt, &roleUpdatedAt,
+			&roleID, &roleName, &roleDesc, &roleIsSystem, &roleCreatedAt, &roleUpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("list users: scan: %w", err)
 		}
@@ -770,6 +791,7 @@ func (s *Service) listUsers() ([]UserInfo, error) {
 				ID:          roleID.String,
 				Name:        roleName.String,
 				Description: roleDesc.String,
+				IsSystem:    roleIsSystem.Bool,
 				CreatedAt:   roleCreatedAt.Time,
 				UpdatedAt:   roleUpdatedAt.Time,
 			}
@@ -811,17 +833,58 @@ func (s *Service) listAssigneeOptions() ([]AssigneeOption, error) {
 	return options, rows.Err()
 }
 
-func (s *Service) createUser(name, email, password string, actorID string) (*UserInfo, error) {
+// createUser creates a user with an optional role, forced to change the
+// password at first login. Assigning a wildcard-carrying role (the superadmin
+// role) requires the actor to already hold the wildcard — the same guard as
+// setUserRole. The insert and role assignment commit in one transaction.
+func (s *Service) createUser(name, email, password, roleID, actorID string) (*UserInfo, error) {
+	if roleID != "" && !validUUID(roleID) {
+		return nil, ErrNotFound
+	}
 	hash, err := auth.HashPassword(password, 12)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 	email = util.NormalizeEmail(email)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := lockRBACMutations(tx); err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
+
 	var u UserInfo
-	err = s.db.QueryRow(
-		`INSERT INTO users (name, email, password_hash, must_change_password) VALUES ($1, $2, $3, true)
+	var roleArg any
+	var roleName string
+	if roleID != "" {
+		next, err := roleStatusForID(tx, roleID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, fmt.Errorf("create user: %w", err)
+		}
+		if next.hasWildcard {
+			actorIsSuper, err := userHoldsWildcard(tx, actorID)
+			if err != nil {
+				return nil, fmt.Errorf("create user: %w", err)
+			}
+			if !actorIsSuper {
+				return nil, ErrSuperadminAssignmentRestricted
+			}
+		}
+		roleArg = roleID
+		roleName = next.name
+	}
+
+	err = tx.QueryRow(
+		`INSERT INTO users (name, email, password_hash, role_id, must_change_password)
+		VALUES ($1, $2, $3, $4, true)
 		RETURNING id, name, email, COALESCE(avatar_url, ''), created_at`,
-		name, email, hash,
+		name, email, hash, roleArg,
 	).Scan(&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt)
 	if err != nil {
 		if respond.IsDuplicate(err) {
@@ -829,7 +892,31 @@ func (s *Service) createUser(name, email, password string, actorID string) (*Use
 		}
 		return nil, fmt.Errorf("create user: %w", err)
 	}
-	changes, _ := json.Marshal(map[string]string{"name": name, "email": email})
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
+	if roleID != "" {
+		// The response role mirrors listUsers' shape (is_system + timestamps),
+		// not the minimal guard read. A role deleted concurrently after the
+		// commit is reported as the id+name known to this call, so the user is
+		// created either way (the 201 must not 500 after the commit).
+		u.Role = &Role{ID: roleID, Name: roleName}
+		err := s.db.QueryRow(
+			`SELECT id, name, COALESCE(description, ''), is_system, created_at, updated_at FROM roles WHERE id = $1`,
+			roleID,
+		).Scan(&u.Role.ID, &u.Role.Name, &u.Role.Description, &u.Role.IsSystem, &u.Role.CreatedAt, &u.Role.UpdatedAt)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("create user: load role: %w", err)
+		}
+	}
+	changes, _ := json.Marshal(map[string]any{"name": name, "email": email})
+	if roleName != "" {
+		changes, _ = json.Marshal(map[string]any{
+			"name":  name,
+			"email": email,
+			"role":  map[string]string{"new": roleName},
+		})
+	}
 	s.logActivity(u.ID, "user", "create", string(changes), actorID)
 	return &u, nil
 }

@@ -257,7 +257,7 @@ func main() {
 			r.Delete("/api/users/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.DeleteUser))
 			r.Put("/api/users/{id}/role", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.SetUserRole))
 
-			r.Get("/api/activity", middleware.RequirePermission(rbacSvc, "activity:read", activityH.List))
+			r.Get("/api/activity", middleware.RequirePermission(rbacSvc, "settings:manage", activityH.List))
 
 			r.Get("/api/tags", middleware.RequireAny(rbacSvc, []string{"contact:read", "lead:read", "settings:manage"}, tagH.List))
 			r.Post("/api/tags", middleware.RequirePermission(rbacSvc, "settings:manage", tagH.Create))

@@ -35,7 +35,7 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "NOT_FOUND", Message: "Role or user not found"},
 			nil,
 		)
-	case errors.Is(err, ErrDuplicate), errors.Is(err, ErrRoleInUse):
+	case errors.Is(err, ErrDuplicate), errors.Is(err, ErrRoleInUse), errors.Is(err, ErrSystemRoleProtected):
 		respond.JSON(
 			w,
 			http.StatusConflict,
@@ -332,6 +332,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		RoleID   string `json:"role_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.JSON(
@@ -363,7 +364,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	user, err := h.svc.createUser(req.Name, req.Email, req.Password, ctxutil.GetUserID(r))
+	user, err := h.svc.createUser(req.Name, req.Email, req.Password, req.RoleID, ctxutil.GetUserID(r))
 	if err != nil {
 		h.respondError(w, err)
 		return

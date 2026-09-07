@@ -5,6 +5,7 @@ import { apiClient, type ApiResponse } from '@/composables/useApi'
 export interface Role {
   id: string
   name: string
+  is_system?: boolean
 }
 
 export interface Permission {

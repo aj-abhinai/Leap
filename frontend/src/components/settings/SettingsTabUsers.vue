@@ -28,6 +28,7 @@ const rbac = useRBACStore()
 const newUserName = shallowRef('')
 const newUserEmail = shallowRef('')
 const newUserPassword = shallowRef('')
+const newUserRoleId = shallowRef('')
 const newUserError = shallowRef('')
 const creatingUser = shallowRef(false)
 
@@ -67,8 +68,18 @@ async function loadRoles() {
   try {
     const res = await listRoles()
     roles.value = res.data
+    preselectSalesRole()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load roles'))
+  }
+}
+
+// The new-user form preselects the Sales role instead of carrying a per-role
+// default flag; fall back to no role when Sales is missing or not assignable.
+function preselectSalesRole() {
+  if (!newUserRoleId.value) {
+    const sales = selectableRoles.value.find((r) => r.name === 'Sales')
+    if (sales) newUserRoleId.value = sales.id
   }
 }
 
@@ -88,11 +99,14 @@ async function createUser() {
       name: newUserName.value,
       email: newUserEmail.value,
       password: newUserPassword.value,
+      role_id: newUserRoleId.value || undefined,
     })
     toast.success('User created')
     newUserName.value = ''
     newUserEmail.value = ''
     newUserPassword.value = ''
+    newUserRoleId.value = ''
+    preselectSalesRole()
     loadUsers()
   } catch (e) {
     newUserError.value = errorMessage(e, 'Failed to create user')
@@ -144,6 +158,14 @@ function onRoleChange(u: User, event: Event) {
         <div class="flex flex-wrap gap-2">
           <Input v-model="newUserName" placeholder="Name" class="min-w-32 flex-1" />
           <Input v-model="newUserEmail" placeholder="Email" type="email" class="min-w-32 flex-1" />
+          <select
+            v-model="newUserRoleId"
+            class="h-10 w-36 rounded-md border bg-background px-2 text-sm"
+            :aria-label="`Role for ${newUserName || 'new user'}`"
+          >
+            <option value="">No role</option>
+            <option v-for="r in selectableRoles" :key="r.id" :value="r.id">{{ r.name }}</option>
+          </select>
           <Input v-model="newUserPassword" placeholder="Password (10+ chars, strong)" type="password" class="min-w-32 flex-1" />
           <Button @click="createUser" :disabled="creatingUser">
             <Plus class="mr-2 size-4" /> Add User
@@ -188,6 +210,7 @@ function onRoleChange(u: User, event: Event) {
                   <select
                     class="h-8 w-40 rounded-md border bg-background px-2 text-sm"
                     :value="u.role?.id ?? ''"
+                    :aria-label="`Role for ${u.name}`"
                     :disabled="protectedIds.has(u.id)"
                     @change="onRoleChange(u, $event)"
                   >

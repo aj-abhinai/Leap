@@ -3,6 +3,9 @@ package middleware
 import (
 	"context"
 	"crm/internal/ctxutil"
+	"crm/internal/rbac"
+	"crm/internal/testdb"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -203,6 +206,94 @@ func TestRequireAnyUnauthenticated(t *testing.T) {
 	mw(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", rr.Code)
+	}
+}
+
+// seedRBACUser inserts a user holding a role with the given permission names
+// (creating the permission rows on demand) and returns the user id.
+func seedRBACUser(t *testing.T, db *sql.DB, perms ...string) string {
+	t.Helper()
+	var roleID string
+	if err := db.QueryRow(
+		`INSERT INTO roles (name) VALUES ('test-role') RETURNING id`,
+	).Scan(&roleID); err != nil {
+		t.Fatalf("insert role: %v", err)
+	}
+	for _, perm := range perms {
+		if _, err := db.Exec(
+			`INSERT INTO permissions (name, description) VALUES ($1, '') ON CONFLICT (name) DO NOTHING`,
+			perm,
+		); err != nil {
+			t.Fatalf("insert permission %s: %v", perm, err)
+		}
+		if _, err := db.Exec(
+			`INSERT INTO role_permissions (role_id, permission_id)
+			SELECT $1, id FROM permissions WHERE name = $2`,
+			roleID, perm,
+		); err != nil {
+			t.Fatalf("assign permission %s: %v", perm, err)
+		}
+	}
+	var userID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('User', 'u@example.com', 'hash', $1) RETURNING id`,
+		roleID,
+	).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	return userID
+}
+
+// The audit-log surface gates on settings:manage: a Sales persona (contact
+// and lead permissions only) is refused, while a settings:manage holder
+// passes — the same permission check the /api/activity route registers.
+func TestAuditGateRejectsSalesPersonaIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := rbac.NewService(db)
+	salesUser := seedRBACUser(t, db, "contact:read", "contact:write", "lead:read", "lead:write")
+
+	var called bool
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}
+	mw := RequirePermission(svc, "settings:manage", handler)
+	req := httptest.NewRequest(http.MethodGet, "/api/activity", nil)
+	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, salesUser)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	mw(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("Sales persona audit gate = %d, want 403", rr.Code)
+	}
+	if called {
+		t.Error("handler must not run for a Sales persona")
+	}
+}
+
+func TestAuditGateAllowsSettingsManagerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := rbac.NewService(db)
+	managerUser := seedRBACUser(t, db, "settings:manage")
+
+	var called bool
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}
+	mw := RequirePermission(svc, "settings:manage", handler)
+	req := httptest.NewRequest(http.MethodGet, "/api/activity", nil)
+	ctx := context.WithValue(req.Context(), ctxutil.UserIDKey, managerUser)
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	mw(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("manager audit gate = %d, want 200", rr.Code)
+	}
+	if !called {
+		t.Error("handler should have run for a settings:manage holder")
 	}
 }
 

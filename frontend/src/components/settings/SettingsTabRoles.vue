@@ -108,6 +108,13 @@ function isSuperadminRole(role: Role): boolean {
   return role.name === 'superadmin'
 }
 
+// System roles are the seeded permanent roles (superadmin, Sales, Viewer).
+// The name check keeps a pre-migration superadmin protected even though its
+// row predates the is_system flag.
+function isSystemRole(role: Role): boolean {
+  return role.is_system === true || role.name === 'superadmin'
+}
+
 // The wildcard may only be assigned to the superadmin role, and the
 // superadmin role is fully governed by it (its permissions are locked).
 const visiblePermissions = computed(() => {
@@ -185,10 +192,22 @@ function permissionLabel(perm: Permission): string {
   return perm.name === '*' ? 'All permissions' : perm.name
 }
 
+// The permission matrix groups checkboxes by the resource prefix of each
+// permission name; the group headers use the resource names the product
+// speaks (the prefixes themselves are internal identifiers).
+const groupLabels: Record<string, string> = {
+  contact: 'Contacts',
+  lead: 'Leads',
+  settings: 'Settings',
+  data: 'Records',
+  system: 'System',
+}
+
 function groupPermissions(perms: Permission[]): { group: string; perms: Permission[] }[] {
   const groups = new Map<string, Permission[]>()
   for (const p of perms) {
-    const group = p.name.includes(':') ? p.name.split(':')[0] : 'system'
+    const prefix = p.name.includes(':') ? p.name.split(':')[0] : 'system'
+    const group = groupLabels[prefix] ?? prefix
     const bucket = groups.get(group) ?? []
     bucket.push(p)
     groups.set(group, bucket)
@@ -226,7 +245,7 @@ const permissionGroups = computed(() => groupPermissions(visiblePermissions.valu
           <TableCell>
             <div class="flex items-center gap-2">
               <span class="font-medium">{{ role.name }}</span>
-              <Badge v-if="isSuperadminRole(role)" variant="secondary" class="text-xs">
+              <Badge v-if="isSystemRole(role)" variant="secondary" class="text-xs">
                 <ShieldCheck class="mr-1 size-3" /> Protected
               </Badge>
             </div>
@@ -241,7 +260,7 @@ const permissionGroups = computed(() => groupPermissions(visiblePermissions.valu
                 <Pencil class="size-3.5" />
               </Button>
               <Button
-                v-if="!isSuperadminRole(role)"
+                v-if="!isSystemRole(role)"
                 variant="ghost"
                 size="icon-sm"
                 title="Delete role"
@@ -269,7 +288,18 @@ const permissionGroups = computed(() => groupPermissions(visiblePermissions.valu
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">
               <Label for="role-name">Name</Label>
-              <Input id="role-name" v-model="formName" placeholder="e.g. Sales Manager" />
+              <Input
+                id="role-name"
+                v-model="formName"
+                placeholder="e.g. Sales Manager"
+                :disabled="isEditing && !!editingRole && isSystemRole(editingRole)"
+              />
+              <p
+                v-if="isEditing && !!editingRole && isSystemRole(editingRole)"
+                class="text-xs text-muted-foreground"
+              >
+                System roles keep their name; description and permissions stay editable.
+              </p>
             </div>
             <div class="space-y-2">
               <Label for="role-desc">Description</Label>
