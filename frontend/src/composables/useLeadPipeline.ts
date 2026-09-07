@@ -1,4 +1,4 @@
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { usePipelineStore } from '@/stores/pipeline'
 import { fetchBoard, updateLead, type Lead, type BoardStage } from '@/api/leads'
 import { toast } from 'vue-sonner'
@@ -16,12 +16,57 @@ const assigneeFilter = shallowRef('__all__')
 const fromDate = shallowRef('')
 const toDate = shallowRef('')
 
+// Remember the last pipeline so the board opens where the user left it.
+const PIPELINE_KEY = 'crm:leads:pipeline'
+watch(selectedPipelineId, (id) => {
+  if (id) localStorage.setItem(PIPELINE_KEY, id)
+})
+
+// Which pipeline the currently loaded board belongs to; a mismatch means the
+// selector moved and the old board must be dropped for a fresh load.
+const boardPipelineId = shallowRef('')
+
 export function useLeadPipeline() {
   const pipelineStore = usePipelineStore()
 
   // Stage id → (capped window leads + true count) from the board endpoint.
   const boardStages = shallowRef<BoardStage[]>([])
   const loading = shallowRef(false)
+  // Bumped when the board changes pipeline, so the kanban remounts and
+  // animates cards in. Filter changes reuse the same board and don't replay.
+  const boardRevision = shallowRef(0)
+
+  const hasBoard = computed(() => boardStages.value.length > 0)
+
+  // Pipeline selector is a view switch, not a filter: prefer the remembered
+  // pipeline, fall back to the first one. No-op while no pipelines exist so a
+  // late-arriving list (created elsewhere) can still select on arrival.
+  function syncPipelineSelection() {
+    if (pipelineStore.pipelines.length === 0) return
+    if (pipelineStore.pipelines.some((p) => p.id === selectedPipelineId.value)) return
+    const saved = localStorage.getItem(PIPELINE_KEY)
+    selectedPipelineId.value =
+      saved && pipelineStore.pipelines.some((p) => p.id === saved)
+        ? saved
+        : pipelineStore.pipelines[0].id
+  }
+
+  const activeFilterCount = computed(
+    () =>
+      (search.value.trim() !== '' ? 1 : 0) +
+      (outcomeFilter.value !== '' ? 1 : 0) +
+      (assigneeFilter.value !== '__all__' ? 1 : 0) +
+      (fromDate.value !== '' ? 1 : 0) +
+      (toDate.value !== '' ? 1 : 0),
+  )
+
+  function clearFilters() {
+    search.value = ''
+    outcomeFilter.value = ''
+    assigneeFilter.value = '__all__'
+    fromDate.value = ''
+    toDate.value = ''
+  }
 
   const selectedPipeline = computed(() =>
     pipelineStore.pipelines.find((p) => p.id === selectedPipelineId.value)
@@ -41,25 +86,38 @@ export function useLeadPipeline() {
   })
 
   async function loadLeads() {
-    if (!selectedPipelineId.value) return
+    const pipelineId = selectedPipelineId.value
+    if (!pipelineId) return
+    // A pipeline switch means a different board: clear the old one so the
+    // skeleton shows instead of stale cards from the previous pipeline, and
+    // bump the revision so the fresh board animates in. Filter changes keep
+    // the current board and dim it until the new data lands.
+    if (boardPipelineId.value !== pipelineId) {
+      boardStages.value = []
+      boardPipelineId.value = pipelineId
+      boardRevision.value++
+    }
     loading.value = true
     try {
       // The date inputs are YYYY-MM-DD; the board filter expects RFC3339.
       const from = fromDate.value ? `${fromDate.value}T00:00:00Z` : undefined
       const to = toDate.value ? `${toDate.value}T23:59:59Z` : undefined
       const res = await fetchBoard({
-        pipelineId: selectedPipelineId.value,
+        pipelineId,
         q: search.value.trim() || undefined,
         outcome: outcomeFilter.value || undefined,
         assignedTo: assigneeFilter.value === '__all__' ? undefined : assigneeFilter.value || undefined,
         from,
         to,
       })
+      // The user may have switched pipelines while this request was in
+      // flight; a stale response must not overwrite the current board.
+      if (pipelineId !== selectedPipelineId.value) return
       boardStages.value = res.data?.stages ?? []
     } catch {
-      toast.error('Failed to load leads')
+      if (pipelineId === selectedPipelineId.value) toast.error('Failed to load leads')
     } finally {
-      loading.value = false
+      if (pipelineId === selectedPipelineId.value) loading.value = false
     }
   }
 
@@ -121,11 +179,16 @@ export function useLeadPipeline() {
     selectedPipeline,
     kanbanColumns,
     loading,
+    hasBoard,
+    boardRevision,
     search,
     outcomeFilter,
     assigneeFilter,
     fromDate,
     toDate,
+    activeFilterCount,
+    clearFilters,
+    syncPipelineSelection,
     loadLeads,
     moveStage,
     bulkMoveStage,

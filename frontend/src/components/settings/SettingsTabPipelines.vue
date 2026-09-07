@@ -3,6 +3,7 @@ import { onMounted, ref, shallowRef } from 'vue'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
@@ -14,8 +15,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ArrowDown, ArrowUp, Check, Layers, Plus, Trash2, Pencil, X } from '@lucide/vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { errorMessage } from '@/utils/errors'
-import { listPipelines, createPipeline as apiCreatePipeline, deletePipeline as apiDeletePipeline, addStage, updateStage, deleteStage as apiDeleteStage, type Stage, type Pipeline } from '@/api/pipelines'
+import { listPipelines, createPipeline as apiCreatePipeline, updatePipeline as apiUpdatePipeline, deletePipeline as apiDeletePipeline, addStage, updateStage, deleteStage as apiDeleteStage, type Stage, type Pipeline } from '@/api/pipelines'
 
 // readonly renders pipelines and stages without any mutation control: the
 // read-only domain-tab view for users without settings:manage.
@@ -29,6 +31,14 @@ const creatingPipeline = shallowRef(false)
 const newStageNames = ref<Record<string, string>>({})
 const editingStageId = shallowRef('')
 const editingStageName = shallowRef('')
+
+// Pipeline edit + delete-confirm state.
+const editingPipelineId = shallowRef('')
+const editingPipelineName = shallowRef('')
+const editingPipelineDesc = shallowRef('')
+const savingPipelineEdit = shallowRef(false)
+const deletingPipeline = shallowRef<Pipeline | null>(null)
+const deletingStage = shallowRef<{ id: string; name: string } | null>(null)
 
 // Remember the last won/lost choice per stage: unchecking "Closing" forces the
 // stage to 'open' server-side, so without this the win/loss would be lost and
@@ -73,6 +83,62 @@ async function deletePipeline(pipelineId: string) {
     loadPipelines()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to delete pipeline'))
+  } finally {
+    deletingPipeline.value = null
+  }
+}
+
+function startEditPipeline(p: Pipeline) {
+  editingPipelineId.value = p.id
+  editingPipelineName.value = p.name
+  editingPipelineDesc.value = p.description ?? ''
+}
+
+function cancelEditPipeline() {
+  editingPipelineId.value = ''
+}
+
+async function savePipelineEdit(pipelineId: string) {
+  const name = editingPipelineName.value.trim()
+  if (!name) {
+    toast.error('Pipeline name is required')
+    return
+  }
+  savingPipelineEdit.value = true
+  try {
+    await apiUpdatePipeline(pipelineId, {
+      name,
+      description: editingPipelineDesc.value.trim(),
+    })
+    toast.success('Pipeline updated')
+    cancelEditPipeline()
+    loadPipelines()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to update pipeline'))
+  } finally {
+    savingPipelineEdit.value = false
+  }
+}
+
+function requestDeletePipeline(p: Pipeline) {
+  deletingPipeline.value = p
+}
+
+function requestDeleteStage(s: Stage) {
+  deletingStage.value = { id: s.id, name: s.name }
+}
+
+async function confirmDeleteStage() {
+  const stage = deletingStage.value
+  if (!stage) return
+  try {
+    await apiDeleteStage(stage.id)
+    toast.success('Stage deleted')
+    loadPipelines()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to delete stage'))
+  } finally {
+    deletingStage.value = null
   }
 }
 
@@ -121,16 +187,6 @@ async function reorderStage(stageId: string, order: number) {
     loadPipelines()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to reorder stage'))
-  }
-}
-
-async function deleteStage(stageId: string) {
-  try {
-    await apiDeleteStage(stageId)
-    toast.success('Stage deleted')
-    loadPipelines()
-  } catch (e) {
-    toast.error(errorMessage(e, 'Failed to delete stage'))
   }
 }
 
@@ -195,10 +251,41 @@ async function setStageOutcome(stage: Stage, outcome: string) {
           <CardTitle class="text-base">{{ p.name }}</CardTitle>
           <p v-if="p.description" class="text-sm text-muted-foreground mt-0.5">{{ p.description }}</p>
         </div>
-        <Button v-if="!readonly" variant="ghost" size="sm" @click="deletePipeline(p.id)">
-          <Trash2 class="mr-1 size-3.5" /> Delete
-        </Button>
+        <div v-if="!readonly" class="flex items-center gap-1">
+          <Button
+            v-if="editingPipelineId !== p.id"
+            variant="ghost"
+            size="sm"
+            title="Edit pipeline"
+            @click="startEditPipeline(p)"
+          >
+            <Pencil class="mr-1 size-3.5" /> Edit
+          </Button>
+          <Button
+            v-if="editingPipelineId !== p.id"
+            variant="ghost"
+            size="sm"
+            title="Delete pipeline"
+            @click="requestDeletePipeline(p)"
+          >
+            <Trash2 class="mr-1 size-3.5" /> Delete
+          </Button>
+        </div>
       </CardHeader>
+      <CardContent v-if="!readonly && editingPipelineId === p.id" class="flex flex-wrap items-end gap-2 border-t pt-3">
+        <div class="space-y-1">
+          <Label class="text-xs">Name</Label>
+          <Input v-model="editingPipelineName" class="min-w-40" @keyup.enter="savePipelineEdit(p.id)" />
+        </div>
+        <div class="space-y-1">
+          <Label class="text-xs">Description</Label>
+          <Input v-model="editingPipelineDesc" class="min-w-52" @keyup.enter="savePipelineEdit(p.id)" />
+        </div>
+        <Button :disabled="savingPipelineEdit" @click="savePipelineEdit(p.id)">
+          {{ savingPipelineEdit ? 'Saving…' : 'Save' }}
+        </Button>
+        <Button variant="ghost" @click="cancelEditPipeline">Cancel</Button>
+      </CardContent>
       <CardContent class="space-y-3">
         <div v-if="!readonly" class="flex flex-wrap gap-2">
           <Input
@@ -282,7 +369,7 @@ async function setStageOutcome(stage: Stage, outcome: string) {
                 >
                   <ArrowDown class="size-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon-sm" :title="`Delete ${s.name}`" :aria-label="`Delete ${s.name}`" @click="deleteStage(s.id)">
+                <Button variant="ghost" size="icon-sm" :title="`Delete ${s.name}`" :aria-label="`Delete ${s.name}`" @click="requestDeleteStage(s)">
                   <Trash2 class="size-3.5" />
                 </Button>
               </template>
@@ -291,5 +378,24 @@ async function setStageOutcome(stage: Stage, outcome: string) {
         </div>
       </CardContent>
     </Card>
+
+    <ConfirmDialog
+      :open="!!deletingPipeline"
+      title="Delete pipeline"
+      :description="`Delete the pipeline “${deletingPipeline?.name ?? ''}” and its stages? This cannot be undone.`"
+      confirm-text="Delete"
+      destructive
+      @update:open="(v) => { if (!v) deletingPipeline = null }"
+      @confirm="deletePipeline(deletingPipeline?.id ?? '')"
+    />
+    <ConfirmDialog
+      :open="!!deletingStage"
+      title="Delete stage"
+      :description="`Delete the stage “${deletingStage?.name ?? ''}”? Leads on it must be moved first.`"
+      confirm-text="Delete"
+      destructive
+      @update:open="(v) => { if (!v) deletingStage = null }"
+      @confirm="confirmDeleteStage"
+    />
   </div>
 </template>

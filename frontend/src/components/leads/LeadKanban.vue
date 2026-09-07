@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { type Lead } from '@/stores/leads'
 import { type Stage } from '@/stores/pipeline'
 import { useRBACStore } from '@/stores/rbac'
@@ -91,7 +91,15 @@ watch(collapsed, (v) => saveJson(collapsedKey(props.pipelineId), v), { deep: tru
 watch(columnWidths, (v) => saveJson(widthsKey(props.pipelineId), v), { deep: true })
 watch(cardFields, (v) => saveJson(fieldsKey(props.pipelineId), v), { deep: true })
 
-onMounted(() => users.fetchOptions())
+onMounted(() => {
+  users.fetchOptions()
+  const el = scroller.value
+  if (el) {
+    resizeObserver = new ResizeObserver(updateScrollHint)
+    resizeObserver.observe(el)
+    updateScrollHint()
+  }
+})
 
 // Resolve the assignee's name from the users store; falls back to a neutral
 // label when the id is unknown (e.g. a deleted user).
@@ -152,7 +160,29 @@ function stopResize() {
   window.removeEventListener('mouseup', stopResize)
 }
 
-onBeforeUnmount(stopResize)
+onBeforeUnmount(() => {
+  stopResize()
+  resizeObserver?.disconnect()
+  resizeObserver = undefined
+})
+
+// ---- horizontal scroll affordance ----
+const scroller = shallowRef<HTMLElement | null>(null)
+const canScrollRight = shallowRef(false)
+let resizeObserver: ResizeObserver | undefined
+
+function updateScrollHint() {
+  const el = scroller.value
+  if (!el) return
+  canScrollRight.value = el.scrollWidth - el.scrollLeft - el.clientWidth > 24
+}
+
+// Column content changes (a stage added here, a board refresh, a resize) widen
+// the scrollable area without scrolling; refresh the edge hint when they do.
+watch(
+  () => props.columns.map((c) => `${c.id}:${c.leads.length}`).join(','),
+  () => nextTick(updateScrollHint),
+)
 
 // ---- inline add stage ----
 const addingStage = shallowRef(false)
@@ -336,14 +366,20 @@ function showField(key: string): boolean {
     </div>
 
     <!-- Kanban row -->
-    <div class="flex w-full min-w-0 gap-2 overflow-x-auto pb-4">
+    <div class="relative min-w-0">
       <div
-        v-for="col in columns"
-        :key="col.id"
-        class="group relative shrink-0"
-        :style="{ width: `${columnWidth(col.id)}px` }"
+        ref="scroller"
+        class="flex w-full min-w-0 gap-2 overflow-x-auto pb-4"
+        @scroll="updateScrollHint"
       >
-        <div class="mb-2 flex items-center gap-1.5 px-1">
+        <div
+          v-for="(col, ci) in columns"
+          :key="col.id"
+          class="card-in group relative shrink-0"
+          :style="{ width: `${columnWidth(col.id)}px`, animationDelay: `${Math.min(ci * 60, 300)}ms` }"
+        >
+          <div class="flex h-full flex-col rounded-lg bg-muted/40 p-2 pt-1.5">
+            <div class="mb-2 flex items-center gap-1.5 px-1">
           <Checkbox
             v-if="rbac.can('lead:write') && selectableLeads(col).length > 0"
             :model-value="columnCheckState(col)"
@@ -506,6 +542,7 @@ function showField(key: string): boolean {
             </Button>
           </div>
         </div>
+        </div>
 
         <!-- resize handle -->
         <div
@@ -542,6 +579,12 @@ function showField(key: string): boolean {
           <Plus class="mr-1 size-3.5" /> Add stage
         </Button>
       </div>
+      </div>
+      <div
+        v-if="canScrollRight"
+        class="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent"
+        aria-hidden="true"
+      />
     </div>
 
     <!-- Customize cards (per-pipeline) -->
@@ -578,5 +621,18 @@ function showField(key: string): boolean {
   transform: rotate(1deg);
   z-index: 50;
   box-shadow: var(--shadow-xl);
+}
+
+/* Board entrance: columns rise in on a fresh load (first render or pipeline
+   switch). Filter changes reuse the columns in place, so they don't replay. */
+.card-in {
+  animation: card-in 0.24s ease both;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 </style>

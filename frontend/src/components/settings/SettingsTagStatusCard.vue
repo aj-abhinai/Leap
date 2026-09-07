@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import { Plus, Trash2, Pencil } from '@lucide/vue'
+import { Plus, Trash2, Pencil, X } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
 
 const behaviorLabels: Record<string, string> = {
@@ -42,6 +42,10 @@ const props = defineProps<{
 // Quick replies are the only catalog with group/behavior config;
 // plain statuses are general contact identifiers.
 const isQuickReply = computed(() => props.kind === 'quick_reply')
+
+// Tags and statuses carry an optional color used on contact labels; the
+// other word lists have no color concept.
+const showColor = computed(() => props.kind === 'tag' || props.kind === 'status')
 
 const store = useSettingsStore()
 
@@ -121,6 +125,17 @@ async function remove() {
   }
 }
 
+// setColor saves a tag/status color; the empty string clears it back to no
+// color (the backend treats '' as an explicit clear). The swatch picker can
+// only emit #rrggbb, so the clear button is what produces the empty value.
+async function setColor(id: string, value: string) {
+  try {
+    await store.updateTag(id, { color: value })
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to save color'))
+  }
+}
+
 function openEdit(id: string) {
   const item = items.value.find((i) => i.id === id)
   if (!item) return
@@ -170,6 +185,7 @@ async function saveEdit() {
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
+            <TableHead v-if="showColor">Color</TableHead>
             <TableHead v-if="isQuickReply">Group</TableHead>
             <TableHead v-if="isQuickReply">Behavior</TableHead>
             <TableHead v-if="!readonly" class="w-24" />
@@ -177,12 +193,37 @@ async function saveEdit() {
         </TableHeader>
         <TableBody>
           <TableRow v-if="items.length === 0">
-            <TableCell :colspan="isQuickReply ? (readonly ? 3 : 4) : (readonly ? 1 : 2)" class="text-center text-muted-foreground text-sm py-4">
+            <TableCell :colspan="isQuickReply ? (readonly ? 3 : 4) : (readonly ? (showColor ? 2 : 1) : (showColor ? 3 : 2))" class="text-center text-muted-foreground text-sm py-4">
               No {{ title.toLowerCase() }} yet
             </TableCell>
           </TableRow>
           <TableRow v-for="item in items" :key="item.id">
             <TableCell>{{ item.name }}</TableCell>
+            <TableCell v-if="showColor">
+              <div class="flex items-center gap-1.5">
+                <input
+                  v-if="!readonly"
+                  type="color"
+                  :value="item.color || '#64748b'"
+                  :aria-label="`Color for ${item.name}`"
+                  class="h-6 w-8 cursor-pointer rounded border bg-transparent p-0.5"
+                  @change="setColor(item.id, (($event.target as HTMLInputElement).value))"
+                />
+                <Button
+                  v-if="!readonly && item.color"
+                  variant="ghost"
+                  size="icon-sm"
+                  class="size-5"
+                  :title="`Clear color for ${item.name}`"
+                  :aria-label="`Clear color for ${item.name}`"
+                  @click="setColor(item.id, '')"
+                >
+                  <X class="size-3" />
+                </Button>
+                <span v-else-if="item.color" class="inline-block size-4 rounded-full border" :style="{ backgroundColor: item.color }" />
+                <span v-else class="text-xs text-muted-foreground/50">—</span>
+              </div>
+            </TableCell>
             <TableCell v-if="isQuickReply">
               <span v-if="item.group_name" class="text-xs text-muted-foreground">{{ item.group_name }}</span>
               <span v-else class="text-xs text-muted-foreground/50">—</span>

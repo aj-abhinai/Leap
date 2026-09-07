@@ -2,6 +2,7 @@
 import { shallowRef, computed, onMounted } from 'vue'
 import { useActivityStore } from '@/stores/activity'
 import { useRBACStore } from '@/stores/rbac'
+import { listUsers, type User } from '@/api/users'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -26,17 +27,32 @@ const activityPage = shallowRef(1)
 const activityPerPage = 20
 const activityAction = shallowRef('')
 const activityResourceType = shallowRef('')
+const activityUserId = shallowRef('')
+const users = shallowRef<User[]>([])
 
 const activityTotalPages = computed(() => Math.ceil(activity.total / activityPerPage) || 1)
 
 onMounted(() => {
-  if (rbac.can('settings:manage')) loadActivity()
+  if (rbac.can('settings:manage')) {
+    loadUsers()
+    loadActivity()
+  }
 })
+
+// The actor filter lists the live users, so a manager can trace one person's
+// mutations; the backend user_id filter is a settings:manage read.
+async function loadUsers() {
+  try {
+    const res = await listUsers()
+    users.value = res.data
+  } catch {}
+}
 
 function loadActivity() {
   activity.fetchActivity(activityPage.value, activityPerPage, {
     action: activityAction.value,
     resourceType: activityResourceType.value,
+    userId: activityUserId.value,
   })
 }
 
@@ -80,6 +96,14 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
       </CardHeader>
       <CardContent>
         <div class="mb-4 flex flex-wrap gap-2">
+          <select
+            v-model="activityUserId"
+            class="h-8 rounded-md border bg-background px-2 text-sm"
+            @change="applyActivityFilters()"
+          >
+            <option value="">All users</option>
+            <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
+          </select>
           <select
             v-model="activityAction"
             class="h-8 rounded-md border bg-background px-2 text-sm"
