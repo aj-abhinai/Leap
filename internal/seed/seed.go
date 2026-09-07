@@ -292,16 +292,16 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		typ   string
 		label string
 	}{
-		// Tags shown on the contact/lead forms.
-		{"Hot Lead", "tag", "tag"},
-		{"VIP", "tag", "tag"},
+		// Tags shown on the contact forms. The seed never deletes: databases
+		// that already carry the retired names keep them.
 		{"Student", "tag", "tag"},
-		{"Influencer", "tag", "tag"},
+		{"Referral", "tag", "tag"},
+		{"Parent", "tag", "tag"},
 		// Contact statuses (a separate tag type).
 		{"New", "status", "status"},
-		{"Active", "status", "status"},
-		{"Cold", "status", "status"},
-		{"Archived", "status", "status"},
+		{"Client", "status", "status"},
+		{"Past Client", "status", "status"},
+		{"Do Not Contact", "status", "status"},
 		// Activity types (the "Stage Activity" labels; presets, not enforced).
 		{"Call", "activity_type", "activity type"},
 		{"WhatsApp", "activity_type", "activity type"},
@@ -310,7 +310,8 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		{"Enquiry", "activity_type", "activity type"},
 		// Loss-reason presets for the "Closed Lost" stage (free text plus presets).
 		{"Not interested", "loss_reason", "loss reason"},
-		{"Fake", "loss_reason", "loss reason"},
+		{"Fake enquiry", "loss_reason", "loss reason"},
+		{"Budget", "loss_reason", "loss reason"},
 	}
 	for _, t := range catalog {
 		_, err := db.Exec(
