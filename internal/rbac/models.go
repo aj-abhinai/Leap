@@ -38,6 +38,14 @@ type SetUserRoleRequest struct {
 	RoleID string `json:"role_id"`
 }
 
+// UpdateUserRequest carries the editable identity fields of a user; only the
+// provided fields change.
+type UpdateUserRequest struct {
+	Name  *string `json:"name,omitempty"`
+	Email *string `json:"email,omitempty"`
+	Phone *string `json:"phone,omitempty"`
+}
+
 type SetRolePermissionsRequest struct {
 	PermissionIDs []string `json:"permission_ids"`
 }

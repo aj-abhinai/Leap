@@ -56,6 +56,39 @@ func TestLoginUnknownUserIntegration(t *testing.T) {
 	}
 }
 
+// A deactivated user cannot log in; reactivating the account restores login
+// (data was never touched by the deactivation).
+func TestReactivatedUserCanLoginAgainIntegration(t *testing.T) {
+	db := testdb.New(t)
+	seedUser(t, db, "alice@example.com", "correct-horse")
+	svc := NewService(db, authTestConfig())
+
+	var userID string
+	if err := db.QueryRow(`SELECT id FROM users WHERE email = 'alice@example.com'`).Scan(&userID); err != nil {
+		t.Fatalf("load user id: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1`, userID); err != nil {
+		t.Fatalf("deactivate user: %v", err)
+	}
+
+	_, _, _, err := svc.login("alice@example.com", "correct-horse")
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("login while deactivated = %v, want ErrInvalidCredentials", err)
+	}
+
+	if _, err := db.Exec(`UPDATE users SET deleted_at = NULL WHERE id = $1`, userID); err != nil {
+		t.Fatalf("reactivate user: %v", err)
+	}
+
+	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
+	if err != nil {
+		t.Fatalf("login after reactivation: %v", err)
+	}
+	if resp.AccessToken == "" {
+		t.Error("expected an access token after reactivation")
+	}
+}
+
 func TestRefreshRotationIntegration(t *testing.T) {
 	db := testdb.New(t)
 	seedUser(t, db, "alice@example.com", "correct-horse")

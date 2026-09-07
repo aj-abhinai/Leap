@@ -4,6 +4,7 @@ import (
 	"crm/internal/audit"
 	"crm/internal/auth"
 	"crm/internal/respond"
+	"crm/internal/settings"
 	"crm/internal/util"
 	"database/sql"
 	"encoding/json"
@@ -49,6 +50,15 @@ var (
 	// role (is_system). System roles are permanent by name; their description
 	// and permissions stay editable.
 	ErrSystemRoleProtected = errors.New("system roles are permanent and cannot be renamed or deleted")
+
+// ErrSelfReactivate is returned when an actor targets their own account for
+	// reactivation; a deactivated user must not undo their own deactivation.
+	ErrSelfReactivate = errors.New("a user cannot reactivate their own account")
+
+	// ErrDeactivatedActor is returned when an actor whose account is
+	// deactivated tries a privileged RBAC mutation within their access-token
+	// TTL; deactivation must be the end of an account's reach.
+	ErrDeactivatedActor = errors.New("a deactivated user cannot perform this action")
 
 	// ErrNotFound marks mutations targeting a role or user that does not
 	// exist.
@@ -763,12 +773,12 @@ func (s *Service) UserCan(userID, permission string) (bool, error) {
 
 func (s *Service) listUsers() ([]UserInfo, error) {
 	rows, err := s.db.Query(
-		`SELECT u.id, u.name, u.email, COALESCE(u.avatar_url, ''), u.created_at,
+		`SELECT u.id, u.name, u.email, COALESCE(u.phone, ''), COALESCE(u.avatar_url, ''), u.created_at,
+			u.deleted_at IS NULL AS active,
 			r.id, r.name, COALESCE(r.description, ''), r.is_system, r.created_at, r.updated_at
 		FROM users u
 		LEFT JOIN roles r ON r.id = u.role_id
-		WHERE u.deleted_at IS NULL
-		ORDER BY u.name`,
+		ORDER BY u.deleted_at IS NOT NULL, u.name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
@@ -781,7 +791,7 @@ func (s *Service) listUsers() ([]UserInfo, error) {
 		var roleIsSystem sql.NullBool
 		var roleCreatedAt, roleUpdatedAt sql.NullTime
 		if err := rows.Scan(
-			&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt,
+			&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt, &u.Active,
 			&roleID, &roleName, &roleDesc, &roleIsSystem, &roleCreatedAt, &roleUpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("list users: scan: %w", err)
@@ -982,6 +992,277 @@ func (s *Service) deleteUser(id, actorID string) error {
 	return nil
 }
 
+// updateUser edits a live user's name, email, or phone. The email is
+// normalized and must stay unique; the phone is canonicalized like every
+// other entry point. An empty provided name or email is rejected in the
+// handler, so the service only writes non-empty values.
+func (s *Service) updateUser(id string, req UpdateUserRequest, actorID string) (*UserInfo, error) {
+	if !validUUID(id) {
+		return nil, ErrNotFound
+	}
+	if req.Email != nil {
+		normalized := util.NormalizeEmail(*req.Email)
+		req.Email = &normalized
+	}
+	if req.Phone != nil {
+		defaultCC, err := settings.DefaultCountryCode(s.db)
+		if err != nil {
+			return nil, err
+		}
+		canonical := util.CanonicalPhone(*req.Phone, defaultCC)
+		// The stored value is bounded like the self-service profile path.
+		if len([]rune(canonical)) > 20 {
+			return nil, auth.ErrPhoneTooLong
+		}
+		req.Phone = &canonical
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := lockRBACMutations(tx); err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	var currentName, currentEmail, currentPhone string
+	if err := tx.QueryRow(
+		`SELECT name, email, COALESCE(phone, '') FROM users WHERE id = $1 AND deleted_at IS NULL`,
+		id,
+	).Scan(&currentName, &currentEmail, &currentPhone); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	// A wildcard-carrying account is governed by the same rule as role
+	// assignment: only a wildcard holder may touch it, so settings:manage
+	// alone cannot seize or tamper with the owner account.
+	target, err := userRoleStatus(tx, id)
+	if err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+	if target.hasWildcard {
+		actorIsSuper, err := userHoldsWildcard(tx, actorID)
+		if err != nil {
+			return nil, fmt.Errorf("update user: %w", err)
+		}
+		if !actorIsSuper {
+			return nil, ErrSuperadminAssignmentRestricted
+		}
+	}
+
+	var u UserInfo
+	err = tx.QueryRow(
+		`UPDATE users SET
+			name = COALESCE($2, name),
+			email = COALESCE($3, email),
+			phone = COALESCE($4, phone),
+			updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at`,
+		id, req.Name, req.Email, req.Phone,
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt)
+	if err != nil {
+		if respond.IsDuplicate(err) {
+			return nil, ErrDuplicate
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+	u.Active = true
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+	changes := map[string]any{}
+	if currentName != u.Name {
+		changes["name"] = map[string]string{"old": currentName, "new": u.Name}
+	}
+	if currentEmail != u.Email {
+		changes["email"] = map[string]string{"old": currentEmail, "new": u.Email}
+	}
+	if currentPhone != u.Phone {
+		changes["phone"] = map[string]string{"old": currentPhone, "new": u.Phone}
+	}
+	if len(changes) > 0 {
+		if b, err := json.Marshal(changes); err == nil {
+			s.logActivity(id, "user", "update", string(b), actorID)
+		}
+	}
+	return &u, nil
+}
+
+// resetPassword sets a temporary password for a user and forces a change at
+// their next login, revoking every existing session like a password change
+// does. The event is audit-logged as a security action.
+func (s *Service) resetPassword(id, password, actorID string) error {
+	if !validUUID(id) {
+		return ErrNotFound
+	}
+	if err := auth.ValidatePassword(password); err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("reset password: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := lockRBACMutations(tx); err != nil {
+		return fmt.Errorf("reset password: %w", err)
+	}
+
+	var exists bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`,
+		id,
+	).Scan(&exists); err != nil {
+		return fmt.Errorf("reset password: %w", err)
+	}
+	if !exists {
+		return ErrNotFound
+	}
+
+	// Same rule as role assignment and user edits: only a wildcard holder may
+	// reset a wildcard-carrying account.
+	target, err := userRoleStatus(tx, id)
+	if err != nil {
+		return fmt.Errorf("reset password: %w", err)
+	}
+	if target.hasWildcard {
+		actorIsSuper, err := userHoldsWildcard(tx, actorID)
+		if err != nil {
+			return fmt.Errorf("reset password: %w", err)
+		}
+		if !actorIsSuper {
+			return ErrSuperadminAssignmentRestricted
+		}
+	}
+
+	// The hash is computed after the guards so a refused reset costs no
+	// bcrypt work.
+	hash, err := auth.HashPassword(password, 12)
+	if err != nil {
+		return fmt.Errorf("hash reset password: %w", err)
+	}
+
+	var updated bool
+	if err := tx.QueryRow(
+		`UPDATE users SET password_hash = $2, must_change_password = true, updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL RETURNING true`,
+		id, hash,
+	).Scan(&updated); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("reset password: %w", err)
+	}
+	if _, err := tx.Exec(
+		`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND NOT revoked`,
+		id,
+	); err != nil {
+		return fmt.Errorf("reset password: revoke sessions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("reset password: %w", err)
+	}
+	s.logActivity(id, "user", "reset_password", `{"password":"reset"}`, actorID)
+	return nil
+}
+
+// reactivateUser lifts a deactivated (soft-deleted) user's account. Their
+// revoked sessions stay revoked; the next login issues a fresh pair. The
+// user's data and role were never touched by the deactivation. A user cannot
+// reactivate themselves (deactivation would be self-undoable within the
+// access-token TTL), a deactivated actor cannot reactivate anyone (the undo
+// tool must not serve the account it just disabled), and reactivating a
+// wildcard-carrying account requires a wildcard holder, like every other
+// touch of the owner account.
+func (s *Service) reactivateUser(id, actorID string) (*UserInfo, error) {
+	if !validUUID(id) {
+		return nil, ErrNotFound
+	}
+	if actorID != "" && actorID == id {
+		return nil, ErrSelfReactivate
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("reactivate user: %w", err)
+	}
+	defer tx.Rollback()
+
+	if actorID != "" {
+		var actorLive bool
+		if err := tx.QueryRow(
+			`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`,
+			actorID,
+		).Scan(&actorLive); err != nil {
+			return nil, fmt.Errorf("reactivate user: %w", err)
+		}
+		if !actorLive {
+			return nil, ErrDeactivatedActor
+		}
+	}
+
+	var isDeleted bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NOT NULL)`,
+		id,
+	).Scan(&isDeleted); err != nil {
+		return nil, fmt.Errorf("reactivate user: %w", err)
+	}
+	if !isDeleted {
+		return nil, ErrNotFound
+	}
+
+	var targetIsSuper bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS(
+			SELECT 1 FROM role_permissions rp
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE rp.role_id = (SELECT role_id FROM users WHERE id = $1)
+			  AND p.name = '*'
+		)`,
+		id,
+	).Scan(&targetIsSuper); err != nil {
+		return nil, fmt.Errorf("reactivate user: %w", err)
+	}
+	if targetIsSuper {
+		actorIsSuper, err := userHoldsWildcard(tx, actorID)
+		if err != nil {
+			return nil, fmt.Errorf("reactivate user: %w", err)
+		}
+		if !actorIsSuper {
+			return nil, ErrSuperadminAssignmentRestricted
+		}
+	}
+
+	var u UserInfo
+	err = tx.QueryRow(
+		`UPDATE users SET deleted_at = NULL, updated_at = now()
+		WHERE id = $1 AND deleted_at IS NOT NULL
+		RETURNING id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at`,
+		id,
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("reactivate user: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("reactivate user: %w", err)
+	}
+	u.Active = true
+	s.logActivity(id, "user", "reactivate", `{"action":"reactivated"}`, actorID)
+	return &u, nil
+}
+
 // lockRBACMutations serializes mutations that can remove the last RBAC
 // manager so concurrent deletions cannot both pass the count check.
 func lockRBACMutations(tx *sql.Tx) error {
@@ -1176,8 +1457,10 @@ type UserInfo struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Email     string    `json:"email"`
+	Phone     string    `json:"phone,omitempty"`
 	AvatarURL string    `json:"avatar_url,omitempty"`
 	Role      *Role     `json:"role,omitempty"`
 	Protected bool      `json:"protected"`
+	Active    bool      `json:"active"`
 	CreatedAt time.Time `json:"created_at"`
 }

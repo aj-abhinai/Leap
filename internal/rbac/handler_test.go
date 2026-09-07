@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"crm/internal/auth"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,27 @@ func TestRespondErrorMapsSuperadminAssignmentRestrictionToForbidden(t *testing.T
 	}
 	if body.Error.Code != "FORBIDDEN" {
 		t.Errorf("error code = %q, want FORBIDDEN", body.Error.Code)
+	}
+}
+
+func TestRespondErrorMapsUserProtectionErrorsToForbidden(t *testing.T) {
+	h := NewHandler(NewService(nil))
+	for _, err := range []error{ErrSelfReactivate, ErrDeactivatedActor} {
+		rr := httptest.NewRecorder()
+		h.respondError(rr, err)
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("%v -> %d, want 403", err, rr.Code)
+		}
+	}
+}
+
+func TestRespondErrorMapsPhoneTooLongToBadRequest(t *testing.T) {
+	h := NewHandler(NewService(nil))
+	rr := httptest.NewRecorder()
+
+	h.respondError(rr, auth.ErrPhoneTooLong)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
 	}
 }
 

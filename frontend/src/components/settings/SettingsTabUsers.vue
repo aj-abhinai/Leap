@@ -2,12 +2,25 @@
 import { onMounted, shallowRef, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRBACStore } from '@/stores/rbac'
-import { listUsers, createUser as apiCreateUser, deleteUser as apiDeleteUser, setUserRole as apiSetRole, type User } from '@/api/users'
+import {
+  listUsers,
+  createUser as apiCreateUser,
+  updateUser as apiUpdateUser,
+  resetUserPassword as apiResetUserPassword,
+  deleteUser as apiDeleteUser,
+  reactivateUser as apiReactivateUser,
+  setUserRole as apiSetRole,
+  type User,
+} from '@/api/users'
 import { listRoles, type Role } from '@/api/roles'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Table,
   TableBody,
@@ -17,7 +30,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Plus, ShieldCheck, Trash2, User as UserIcon } from '@lucide/vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import { Plus, ShieldCheck, Pencil, KeyRound, UserX, UserCheck, User as UserIcon } from '@lucide/vue'
 import { PASSWORD_POLICY_HINT, isStrongPassword } from '@/lib/validation'
 import { errorMessage } from '@/utils/errors'
 
@@ -31,6 +45,23 @@ const newUserPassword = shallowRef('')
 const newUserRoleId = shallowRef('')
 const newUserError = shallowRef('')
 const creatingUser = shallowRef(false)
+
+// Edit state
+const editingUser = shallowRef<User | null>(null)
+const editName = shallowRef('')
+const editEmail = shallowRef('')
+const editPhone = shallowRef('')
+const editError = shallowRef('')
+const savingEdit = shallowRef(false)
+
+// Reset-password state
+const resettingUser = shallowRef<User | null>(null)
+const resetPassword = shallowRef('')
+const resetError = shallowRef('')
+const resetting = shallowRef(false)
+
+// Deactivate state
+const deactivatingUser = shallowRef<User | null>(null)
 
 // Only wildcard holders may assign the superadmin role; hide the option for
 // everyone else so settings:manage users never hit a confusing 403.
@@ -115,13 +146,90 @@ async function createUser() {
   }
 }
 
-async function deleteUser(userId: string) {
+function openEdit(u: User) {
+  editingUser.value = u
+  editName.value = u.name
+  editEmail.value = u.email
+  editPhone.value = u.phone ?? ''
+  editError.value = ''
+}
+
+async function saveEdit() {
+  const u = editingUser.value
+  if (!u) return
+  editError.value = ''
+  if (!editName.value.trim() || !editEmail.value.trim()) {
+    editError.value = 'Name and email are required'
+    return
+  }
+  savingEdit.value = true
   try {
-    await apiDeleteUser(userId)
-    toast.success('User deleted')
+    await apiUpdateUser(u.id, {
+      name: editName.value.trim(),
+      email: editEmail.value.trim(),
+      phone: editPhone.value.trim() || undefined,
+    })
+    toast.success('User updated')
+    editingUser.value = null
     loadUsers()
   } catch (e) {
-    toast.error(errorMessage(e, 'Failed to delete user'))
+    editError.value = errorMessage(e, 'Failed to update user')
+  } finally {
+    savingEdit.value = false
+  }
+}
+
+function openResetPassword(u: User) {
+  resettingUser.value = u
+  resetPassword.value = ''
+  resetError.value = ''
+}
+
+async function saveResetPassword() {
+  const u = resettingUser.value
+  if (!u) return
+  resetError.value = ''
+  if (!isStrongPassword(resetPassword.value)) {
+    resetError.value = PASSWORD_POLICY_HINT
+    return
+  }
+  resetting.value = true
+  try {
+    await apiResetUserPassword(u.id, resetPassword.value)
+    toast.success('Password reset — the user must change it at next login')
+    resettingUser.value = null
+  } catch (e) {
+    resetError.value = errorMessage(e, 'Failed to reset password')
+  } finally {
+    resetting.value = false
+  }
+}
+
+function requestDeactivate(u: User) {
+  deactivatingUser.value = u
+}
+
+async function deactivateUser() {
+  const u = deactivatingUser.value
+  if (!u) return
+  try {
+    await apiDeleteUser(u.id)
+    toast.success('User deactivated')
+    loadUsers()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to deactivate user'))
+  } finally {
+    deactivatingUser.value = null
+  }
+}
+
+async function reactivateUser(u: User) {
+  try {
+    await apiReactivateUser(u.id)
+    toast.success('User reactivated')
+    loadUsers()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to reactivate user'))
   }
 }
 
@@ -146,6 +254,8 @@ const protectedIds = computed(() => new Set(users.value.filter(isProtectedUser).
 function onRoleChange(u: User, event: Event) {
   setRole(u.id, (event.target as HTMLSelectElement).value)
 }
+
+const deactivatingName = computed(() => deactivatingUser.value?.name ?? '')
 </script>
 
 <template>
@@ -189,12 +299,17 @@ function onRoleChange(u: User, event: Event) {
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead class="w-16">Actions</TableHead>
+              <TableHead class="w-40">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow v-for="u in users" :key="u.id">
-              <TableCell class="font-medium">{{ u.name }}</TableCell>
+            <TableRow v-for="u in users" :key="u.id" :class="{ 'opacity-50': u.active === false }">
+              <TableCell class="font-medium">
+                <div class="flex items-center gap-2">
+                  {{ u.name }}
+                  <Badge v-if="u.active === false" variant="secondary" class="text-xs">Deactivated</Badge>
+                </div>
+              </TableCell>
               <TableCell class="text-muted-foreground">{{ u.email }}</TableCell>
               <TableCell>
                 <div class="flex items-center gap-2">
@@ -211,7 +326,7 @@ function onRoleChange(u: User, event: Event) {
                     class="h-8 w-40 rounded-md border bg-background px-2 text-sm"
                     :value="u.role?.id ?? ''"
                     :aria-label="`Role for ${u.name}`"
-                    :disabled="protectedIds.has(u.id)"
+                    :disabled="u.active === false || protectedIds.has(u.id)"
                     @change="onRoleChange(u, $event)"
                   >
                     <option value="">No role</option>
@@ -225,18 +340,116 @@ function onRoleChange(u: User, event: Event) {
                 </div>
               </TableCell>
               <TableCell>
-                <div v-if="protectedIds.has(u.id)" class="flex items-center gap-1.5">
-                  <ShieldCheck class="size-3.5 text-muted-foreground" />
-                  <span class="text-xs text-muted-foreground">Protected</span>
+                <div v-if="u.active === false" class="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Reactivate user"
+                    :aria-label="`Reactivate ${u.name}`"
+                    @click="reactivateUser(u)"
+                  >
+                    <UserCheck class="size-3.5" />
+                  </Button>
                 </div>
-                <Button v-else variant="ghost" size="icon-sm" :aria-label="`Delete ${u.name}`" @click="deleteUser(u.id)">
-                  <Trash2 class="size-3.5" />
-                </Button>
+                <div v-else class="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Edit user"
+                    :aria-label="`Edit ${u.name}`"
+                    @click="openEdit(u)"
+                  >
+                    <Pencil class="size-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Reset password"
+                    :aria-label="`Reset password for ${u.name}`"
+                    @click="openResetPassword(u)"
+                  >
+                    <KeyRound class="size-3.5" />
+                  </Button>
+                  <Button
+                    v-if="!protectedIds.has(u.id)"
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Deactivate user"
+                    :aria-label="`Deactivate ${u.name}`"
+                    @click="requestDeactivate(u)"
+                  >
+                    <UserX class="size-3.5" />
+                  </Button>
+                </div>
               </TableCell>
             </TableRow>
           </TableBody>
         </Table>
       </CardContent>
     </Card>
+
+    <Dialog :open="!!editingUser" @update:open="(v) => { if (!v) editingUser = null }">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit user</DialogTitle>
+          <DialogDescription>Update the identity details of {{ editingUser?.name }}.</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4 py-2">
+          <div class="space-y-2">
+            <Label for="edit-name">Name</Label>
+            <Input id="edit-name" v-model="editName" />
+          </div>
+          <div class="space-y-2">
+            <Label for="edit-email">Email</Label>
+            <Input id="edit-email" v-model="editEmail" type="email" />
+          </div>
+          <div class="space-y-2">
+            <Label for="edit-phone">Phone</Label>
+            <Input id="edit-phone" v-model="editPhone" placeholder="98765 43210 or +971 50 123 4567" />
+          </div>
+          <p v-if="editError" class="text-sm text-destructive">{{ editError }}</p>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" @click="editingUser = null">Cancel</Button>
+          <Button :disabled="savingEdit" @click="saveEdit">
+            {{ savingEdit ? 'Saving…' : 'Save changes' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="!!resettingUser" @update:open="(v) => { if (!v) resettingUser = null }">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Reset password</DialogTitle>
+          <DialogDescription>
+            Set a temporary password for {{ resettingUser?.name }}. They must choose their own at next login.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4 py-2">
+          <div class="space-y-2">
+            <Label for="reset-password">Temporary password</Label>
+            <Input id="reset-password" v-model="resetPassword" type="password" :placeholder="PASSWORD_POLICY_HINT" />
+          </div>
+          <p v-if="resetError" class="text-sm text-destructive">{{ resetError }}</p>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" @click="resettingUser = null">Cancel</Button>
+          <Button :disabled="resetting" @click="saveResetPassword">
+            {{ resetting ? 'Resetting…' : 'Reset password' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <ConfirmDialog
+      :open="!!deactivatingUser"
+      title="Deactivate user"
+      :description="`Deactivate ${deactivatingName}? They cannot log in anymore, their work and history stay, and the account can be reactivated.`"
+      confirm-text="Deactivate"
+      destructive
+      @update:open="(v) => { if (!v) deactivatingUser = null }"
+      @confirm="deactivateUser"
+    />
   </div>
 </template>

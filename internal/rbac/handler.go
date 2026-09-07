@@ -43,7 +43,7 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "CONFLICT", Message: err.Error()},
 			nil,
 		)
-	case errors.Is(err, ErrInvalidPermission):
+	case errors.Is(err, ErrInvalidPermission), errors.Is(err, auth.ErrPhoneTooLong):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -57,6 +57,8 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 }
 func (h *Handler) writeProtected(w http.ResponseWriter, err error) bool {
 	if !errors.Is(err, ErrSelfDelete) &&
+		!errors.Is(err, ErrSelfReactivate) &&
+		!errors.Is(err, ErrDeactivatedActor) &&
 		!errors.Is(err, ErrLastSuperadminProtected) &&
 		!errors.Is(err, ErrSelfRoleChange) &&
 		!errors.Is(err, ErrWildcardRestricted) &&
@@ -387,7 +389,116 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(
 		w,
 		http.StatusOK,
-		map[string]string{"message": "User deleted"},
+		map[string]string{"message": "User deactivated"},
+		nil,
+		nil,
+	)
+}
+
+// UpdateUser handles admin edits of a user's identity fields. Blank values
+// for provided fields are rejected so a typo can never blank a name or email.
+func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req UpdateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: "Name cannot be blank"},
+				nil,
+			)
+			return
+		}
+		req.Name = &name
+	}
+	if req.Email != nil && strings.TrimSpace(*req.Email) == "" {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Email cannot be blank"},
+			nil,
+		)
+		return
+	}
+	user, err := h.svc.updateUser(id, req, ctxutil.GetUserID(r))
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		user,
+		nil,
+		nil,
+	)
+}
+
+// ResetPassword sets a temporary password an admin types; the user must
+// change it at their next login.
+func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	if err := auth.ValidatePassword(body.Password); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+			nil,
+		)
+		return
+	}
+	if err := h.svc.resetPassword(id, body.Password, ctxutil.GetUserID(r)); err != nil {
+		h.respondError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		map[string]string{"message": "Password reset"},
+		nil,
+		nil,
+	)
+}
+
+func (h *Handler) ReactivateUser(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	user, err := h.svc.reactivateUser(id, ctxutil.GetUserID(r))
+	if err != nil {
+		h.respondError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		user,
 		nil,
 		nil,
 	)

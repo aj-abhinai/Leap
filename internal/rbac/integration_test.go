@@ -593,6 +593,443 @@ func TestRenameSystemRoleBlocked(t *testing.T) {
 	}
 }
 
+func TestResetPasswordForcesChangeAndRevokesSessions(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var userID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Alice', 'alice@example.com', 'hash') RETURNING id`,
+	).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := db.Exec(
+			`INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '7 days')`,
+			userID, fmt.Sprintf("token-hash-%d", i),
+		); err != nil {
+			t.Fatalf("seed refresh token: %v", err)
+		}
+	}
+	var actorID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Admin', 'admin@example.com', 'hash') RETURNING id`,
+	).Scan(&actorID); err != nil {
+		t.Fatalf("insert actor: %v", err)
+	}
+
+	if err := svc.resetPassword(userID, "Temp-Pass-123", actorID); err != nil {
+		t.Fatalf("resetPassword: %v", err)
+	}
+
+	var mustChange bool
+	if err := db.QueryRow(`SELECT must_change_password FROM users WHERE id = $1`, userID).Scan(&mustChange); err != nil {
+		t.Fatalf("load must_change_password: %v", err)
+	}
+	if !mustChange {
+		t.Error("reset password must force a change at next login")
+	}
+
+	var active int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM refresh_tokens WHERE user_id = $1 AND NOT revoked`,
+		userID,
+	).Scan(&active); err != nil {
+		t.Fatalf("count active tokens: %v", err)
+	}
+	if active != 0 {
+		t.Errorf("active refresh tokens = %d, want 0 after reset", active)
+	}
+
+	var auditCount int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM audit_logs WHERE action = 'reset_password' AND resource_type = 'user' AND resource_id = $1`,
+		userID,
+	).Scan(&auditCount); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	if auditCount != 1 {
+		t.Errorf("reset audit rows = %d, want 1", auditCount)
+	}
+}
+
+func TestResetPasswordWeakPasswordRejected(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if err := svc.resetPassword("00000000-0000-0000-0000-000000000000", "weak", ""); err == nil {
+		t.Fatal("weak reset password accepted; want validation error")
+	}
+}
+
+func TestResetPasswordUnknownUser(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	err := svc.resetPassword("00000000-0000-0000-0000-000000000000", "Strong-Pass-123", "")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("resetPassword(missing) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestReactivateRestoresAccount(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var userID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Alice', 'alice@example.com', 'hash', NULL) RETURNING id`,
+	).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if err := svc.deleteUser(userID, ""); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+
+	u, err := svc.reactivateUser(userID, "")
+	if err != nil {
+		t.Fatalf("reactivateUser: %v", err)
+	}
+	if !u.Active {
+		t.Error("reactivated user must report active")
+	}
+
+	var deleted sql.NullTime
+	if err := db.QueryRow(`SELECT deleted_at FROM users WHERE id = $1`, userID).Scan(&deleted); err != nil {
+		t.Fatalf("load deleted_at: %v", err)
+	}
+	if deleted.Valid {
+		t.Error("reactivated user must have deleted_at cleared")
+	}
+
+	// The user's data survives the cycle.
+	var email string
+	if err := db.QueryRow(`SELECT email FROM users WHERE id = $1`, userID).Scan(&email); err != nil {
+		t.Fatalf("load email: %v", err)
+	}
+	if email != "alice@example.com" {
+		t.Errorf("email = %q, want unchanged", email)
+	}
+
+	var auditCount int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM audit_logs WHERE action = 'reactivate' AND resource_id = $1`,
+		userID,
+	).Scan(&auditCount); err != nil {
+		t.Fatalf("count reactivate audits: %v", err)
+	}
+	if auditCount != 1 {
+		t.Errorf("reactivate audit rows = %d, want 1", auditCount)
+	}
+}
+
+func TestReactivateUnknownUser(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	_, err := svc.reactivateUser("00000000-0000-0000-0000-000000000000", "")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("reactivateUser(missing) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUpdateUserEditsIdentityFields(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var userID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Alice', 'alice@example.com', 'hash') RETURNING id`,
+	).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	var actorID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Admin', 'admin@example.com', 'hash') RETURNING id`,
+	).Scan(&actorID); err != nil {
+		t.Fatalf("insert actor: %v", err)
+	}
+
+	phone := "98765 43210"
+	u, err := svc.updateUser(userID, UpdateUserRequest{
+		Name:  strPtr("Alice Renamed"),
+		Email: strPtr("  Alice@Example.com "),
+		Phone: &phone,
+	}, actorID)
+	if err != nil {
+		t.Fatalf("updateUser: %v", err)
+	}
+	if u.Name != "Alice Renamed" {
+		t.Errorf("name = %q, want Alice Renamed", u.Name)
+	}
+	if u.Email != "alice@example.com" {
+		t.Errorf("email = %q, want normalized alice@example.com", u.Email)
+	}
+	if u.Phone != "+919876543210" {
+		t.Errorf("phone = %q, want canonical +919876543210", u.Phone)
+	}
+	if !u.Active {
+		t.Error("updated user must report active")
+	}
+}
+
+func TestUpdateUserDuplicateEmailRejected(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	for _, email := range []string{"a@example.com", "b@example.com"} {
+		if _, err := db.Exec(
+			`INSERT INTO users (name, email, password_hash) VALUES ('User', $1, 'hash')`,
+			email,
+		); err != nil {
+			t.Fatalf("insert user %s: %v", email, err)
+		}
+	}
+
+	// Renaming B to A's normalized email collides.
+	email := "A@Example.com"
+	var bID string
+	if err := db.QueryRow(`SELECT id FROM users WHERE email = 'b@example.com'`).Scan(&bID); err != nil {
+		t.Fatalf("load user b: %v", err)
+	}
+	_, err := svc.updateUser(bID, UpdateUserRequest{Email: &email}, "")
+	if !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("updateUser(dup email) = %v, want ErrDuplicate", err)
+	}
+}
+
+func TestUpdateUserUnknownUser(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	_, err := svc.updateUser(
+		"00000000-0000-0000-0000-000000000000",
+		UpdateUserRequest{Name: strPtr("Nobody")},
+		"",
+	)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("updateUser(missing) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestListUsersIncludesActiveFlag(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var userID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Alice', 'alice@example.com', 'hash') RETURNING id`,
+	).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	var activeID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Bob', 'bob@example.com', 'hash') RETURNING id`,
+	).Scan(&activeID); err != nil {
+		t.Fatalf("insert second user: %v", err)
+	}
+	if err := svc.deleteUser(activeID, ""); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+
+	users, err := svc.listUsers()
+	if err != nil {
+		t.Fatalf("listUsers: %v", err)
+	}
+	byID := map[string]UserInfo{}
+	for _, u := range users {
+		byID[u.ID] = u
+	}
+	if !byID[userID].Active {
+		t.Error("live user must report active")
+	}
+	if byID[activeID].Active {
+		t.Error("deactivated user must report inactive")
+	}
+	if byID[activeID].Name != "Bob" {
+		t.Errorf("deactivated user data = %+v, want Bob still listed", byID[activeID])
+	}
+}
+
+// The wildcard-minting rule covers every touch of a wildcard-carrying
+// account: a settings:manage holder cannot reset, edit, or reactivate the
+// superadmin — only a wildcard holder can.
+func TestWildcardAccountProtectedFromManager(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	superRoleID := insertRole(t, db, "superadmin")
+	wildcardID := insertPermission(t, db, "*")
+	if _, err := db.Exec(
+		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)`,
+		superRoleID, wildcardID,
+	); err != nil {
+		t.Fatalf("assign wildcard: %v", err)
+	}
+	var superID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Owner', 'owner@example.com', 'hash', $1) RETURNING id`,
+		superRoleID,
+	).Scan(&superID); err != nil {
+		t.Fatalf("insert superadmin: %v", err)
+	}
+	managerID, _ := seedManager(t, db, "manager@example.com")
+
+	err := svc.resetPassword(superID, "Strong-Pass-123", managerID)
+	if !errors.Is(err, ErrSuperadminAssignmentRestricted) {
+		t.Fatalf("resetPassword(superadmin by manager) = %v, want ErrSuperadminAssignmentRestricted", err)
+	}
+	_, err = svc.updateUser(superID, UpdateUserRequest{Name: strPtr("Seized")}, managerID)
+	if !errors.Is(err, ErrSuperadminAssignmentRestricted) {
+		t.Fatalf("updateUser(superadmin by manager) = %v, want ErrSuperadminAssignmentRestricted", err)
+	}
+
+	// The superadmin's hash and name are untouched.
+	var name string
+	if err := db.QueryRow(`SELECT name FROM users WHERE id = $1`, superID).Scan(&name); err != nil {
+		t.Fatalf("load superadmin: %v", err)
+	}
+	if name != "Owner" {
+		t.Errorf("superadmin name = %q, want Owner (edit must be refused)", name)
+	}
+
+	// A wildcard holder can reset and edit the superadmin.
+	superActorID := insertRole(t, db, "superadmin-actor")
+	if _, err := db.Exec(
+		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2)`,
+		superActorID, wildcardID,
+	); err != nil {
+		t.Fatalf("assign wildcard to actor: %v", err)
+	}
+	var actorID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Deputy', 'deputy@example.com', 'hash', $1) RETURNING id`,
+		superActorID,
+	).Scan(&actorID); err != nil {
+		t.Fatalf("insert deputy: %v", err)
+	}
+	if err := svc.resetPassword(superID, "Strong-Pass-456", actorID); err != nil {
+		t.Fatalf("resetPassword(superadmin by superadmin): %v", err)
+	}
+	if _, err := svc.updateUser(superID, UpdateUserRequest{Name: strPtr("Owner Renamed")}, actorID); err != nil {
+		t.Fatalf("updateUser(superadmin by superadmin): %v", err)
+	}
+
+	// A manager cannot reactivate a deactivated superadmin either. A second
+	// superadmin exists so deactivating the first is legal.
+	var super2ID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash, role_id) VALUES ('Owner 2', 'owner2@example.com', 'hash', $1) RETURNING id`,
+		superRoleID,
+	).Scan(&super2ID); err != nil {
+		t.Fatalf("insert second superadmin: %v", err)
+	}
+	if err := svc.deleteUser(superID, managerID); err != nil {
+		t.Fatalf("deactivate superadmin by manager: %v", err)
+	}
+	_, err = svc.reactivateUser(superID, managerID)
+	if !errors.Is(err, ErrSuperadminAssignmentRestricted) {
+		t.Fatalf("reactivateUser(superadmin by manager) = %v, want ErrSuperadminAssignmentRestricted", err)
+	}
+
+	// A wildcard holder can reactivate the deactivated superadmin.
+	if _, err := svc.reactivateUser(superID, actorID); err != nil {
+		t.Fatalf("reactivateUser(superadmin by superadmin): %v", err)
+	}
+}
+
+func TestReactivateSelfBlocked(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var userID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Alice', 'alice@example.com', 'hash') RETURNING id`,
+	).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if err := svc.deleteUser(userID, ""); err != nil {
+		t.Fatalf("deactivate: %v", err)
+	}
+
+	_, err := svc.reactivateUser(userID, userID)
+	if !errors.Is(err, ErrSelfReactivate) {
+		t.Fatalf("reactivateUser(self) = %v, want ErrSelfReactivate", err)
+	}
+
+	var deleted sql.NullTime
+	if err := db.QueryRow(`SELECT deleted_at FROM users WHERE id = $1`, userID).Scan(&deleted); err != nil {
+		t.Fatalf("load deleted_at: %v", err)
+	}
+	if !deleted.Valid {
+		t.Error("self-reactivation must not lift the deactivation")
+	}
+}
+
+func TestReactivateLiveUserIsNotFound(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var userID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Alice', 'alice@example.com', 'hash') RETURNING id`,
+	).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	_, err := svc.reactivateUser(userID, "")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("reactivateUser(live) = %v, want ErrNotFound", err)
+	}
+	var audits int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM audit_logs WHERE action = 'reactivate'`,
+	).Scan(&audits); err != nil {
+		t.Fatalf("count audits: %v", err)
+	}
+	if audits != 0 {
+		t.Errorf("reactivate audits = %d, want 0 (no-op must not log)", audits)
+	}
+}
+
+func TestReactivateByDeactivatedActorBlocked(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var managerID, targetID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Manager', 'manager@example.com', 'hash') RETURNING id`,
+	).Scan(&managerID); err != nil {
+		t.Fatalf("insert manager: %v", err)
+	}
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Alice', 'alice@example.com', 'hash') RETURNING id`,
+	).Scan(&targetID); err != nil {
+		t.Fatalf("insert target: %v", err)
+	}
+	if err := svc.deleteUser(targetID, ""); err != nil {
+		t.Fatalf("deactivate target: %v", err)
+	}
+	// The actor is deactivated too, but their access token could still be
+	// alive within its TTL — the reactivation must refuse them.
+	if err := svc.deleteUser(managerID, ""); err != nil {
+		t.Fatalf("deactivate manager: %v", err)
+	}
+
+	_, err := svc.reactivateUser(targetID, managerID)
+	if !errors.Is(err, ErrDeactivatedActor) {
+		t.Fatalf("reactivateUser(by deactivated actor) = %v, want ErrDeactivatedActor", err)
+	}
+
+	var deleted sql.NullTime
+	if err := db.QueryRow(`SELECT deleted_at FROM users WHERE id = $1`, targetID).Scan(&deleted); err != nil {
+		t.Fatalf("load target deleted_at: %v", err)
+	}
+	if !deleted.Valid {
+		t.Error("deactivated actor must not be able to lift a reactivation")
+	}
+}
+
 func TestDeleteRoleInUseBlocked(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

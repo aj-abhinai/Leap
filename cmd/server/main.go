@@ -254,7 +254,10 @@ func main() {
 			r.Get("/api/users", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ListUsers))
 			r.Get("/api/users/options", middleware.RequirePermission(rbacSvc, "lead:read", rbacH.ListAssigneeOptions))
 			r.Post("/api/users", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.CreateUser))
+			r.Patch("/api/users/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.UpdateUser))
 			r.Delete("/api/users/{id}", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.DeleteUser))
+			r.Post("/api/users/{id}/reset-password", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ResetPassword))
+			r.Post("/api/users/{id}/reactivate", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.ReactivateUser))
 			r.Put("/api/users/{id}/role", middleware.RequirePermission(rbacSvc, "settings:manage", rbacH.SetUserRole))
 
 			r.Get("/api/activity", middleware.RequirePermission(rbacSvc, "settings:manage", activityH.List))

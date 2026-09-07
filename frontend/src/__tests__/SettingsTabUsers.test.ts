@@ -136,4 +136,42 @@ describe('SettingsTabUsers', () => {
       expect(options).toContain('manager')
     }
   })
+
+  it('deactivates a user and reactivates a deactivated one', async () => {
+    const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
+    await flushPromises()
+
+    // Deactivate Alice through the confirm dialog (rendered in the body
+    // portal).
+    await wrapper.find('button[aria-label="Deactivate Alice"]').trigger('click')
+    await flushPromises()
+    const confirm = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('Deactivate'))
+    expect(confirm).toBeTruthy()
+    confirm!.click()
+    await flushPromises()
+
+    expect(deleteMock).toHaveBeenCalledWith('/api/users/u1')
+    wrapper.unmount()
+
+    // A deactivated user (inactive) shows the reactivate action instead.
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/api/users') {
+        return {
+          data: [
+            { id: 'u1', name: 'Alice', email: 'alice@example.com', role: null, active: false },
+          ],
+        }
+      }
+      if (url === '/api/roles') {
+        return { data: [] }
+      }
+      return { data: [] }
+    })
+    const wrapper2 = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
+    await flushPromises()
+
+    expect(wrapper2.find('button[aria-label="Reactivate Alice"]').exists()).toBe(true)
+    expect(wrapper2.find('button[aria-label="Deactivate Alice"]').exists()).toBe(false)
+    expect(wrapper2.html()).toContain('Deactivated')
+  })
 })
