@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { toast } from 'vue-sonner'
 import { type Lead } from '@/stores/leads'
 import { useSettingsStore } from '@/stores/settings'
 import { useRBACStore } from '@/stores/rbac'
 import { useUsersStore } from '@/stores/users'
+import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -21,8 +23,10 @@ import { Loader2, Link, Search } from '@lucide/vue'
 import type { Stage } from '@/stores/pipeline'
 import { formatCurrency, formatContactDetail } from '@/utils/format'
 import { debounce } from '@/utils/debounce'
+import { errorMessage } from '@/utils/errors'
 import { listContacts, resolveContactByPhone, type ResolveMatch } from '@/api/contacts'
 import { listPrograms, type Program } from '@/api/programs'
+import { createLeadActivity, type OpenLeadRef } from '@/api/leads'
 
 export interface PrefillContact {
   id: string
@@ -45,6 +49,9 @@ const props = defineProps<{
   initialStageId?: string
   prefillContact?: PrefillContact | null
   saving?: boolean
+  // openLeadConflict is the existing open lead from a refused create (409);
+  // it renders the same resolve-or-log banner as the resolve picker path.
+  openLeadConflict?: OpenLeadRef | null
 }>()
 
 export interface LeadSaveBody {
@@ -62,6 +69,9 @@ export interface LeadSaveBody {
 const emit = defineEmits<{
   save: [body: LeadSaveBody]
   delete: [leadId: string]
+  // enquiry-logged fires after the one-tap [Log enquiry] wrote the touchpoint
+  // on the existing open lead; the drawer closes and the board refreshes.
+  'enquiry-logged': []
 }>()
 
 const settings = useSettingsStore()
@@ -104,8 +114,15 @@ const newContactEmail = shallowRef('')
 const resolveMatches = shallowRef<ResolveMatch[]>([])
 const resolvedOnce = shallowRef(false)
 
+// Resolve-or-log banner: open leads already held by the picked contact. One
+// lead → one-tap [Log enquiry]; several → the select identifies the match.
+const bannerLeads = shallowRef<OpenLeadRef[]>([])
+const selectedBannerLeadId = shallowRef('')
+const loggingEnquiry = shallowRef(false)
+
 const router = useRouter()
 const rbac = useRBACStore()
+const { openLeadDrawer } = useLeadDrawerGlobal()
 
 const hasLinkedContact = computed(() => !!linkedContactId.value)
 const isEditing = computed(() => !!props.editingLead)
@@ -168,6 +185,70 @@ function displayName(): string {
   return ''
 }
 
+// showBanner renders the resolve-or-log banner for the given open leads and
+// defaults the match select to the first (oldest) lead.
+function showBanner(leads: OpenLeadRef[]) {
+  if (!leads.length) return
+  bannerLeads.value = leads
+  selectedBannerLeadId.value = leads[0].id
+}
+
+function dismissBanner() {
+  bannerLeads.value = []
+  selectedBannerLeadId.value = ''
+}
+
+// A create refused with an open-lead conflict (409) renders the same
+// resolve-or-log banner as the resolve picker path — the backstop when the
+// form picked a contact without open-lead data. The banner clears when the
+// conflict is reset (drawer close, next create).
+watch(
+  () => props.openLeadConflict,
+  (lead) => {
+    if (lead) {
+      showBanner([lead])
+    } else {
+      dismissBanner()
+    }
+  },
+  { immediate: true },
+)
+
+// The select identifies the match when the contact holds several open leads;
+// the single-lead case falls back to the only lead.
+const selectedBannerLead = computed(() =>
+  bannerLeads.value.find((l) => l.id === selectedBannerLeadId.value) ?? bannerLeads.value[0],
+)
+
+// logEnquiry writes exactly one done Enquiry activity on the existing open
+// lead — the repeat enquiry is a touchpoint, not a new opportunity.
+async function logEnquiry() {
+  const lead = selectedBannerLead.value
+  if (!lead) return
+  loggingEnquiry.value = true
+  try {
+    await createLeadActivity(lead.id, {
+      type: 'Enquiry',
+      is_done: true,
+      occurred_at: new Date().toISOString(),
+    })
+    toast.success('Enquiry logged')
+    emit('enquiry-logged')
+    dismissBanner()
+  } catch (e) {
+    toast.error(errorMessage(e, 'Failed to log enquiry'))
+  } finally {
+    loggingEnquiry.value = false
+  }
+}
+
+// viewBannerLead opens the existing lead's drawer over the current page.
+function viewBannerLead() {
+  const lead = selectedBannerLead.value
+  if (!lead) return
+  openLeadDrawer(lead.id)
+}
+
 // searchContacts debounces the contact picker search (300ms) and discards
 // out-of-order responses so a slow reply can never overwrite a newer query.
 let searchSeq = 0
@@ -199,6 +280,9 @@ function selectContact(c: ContactOption) {
   newContactMode.value = false
   contactSearch.value = ''
   contactResults.value = []
+  // The search list does not carry open leads; a collision surfaces as the
+  // create-409 backstop instead.
+  dismissBanner()
 }
 
 function chooseNewContact() {
@@ -207,6 +291,7 @@ function chooseNewContact() {
   linkedContactName.value = ''
   contactSearch.value = ''
   contactResults.value = []
+  dismissBanner()
 }
 
 function chooseExisting() {
@@ -286,6 +371,13 @@ function linkResolvedMatch(m: ResolveMatch) {
   newContactMode.value = false
   resolveMatches.value = []
   resolvedOnce.value = false
+  // The resolve response carries the contact's open leads, so the banner
+  // renders immediately without a second fetch.
+  if (m.open_leads?.length) {
+    showBanner(m.open_leads)
+  } else {
+    dismissBanner()
+  }
 }
 
 function createNewPersonInstead() {
@@ -303,6 +395,55 @@ function createNewPersonInstead() {
       <Link class="size-3.5 text-muted-foreground" />
       <span class="text-muted-foreground">Linked to</span>
       <Badge variant="secondary" class="text-xs">{{ linkedContactName }}</Badge>
+    </div>
+
+    <!-- Resolve-or-log banner: the contact already holds an open lead in
+         this slot; a repeat enquiry is a touchpoint on the existing deal,
+         not a new opportunity. -->
+    <div v-if="bannerLeads.length" class="space-y-2 rounded-md border px-3 py-2 text-sm">
+      <div class="flex items-center justify-between gap-2">
+        <p class="font-medium">
+          {{
+            bannerLeads.length > 1
+              ? 'Open deals exist for this contact'
+              : `${selectedBannerLead?.display_name || 'This contact'} has an open deal`
+          }}
+        </p>
+        <button
+          type="button"
+          class="text-xs text-muted-foreground hover:text-foreground"
+          @click="dismissBanner"
+        >
+          Dismiss
+        </button>
+      </div>
+      <Select v-if="bannerLeads.length > 1" v-model="selectedBannerLeadId">
+        <SelectTrigger>
+          <SelectValue placeholder="Select deal" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="l in bannerLeads" :key="l.id" :value="l.id">
+            {{ l.display_name }} · {{ l.program_name || 'No program' }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <p v-if="selectedBannerLead" class="text-xs text-muted-foreground">
+        {{
+          [selectedBannerLead.stage_name, selectedBannerLead.program_name || 'No program', selectedBannerLead.pipeline_name]
+            .filter(Boolean)
+            .join(' · ')
+        }}
+      </p>
+      <p class="text-xs text-muted-foreground">
+        Log this enquiry on the open deal instead of creating a duplicate.
+      </p>
+      <div class="flex gap-2">
+        <Button size="sm" :disabled="loggingEnquiry" @click="logEnquiry">
+          <Loader2 v-if="loggingEnquiry" class="mr-2 size-3.5 animate-spin" />
+          Log enquiry
+        </Button>
+        <Button size="sm" variant="outline" @click="viewBannerLead">View lead</Button>
+      </div>
     </div>
 
     <!-- Contact selection (create only) -->

@@ -59,9 +59,11 @@ const {
   initialStageId,
   prefillContact,
   saving,
+  openLeadConflict,
   openCreate,
   openEdit,
   handleSave,
+  handleEnquiryLogged,
   deleteLead,
 } = useLeadDrawer(loadLeads)
 
@@ -215,9 +217,11 @@ watch(
               :pipeline-id="selectedPipelineId"
               :initial-stage-id="initialStageId"
               :prefill-contact="prefillContact"
+              :open-lead-conflict="openLeadConflict"
               :saving="saving"
               @save="onLeadSaved"
               @delete="onLeadDeleted"
+              @enquiry-logged="handleEnquiryLogged"
             />
           </SheetContent>
         </Sheet>
