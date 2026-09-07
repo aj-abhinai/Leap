@@ -6,11 +6,14 @@ import { apiClient, type ApiResponse } from '@/composables/useApi'
 export interface Tag {
   id: string
   name: string
-  type: 'tag' | 'status' | 'quick_reply' | 'activity_type' | 'loss_reason'
+  type: string
   color?: string
   group_name?: string
   sort_order: number
   behavior: 'log' | 'next' | 'close_lost'
+  // usage_count reports how many contacts carry the tag (contact_tags rows),
+  // so the delete confirm dialog can warn before removing a live label.
+  usage_count?: number
   created_at: string
 }
 

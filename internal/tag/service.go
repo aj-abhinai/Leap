@@ -16,6 +16,24 @@ var (
 	ErrInvalidBehavior = errors.New("behavior must be 'log', 'next' or 'close_lost'")
 )
 
+// InUseError is returned when deleting a status or quick reply that history
+// rows still reference. It carries the reference count so the UI can show it;
+// the word lists that back history (statuses, quick replies) refuse deletion
+// while referenced — the same rule the database enforces with its RESTRICT
+// foreign keys.
+type InUseError struct {
+	Count int
+	Type  string
+	Name  string
+}
+
+func (e *InUseError) Error() string {
+	if e.Type == "status" {
+		return fmt.Sprintf("%d contacts still carry the status %q; move them first", e.Count, e.Name)
+	}
+	return fmt.Sprintf("%d tasks still use the quick reply %q; move them first", e.Count, e.Name)
+}
+
 // validType reports whether a tag type is an allowed catalog kind.
 func validType(t string) bool {
 	switch t {
@@ -62,8 +80,13 @@ func (s *Service) list(tagType string) ([]Tag, error) {
 		return nil, ErrInvalidType
 	}
 	rows, err := s.db.Query(
-		`SELECT id, name, type, COALESCE(color, ''), COALESCE(group_name, ''), sort_order, behavior, created_at
-		FROM tags WHERE type = $1 ORDER BY sort_order, name`,
+		`SELECT t.id, t.name, t.type, COALESCE(t.color, ''), COALESCE(t.group_name, ''),
+			t.sort_order, t.behavior, t.created_at, COUNT(ct.contact_id) AS usage_count
+		FROM tags t
+		LEFT JOIN contact_tags ct ON ct.tag_id = t.id
+		WHERE t.type = $1
+		GROUP BY t.id
+		ORDER BY t.sort_order, t.name`,
 		tagType,
 	)
 	if err != nil {
@@ -74,7 +97,7 @@ func (s *Service) list(tagType string) ([]Tag, error) {
 	tags := []Tag{}
 	for rows.Next() {
 		var t Tag
-		if err := rows.Scan(&t.ID, &t.Name, &t.Type, &t.Color, &t.GroupName, &t.SortOrder, &t.Behavior, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Type, &t.Color, &t.GroupName, &t.SortOrder, &t.Behavior, &t.CreatedAt, &t.UsageCount); err != nil {
 			return nil, fmt.Errorf("list tags: scan: %w", err)
 		}
 		tags = append(tags, t)
@@ -140,9 +163,48 @@ func (s *Service) update(id string, req UpdateRequest) (*Tag, error) {
 	return &t, nil
 }
 
+// delete removes a vocabulary entry. Statuses and quick replies refuse
+// deletion while history rows reference them (contacts.status_id,
+// lead_activities.quick_reply_id); the count is reported through InUseError.
+// Task types and loss reasons are free-text snapshots, so they delete freely.
+// Deleting a missing tag stays a no-op, as before.
 func (s *Service) delete(id string) error {
-	_, err := s.db.Exec(`DELETE FROM tags WHERE id = $1`, id)
+	var typ, name string
+	err := s.db.QueryRow(`SELECT type, name FROM tags WHERE id = $1`, id).Scan(&typ, &name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
 	if err != nil {
+		return fmt.Errorf("delete tag: %w", err)
+	}
+	var count int
+	switch typ {
+	case "status":
+		err = s.db.QueryRow(`SELECT COUNT(*) FROM contacts WHERE status_id = $1`, id).Scan(&count)
+	case "quick_reply":
+		err = s.db.QueryRow(`SELECT COUNT(*) FROM lead_activities WHERE quick_reply_id = $1`, id).Scan(&count)
+	}
+	if err != nil {
+		return fmt.Errorf("delete tag: count references: %w", err)
+	}
+	if count > 0 {
+		return &InUseError{Count: count, Type: typ, Name: name}
+	}
+	if _, err := s.db.Exec(`DELETE FROM tags WHERE id = $1`, id); err != nil {
+		// A link can land between the count and the delete; the RESTRICT
+		// foreign key refuses the delete, and the refusal is reported as the
+		// same in-use error with the now-current count instead of a 500.
+		if respond.IsForeignKeyViolation(err) {
+			switch typ {
+			case "status":
+				err = s.db.QueryRow(`SELECT COUNT(*) FROM contacts WHERE status_id = $1`, id).Scan(&count)
+			case "quick_reply":
+				err = s.db.QueryRow(`SELECT COUNT(*) FROM lead_activities WHERE quick_reply_id = $1`, id).Scan(&count)
+			}
+			if err == nil && count > 0 {
+				return &InUseError{Count: count, Type: typ, Name: name}
+			}
+		}
 		return fmt.Errorf("delete tag: %w", err)
 	}
 	return nil

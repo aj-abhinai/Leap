@@ -105,6 +105,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.delete(id); err != nil {
+		var inUse *InUseError
+		if errors.As(err, &inUse) {
+			respond.JSON(
+				w,
+				http.StatusConflict,
+				nil,
+				&respond.Error{Code: "ERR_IN_USE", Message: err.Error()},
+				nil,
+			)
+			return
+		}
 		respond.ServerError(w, err)
 		return
 	}

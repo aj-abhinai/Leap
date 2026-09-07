@@ -94,6 +94,18 @@ const deletingName = computed(
   () => items.value.find((i) => i.id === deletingId.value)?.name ?? '',
 )
 
+// Tags are live labels: the confirm dialog states how many contacts carry
+// the tag. Statuses and quick replies instead refuse deletion server-side
+// (409 with the count) while history rows reference them.
+const deleteDescription = computed(() => {
+  const item = items.value.find((i) => i.id === deletingId.value)
+  if (props.kind === 'tag' && item && (item.usage_count ?? 0) > 0) {
+    const n = item.usage_count ?? 0
+    return `${n} contact${n === 1 ? '' : 's'} currently carry this tag. Deleting removes the label from them.`
+  }
+  return `Delete the ${props.title.toLowerCase()} “${deletingName.value}”? This cannot be undone.`
+})
+
 async function remove() {
   if (!deletingId.value) return
   try {
@@ -198,7 +210,7 @@ async function saveEdit() {
       <ConfirmDialog
         :open="!!deletingId"
         title="Delete"
-        :description="`Delete ${props.title.toLowerCase()} &ldquo;${deletingName}&rdquo;? This cannot be undone.`"
+        :description="deleteDescription"
         confirm-text="Delete"
         destructive
         @update:open="(v) => { if (!v) deletingId = null }"
