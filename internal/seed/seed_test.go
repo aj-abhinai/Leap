@@ -167,11 +167,12 @@ func TestSeedSeedsTagCatalog(t *testing.T) {
 
 	// The four simple catalogs (name+type only) must appear exactly once each,
 	// and the quick-reply catalog (with its group/sort/behavior reconciliation)
-	// must be present with its seven entries.
+	// must be present with its seven entries. Enquiry rides the activity-type
+	// catalog as the repeat-enquiry touchpoint preset.
 	want := map[string]int{
 		"tag":           4,
 		"status":        4,
-		"activity_type": 4,
+		"activity_type": 5,
 		"loss_reason":   2,
 		"quick_reply":   7,
 	}

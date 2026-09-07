@@ -227,6 +227,7 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		{"WhatsApp", "activity_type", "activity type"},
 		{"Email", "activity_type", "activity type"},
 		{"Meeting", "activity_type", "activity type"},
+		{"Enquiry", "activity_type", "activity type"},
 		// Loss-reason presets for the "Closed Lost" stage (free text plus presets).
 		{"Not interested", "loss_reason", "loss reason"},
 		{"Fake", "loss_reason", "loss reason"},
