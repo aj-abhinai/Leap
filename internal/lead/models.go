@@ -249,6 +249,19 @@ type ActivityListItem struct {
 	ContactID       string `json:"contact_id"`
 }
 
+// OpenLeadRef is the existing open lead returned with an open-lead conflict
+// refusal: identity plus the pipeline/program/stage context the UI needs to
+// offer the resolve-or-log path without a second fetch.
+type OpenLeadRef struct {
+	ID           string  `json:"id"`
+	DisplayName  string  `json:"display_name"`
+	StageName    string  `json:"stage_name,omitempty"`
+	ProgramName  string  `json:"program_name,omitempty"`
+	ProgramID    *string `json:"program_id,omitempty"`
+	PipelineID   string  `json:"pipeline_id"`
+	PipelineName string  `json:"pipeline_name,omitempty"`
+}
+
 // StageHistory records a lead's stage move with the from/to stage names
 // snapshotted at move time and the actor who performed it.
 type StageHistory struct {

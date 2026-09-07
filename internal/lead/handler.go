@@ -156,7 +156,19 @@ func (h *Handler) Board(w http.ResponseWriter, r *http.Request) {
 }
 
 func respondLeadMutationError(w http.ResponseWriter, err error) {
+	var openLeadConflict *OpenLeadConflictError
 	switch {
+	case errors.As(err, &openLeadConflict):
+		// A write colliding with an open lead in the same (contact, pipeline,
+		// program) slot returns 409 with the existing lead, so the UI can offer
+		// the resolve-or-log path without a second fetch.
+		respond.JSON(
+			w,
+			http.StatusConflict,
+			map[string]any{"existing_lead": openLeadConflict.Lead},
+			&respond.Error{Code: "OPEN_LEAD_CONFLICT", Message: openLeadConflict.Error()},
+			nil,
+		)
 	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive),
 		errors.Is(err, ErrContactRequired), errors.Is(err, ErrNoContactDetail),
 		errors.Is(err, ErrInvalidQuickReply), errors.Is(err, ErrEmptyType),

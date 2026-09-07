@@ -51,6 +51,19 @@ var (
 	ErrClosedToClosedMove = errors.New("a closed lead cannot move to another closing stage")
 )
 
+// OpenLeadConflictError refuses a write that would open a second lead in an
+// occupied (contact, pipeline, program) slot. Lead carries the open lead that
+// already holds the slot so the UI can offer the resolve-or-log path without
+// a second fetch.
+type OpenLeadConflictError struct {
+	Lead OpenLeadRef
+}
+
+// Error returns the human-readable refusal message.
+func (e *OpenLeadConflictError) Error() string {
+	return "an open lead already exists for this contact, pipeline, and program"
+}
+
 // Service provides database-backed lead operations: list/get/create/update/
 // delete, stage moves with history, activities, reminders, and the
 // resolve-or-create contact flow for lead entry.
@@ -401,6 +414,13 @@ func (s *Service) spawnCycle(old *Lead, targetStageID, userID string) (*Lead, er
 		price = &p
 	}
 
+	// The reopened lead occupies the same (contact, pipeline, program) slot as
+	// the closed one it replaces; refuse when another open lead already holds
+	// it.
+	if err := s.refuseOpenLeadConflictTx(tx, old.ContactID, old.PipelineID, old.ProgramID); err != nil {
+		return nil, err
+	}
+
 	var l Lead
 	err = tx.QueryRow(
 		`INSERT INTO leads (nickname, contact_id, pipeline_id, stage_id, program_id, value)
@@ -471,6 +491,15 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// One open lead per (contact, pipeline, program): a repeat enquiry for an
+	// open deal is a touchpoint, not a new opportunity, so refuse the create
+	// when the contact already holds the slot. Runs after request validation
+	// so invalid payloads surface their own errors first.
+	if err := s.refuseOpenLeadConflictTx(tx, contactID, req.PipelineID, req.ProgramID); err != nil {
+		return nil, err
+	}
+
 	var l Lead
 	err = tx.QueryRow(
 		`INSERT INTO leads (nickname, contact_id, pipeline_id, stage_id, program_id, value, notes, assigned_to)
@@ -629,6 +658,91 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	return id, nil
 }
 
+// normalizeProgram maps a program reference onto its slot key: an explicit
+// empty string (the clear-program signal used by updates) is the program-less
+// slot, same as nil.
+func normalizeProgram(programID *string) *string {
+	if programID == nil || *programID == "" {
+		return nil
+	}
+	return programID
+}
+
+// sameProgram reports whether two program references denote the same slot key,
+// treating nil and an empty string as the program-less slot.
+func sameProgram(a, b *string) bool {
+	an, bn := normalizeProgram(a), normalizeProgram(b)
+	if an == nil || bn == nil {
+		return an == bn
+	}
+	return *an == *bn
+}
+
+// lockLeadSlotTx serializes concurrent writes to the same open-lead slot
+// (contact, pipeline, program) so exactly one of two racing creates wins. The
+// lock is scoped to the transaction and released at commit/rollback, mirroring
+// the contact-resolve lock used by lead entry.
+func lockLeadSlotTx(tx *sql.Tx, contactID, pipelineID string, programID *string) error {
+	slot := "lead_slot:" + contactID + ":" + pipelineID + ":"
+	if programID != nil {
+		slot += *programID
+	}
+	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext($1))`, slot); err != nil {
+		return fmt.Errorf("lock lead slot: %w", err)
+	}
+	return nil
+}
+
+// openLeadForSlotTx returns the open lead holding the (contact, pipeline,
+// program) slot, or nil when the slot is free. A lead holds the slot while it
+// is live and its linked stage declares outcome 'open' — the same stage
+// metadata the rest of the product reads — so a closed or deleted lead never
+// blocks a new cycle.
+func (s *Service) openLeadForSlotTx(tx *sql.Tx, contactID, pipelineID string, programID *string) (*OpenLeadRef, error) {
+	var ref OpenLeadRef
+	err := tx.QueryRow(
+		`SELECT l.id, COALESCE(l.nickname, c.name, ''), COALESCE(ls.name, ''),
+			COALESCE(p.name, ''), l.program_id, COALESCE(pl.name, '')
+		FROM leads l
+		JOIN contacts c ON c.id = l.contact_id
+		JOIN lead_stages ls ON ls.id = l.stage_id AND ls.outcome = 'open'
+		LEFT JOIN programs p ON p.id = l.program_id
+		LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
+		WHERE l.contact_id = $1 AND l.pipeline_id = $2
+			AND l.program_id IS NOT DISTINCT FROM $3
+			AND l.deleted_at IS NULL
+		LIMIT 1`,
+		contactID, pipelineID, programID,
+	).Scan(&ref.ID, &ref.DisplayName, &ref.StageName, &ref.ProgramName, &ref.ProgramID, &ref.PipelineName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("check open lead slot: %w", err)
+	}
+	ref.PipelineID = pipelineID
+	return &ref, nil
+}
+
+// refuseOpenLeadConflictTx enforces the one-open-lead rule for a slot: it
+// locks the slot, then refuses the write when an open lead already holds it.
+// Returns an *OpenLeadConflictError carrying the existing lead; nil when the
+// slot is free. An empty program reference targets the program-less slot.
+func (s *Service) refuseOpenLeadConflictTx(tx *sql.Tx, contactID, pipelineID string, programID *string) error {
+	programID = normalizeProgram(programID)
+	if err := lockLeadSlotTx(tx, contactID, pipelineID, programID); err != nil {
+		return err
+	}
+	existing, err := s.openLeadForSlotTx(tx, contactID, pipelineID, programID)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return &OpenLeadConflictError{Lead: *existing}
+	}
+	return nil
+}
+
 func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, error) {
 	if req.Value != nil {
 		return nil, ErrCustomValueRejected
@@ -708,6 +822,28 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	}
 	if err := s.validateAssignedToTx(tx, req.AssignedTo); err != nil {
 		return nil, err
+	}
+
+	// One open lead per (contact, pipeline, program): only a slot-key change
+	// can create a duplicate, so the guard runs when contact_id, pipeline_id,
+	// or program_id change; stage moves never touch the key. An explicit empty
+	// program clears the program and targets the program-less slot.
+	contactID := old.ContactID
+	if req.ContactID != nil && *req.ContactID != "" {
+		contactID = *req.ContactID
+	}
+	pipelineID := old.PipelineID
+	if req.PipelineID != nil {
+		pipelineID = *req.PipelineID
+	}
+	programID := normalizeProgram(old.ProgramID)
+	if req.ProgramID != nil {
+		programID = normalizeProgram(req.ProgramID)
+	}
+	if contactID != old.ContactID || pipelineID != old.PipelineID || !sameProgram(programID, old.ProgramID) {
+		if err := s.refuseOpenLeadConflictTx(tx, contactID, pipelineID, programID); err != nil {
+			return nil, err
+		}
 	}
 
 	// Resolve the outcome when the lead moves into or out of a closing stage.
