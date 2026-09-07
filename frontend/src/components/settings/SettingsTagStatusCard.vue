@@ -34,6 +34,9 @@ const props = defineProps<{
   kind: 'tag' | 'status' | 'quick_reply' | 'activity_type' | 'loss_reason'
   title: string
   placeholder: string
+  // readonly renders the list without any mutation control: the read-only
+  // domain-tab view for users without settings:manage.
+  readonly?: boolean
 }>()
 
 // Quick replies are the only catalog with group/behavior config;
@@ -65,7 +68,7 @@ const kindLabel = computed(() => {
   switch (props.kind) {
     case 'status': return 'Status'
     case 'quick_reply': return 'Quick reply'
-    case 'activity_type': return 'Activity type'
+    case 'activity_type': return 'Task type'
     case 'loss_reason': return 'Loss reason'
     default: return 'Tag'
   }
@@ -156,7 +159,7 @@ async function saveEdit() {
       <CardTitle class="text-base">{{ title }}</CardTitle>
     </CardHeader>
     <CardContent>
-      <div class="flex gap-2 mb-4">
+      <div v-if="!readonly" class="flex gap-2 mb-4">
         <Input v-model="newName" :placeholder="placeholder" @keyup.enter="add" />
         <Button @click="add">
           <Plus class="mr-2 size-4" /> Add
@@ -169,12 +172,12 @@ async function saveEdit() {
             <TableHead>Name</TableHead>
             <TableHead v-if="isQuickReply">Group</TableHead>
             <TableHead v-if="isQuickReply">Behavior</TableHead>
-            <TableHead class="w-24" />
+            <TableHead v-if="!readonly" class="w-24" />
           </TableRow>
         </TableHeader>
         <TableBody>
           <TableRow v-if="items.length === 0">
-            <TableCell :colspan="isQuickReply ? 4 : 2" class="text-center text-muted-foreground text-sm py-4">
+            <TableCell :colspan="isQuickReply ? (readonly ? 3 : 4) : (readonly ? 1 : 2)" class="text-center text-muted-foreground text-sm py-4">
               No {{ title.toLowerCase() }} yet
             </TableCell>
           </TableRow>
@@ -188,7 +191,7 @@ async function saveEdit() {
               <span v-if="item.behavior" class="text-xs">{{ behaviorLabels[item.behavior] || item.behavior }}</span>
               <span v-else class="text-xs text-muted-foreground/50">—</span>
             </TableCell>
-            <TableCell class="text-right">
+            <TableCell v-if="!readonly" class="text-right">
               <Button
                 v-if="isQuickReply"
                 variant="ghost"

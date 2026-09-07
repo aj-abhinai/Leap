@@ -17,6 +17,10 @@ import { ArrowDown, ArrowUp, Check, Layers, Plus, Trash2, Pencil, X } from '@luc
 import { errorMessage } from '@/utils/errors'
 import { listPipelines, createPipeline as apiCreatePipeline, deletePipeline as apiDeletePipeline, addStage, updateStage, deleteStage as apiDeleteStage, type Stage, type Pipeline } from '@/api/pipelines'
 
+// readonly renders pipelines and stages without any mutation control: the
+// read-only domain-tab view for users without settings:manage.
+defineProps<{ readonly?: boolean }>()
+
 const pipelines = shallowRef<Pipeline[]>([])
 const newPipelineName = shallowRef('')
 const newPipelineDesc = shallowRef('')
@@ -166,7 +170,7 @@ async function setStageOutcome(stage: Stage, outcome: string) {
 
 <template>
   <div class="space-y-4">
-    <Card>
+    <Card v-if="!readonly">
       <CardHeader>
         <CardTitle class="text-base">Create Pipeline</CardTitle>
       </CardHeader>
@@ -191,12 +195,12 @@ async function setStageOutcome(stage: Stage, outcome: string) {
           <CardTitle class="text-base">{{ p.name }}</CardTitle>
           <p v-if="p.description" class="text-sm text-muted-foreground mt-0.5">{{ p.description }}</p>
         </div>
-        <Button variant="ghost" size="sm" @click="deletePipeline(p.id)">
+        <Button v-if="!readonly" variant="ghost" size="sm" @click="deletePipeline(p.id)">
           <Trash2 class="mr-1 size-3.5" /> Delete
         </Button>
       </CardHeader>
       <CardContent class="space-y-3">
-        <div class="flex flex-wrap gap-2">
+        <div v-if="!readonly" class="flex flex-wrap gap-2">
           <Input
             v-model="newStageNames[p.id]"
             placeholder="Stage name"
@@ -216,7 +220,7 @@ async function setStageOutcome(stage: Stage, outcome: string) {
             <Badge variant="secondary" class="text-xs">
               {{ s.name }}
             </Badge>
-            <label class="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground" :title="`Mark ${s.name} as a closing stage`">
+            <label v-if="!readonly" class="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground" :title="`Mark ${s.name} as a closing stage`">
               <Checkbox
                 :model-value="!!s.is_closing"
                 class="size-3.5"
@@ -226,7 +230,7 @@ async function setStageOutcome(stage: Stage, outcome: string) {
               Closing
             </label>
             <Select
-              v-if="s.is_closing"
+              v-if="!readonly && s.is_closing"
               :model-value="s.outcome === 'won' ? 'won' : 'lost'"
               @update:model-value="(v) => setStageOutcome(s, String(v ?? 'lost'))"
             >
@@ -238,7 +242,7 @@ async function setStageOutcome(stage: Stage, outcome: string) {
                 <SelectItem value="won">Won</SelectItem>
               </SelectContent>
             </Select>
-            <div class="ml-auto flex items-center gap-1">
+            <div v-if="!readonly" class="ml-auto flex items-center gap-1">
               <template v-if="editingStageId === s.id">
                 <Input
                   v-model="editingStageName"

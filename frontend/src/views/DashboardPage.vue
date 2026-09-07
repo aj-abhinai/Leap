@@ -99,7 +99,7 @@ function goToActivities() {
   <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 pt-2">
     <div class="flex flex-col">
       <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
-      <p class="mt-0.5 text-sm text-muted-foreground">Pipeline health, reminders, and recent activity</p>
+      <p class="mt-0.5 text-sm text-muted-foreground">Pipeline health, reminders, and recent tasks</p>
     </div>
 
     <!-- Counters -->
@@ -310,7 +310,7 @@ function goToActivities() {
         <CardHeader class="flex flex-row items-center justify-between">
           <div class="flex items-center gap-2">
             <TrendingUp class="size-4 text-muted-foreground" />
-            <CardTitle>Recent Activity</CardTitle>
+            <CardTitle>Recent tasks</CardTitle>
           </div>
           <Button variant="ghost" size="sm" class="text-muted-foreground" @click="goToActivities">
             View all <ArrowRight class="ml-1 size-3.5" />
@@ -329,8 +329,8 @@ function goToActivities() {
           </div>
           <div v-else-if="activitiesStore.recent.length === 0" class="flex flex-col items-center justify-center py-10 text-center">
             <Calendar class="size-10 text-muted-foreground/40 mb-3" />
-            <p class="text-sm font-medium text-muted-foreground">No recent activity</p>
-            <p class="text-xs text-muted-foreground/60 mt-1">Activity will appear here as you work leads</p>
+            <p class="text-sm font-medium text-muted-foreground">No recent tasks</p>
+            <p class="text-xs text-muted-foreground/60 mt-1">Tasks will appear here as you work leads</p>
           </div>
           <div v-else class="space-y-1">
             <div

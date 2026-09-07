@@ -9,7 +9,11 @@ import { Badge } from '@/components/ui/badge'
 import { Plus, Archive, RotateCcw, BookOpen } from '@lucide/vue'
 import { formatCurrency } from '@/utils/format'
 import { errorMessage } from '@/utils/errors'
-import { listProgramsManage, createProgram as apiCreateProgram, updateProgram, archiveProgram as apiArchiveProgram, restoreProgram as apiRestoreProgram, type Program } from '@/api/programs'
+import { listPrograms, listProgramsManage, createProgram as apiCreateProgram, updateProgram, archiveProgram as apiArchiveProgram, restoreProgram as apiRestoreProgram, type Program } from '@/api/programs'
+
+// readonly renders programs without any mutation control: the read-only
+// domain-tab view for users without settings:manage.
+const props = defineProps<{ readonly?: boolean }>()
 
 const programs = shallowRef<Program[]>([])
 const newName = shallowRef('')
@@ -24,7 +28,9 @@ onMounted(() => loadPrograms())
 
 async function loadPrograms() {
   try {
-    const res = await listProgramsManage()
+    // Read-only viewers use the lead:read-gated list (active programs only);
+    // the settings:manage list also returns archived ones.
+    const res = props.readonly ? await listPrograms() : await listProgramsManage()
     programs.value = res.data
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load programs'))
@@ -107,7 +113,7 @@ async function restoreProgram(id: string) {
 
 <template>
   <div class="space-y-4">
-    <Card>
+    <Card v-if="!readonly">
       <CardHeader>
         <CardTitle class="text-base">Add Program</CardTitle>
       </CardHeader>
@@ -150,7 +156,7 @@ async function restoreProgram(id: string) {
           <p v-if="p.description" class="text-sm text-muted-foreground mt-0.5">{{ p.description }}</p>
           <p class="text-sm font-medium mt-1">{{ formatCurrency(p.price) }}</p>
         </div>
-        <div v-if="!editing || editing.id !== p.id" class="flex gap-1">
+        <div v-if="!readonly && (!editing || editing.id !== p.id)" class="flex gap-1">
           <Button variant="outline" size="sm" @click="startEdit(p)">Edit</Button>
           <Button v-if="!p.archived" variant="ghost" size="sm" @click="archiveProgram(p.id)">
             <Archive class="mr-1 size-3.5" /> Archive

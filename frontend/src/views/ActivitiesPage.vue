@@ -57,13 +57,13 @@ interface ViewDef {
 }
 
 const views: ViewDef[] = [
-  { id: 'all', label: 'All Activities', status: 'all' },
+  { id: 'all', label: 'All tasks', status: 'all' },
   { id: 'open', label: 'Open', status: 'open' },
   { id: 'done', label: 'Completed', status: 'done' },
   { id: 'cancelled', label: 'Canceled', status: 'cancelled' },
   { id: 'overdue', label: 'Overdue', status: 'open', overdue: true },
   { id: 'today_overdue', label: 'Today + Overdue', status: 'open', overdue: true, today: true },
-  { id: 'today', label: "Today's Activities", status: 'all', today: true },
+  { id: 'today', label: "Today's tasks", status: 'all', today: true },
   { id: 'my_open', label: 'My Open', status: 'open', mine: true },
   { id: 'my_overdue', label: 'My Overdue', status: 'open', overdue: true, mine: true },
   { id: 'my_done', label: 'My Completed', status: 'done', mine: true },
@@ -174,7 +174,7 @@ async function doDelete() {
       }
     }
     selected.value = new Set()
-    toast.success(deleted > 1 ? `Deleted ${deleted} activities` : 'Activity deleted')
+    toast.success(deleted > 1 ? `Deleted ${deleted} tasks` : 'Task deleted')
     load()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to delete'))
@@ -184,7 +184,7 @@ async function doDelete() {
 async function doMarkDone(item: { id: string; lead_id: string }) {
   try {
     await store.markDone(item.lead_id, item.id)
-    toast.success('Activity completed')
+    toast.success('Task completed')
     load()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to complete'))
@@ -222,7 +222,7 @@ function prevPage() {
 <template>
   <div class="p-6">
     <div class="mb-4">
-      <h1 class="text-2xl font-semibold tracking-tight">Activities</h1>
+      <h1 class="text-2xl font-semibold tracking-tight">Tasks</h1>
       <p v-if="!store.loading && store.total" class="mt-0.5 text-sm text-muted-foreground">
         {{ store.total }} total &middot; {{ selected.size }} selected
       </p>
@@ -293,7 +293,7 @@ function prevPage() {
         <PageState
           :loading="store.loading"
           :empty="store.items.length === 0"
-          empty-title="No activities here"
+          empty-title="No tasks here"
           empty-hint="Try a different view or clear the filters"
           :skeleton-count="6"
           skeleton-class="h-12 w-full"
@@ -366,7 +366,7 @@ function prevPage() {
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger as-child>
-                        <Button variant="ghost" size="icon-sm" class="size-8" aria-label="Activity actions">
+                        <Button variant="ghost" size="icon-sm" class="size-8" aria-label="Task actions">
                           <MoreHorizontal class="size-3.5" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -420,8 +420,8 @@ function prevPage() {
 
     <ConfirmDialog
       :open="deleting"
-      title="Delete activities"
-      :description="`Delete ${deletingIds.length > 1 ? deletingIds.length + ' activities' : 'this activity'}? This cannot be undone.`"
+      title="Delete tasks"
+      :description="`Delete ${deletingIds.length > 1 ? deletingIds.length + ' tasks' : 'this task'}? This cannot be undone.`"
       confirm-text="Delete"
       destructive
       @update:open="(v) => { if (!v) deleting = false }"

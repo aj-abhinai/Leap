@@ -108,7 +108,7 @@ const visibleDone = computed(() =>
 async function deleteActivity(id: string) {
   try {
     await deleteLeadActivity(props.leadId, id)
-    toast.success('Activity deleted')
+    toast.success('Task deleted')
     await fetchActivities()
     emit('tasksChanged')
   } catch (e) {
@@ -210,7 +210,7 @@ defineExpose({ fetchActivities })
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child>
-                    <Button variant="ghost" size="icon-sm" class="size-8 shrink-0" aria-label="Activity actions">
+                    <Button variant="ghost" size="icon-sm" class="size-8 shrink-0" aria-label="Task actions">
                       <MoreHorizontal class="size-3.5" />
                     </Button>
                   </DropdownMenuTrigger>

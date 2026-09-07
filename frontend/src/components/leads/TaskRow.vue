@@ -98,7 +98,7 @@ async function saveEdit() {
       scheduled_end_at: mergeDateTime(editEndDate.value, editEndTime.value),
       remind_at: mergeDateTime(editRemindDate.value, editRemindTime.value),
     })
-    toast.success('Activity updated')
+    toast.success('Task updated')
     cancelEdit()
     emit('changed')
   } catch (e) {

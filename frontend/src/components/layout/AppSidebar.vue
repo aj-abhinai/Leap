@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
+import { computed, onMounted, shallowRef } from 'vue'
 import { Settings, LayoutDashboard, Users, Folder, CalendarCheck } from '@lucide/vue'
+import { useRBACStore } from '@/stores/rbac'
 import {
   Sidebar,
   SidebarContent,
@@ -14,6 +16,29 @@ import {
 import NavMain from './NavMain.vue'
 import NavUser from './NavUser.vue'
 import NotificationPopover from '@/components/notifications/NotificationPopover.vue'
+
+const rbac = useRBACStore()
+const permissionsLoaded = shallowRef(false)
+
+// The Settings nav item appears when any Settings tab is visible; it stays
+// shown while permissions load so a fast viewer never sees it flash away.
+const settingsVisible = computed(() => {
+  if (!permissionsLoaded.value) return true
+  return (
+    rbac.can('contact:read') ||
+    rbac.can('lead:read') ||
+    rbac.can('settings:manage') ||
+    rbac.can('data:export')
+  )
+})
+
+onMounted(async () => {
+  try {
+    await rbac.fetchPermissions()
+  } finally {
+    permissionsLoaded.value = true
+  }
+})
 
 const navItems: { title: string; url: string; icon: Component }[] = [
   {
@@ -32,7 +57,7 @@ const navItems: { title: string; url: string; icon: Component }[] = [
     icon: Folder,
   },
   {
-    title: 'Activities',
+    title: 'Tasks',
     url: '/activities',
     icon: CalendarCheck,
   },
@@ -70,7 +95,7 @@ const navItems: { title: string; url: string; icon: Component }[] = [
             <NotificationPopover />
           </div>
         </SidebarMenuItem>
-        <SidebarMenuItem>
+        <SidebarMenuItem v-if="settingsVisible">
           <SidebarMenuButton as-child tooltip="Settings">
             <router-link to="/settings" class="flex items-center gap-2">
               <Settings class="size-4" />

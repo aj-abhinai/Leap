@@ -236,7 +236,7 @@ async function handleSave() {
   saving.value = true
   try {
     await createLeadActivity(props.leadId, payload)
-    toast.success(hasNext ? 'Attempt logged, next task created' : showNextFields.value ? 'Attempt logged' : 'Activity logged')
+    toast.success(hasNext ? 'Attempt logged, next task created' : showNextFields.value ? 'Attempt logged' : 'Task logged')
     lastActivityType.value = activityType.value
     clearForm()
     // A close_lost save emits only closeLost: the drawer's handleCloseLost
