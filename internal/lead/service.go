@@ -711,6 +711,7 @@ func (s *Service) openLeadForSlotTx(tx *sql.Tx, contactID, pipelineID string, pr
 		WHERE l.contact_id = $1 AND l.pipeline_id = $2
 			AND l.program_id IS NOT DISTINCT FROM $3
 			AND l.deleted_at IS NULL
+		ORDER BY l.created_at ASC
 		LIMIT 1`,
 		contactID, pipelineID, programID,
 	).Scan(&ref.ID, &ref.DisplayName, &ref.StageName, &ref.ProgramName, &ref.ProgramID, &ref.PipelineName)
@@ -824,28 +825,6 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		return nil, err
 	}
 
-	// One open lead per (contact, pipeline, program): only a slot-key change
-	// can create a duplicate, so the guard runs when contact_id, pipeline_id,
-	// or program_id change; stage moves never touch the key. An explicit empty
-	// program clears the program and targets the program-less slot.
-	contactID := old.ContactID
-	if req.ContactID != nil && *req.ContactID != "" {
-		contactID = *req.ContactID
-	}
-	pipelineID := old.PipelineID
-	if req.PipelineID != nil {
-		pipelineID = *req.PipelineID
-	}
-	programID := normalizeProgram(old.ProgramID)
-	if req.ProgramID != nil {
-		programID = normalizeProgram(req.ProgramID)
-	}
-	if contactID != old.ContactID || pipelineID != old.PipelineID || !sameProgram(programID, old.ProgramID) {
-		if err := s.refuseOpenLeadConflictTx(tx, contactID, pipelineID, programID); err != nil {
-			return nil, err
-		}
-	}
-
 	// Resolve the outcome when the lead moves into or out of a closing stage.
 	// outcome is set from the target stage's declared outcome, so 'won' and
 	// 'lost' come from stage metadata rather than
@@ -874,6 +853,31 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		}
 		// Moving out of a closing stage never reaches here: the top-of-update
 		// check spawns a new cycle or rejects the move.
+	}
+
+	// One open lead per (contact, pipeline, program): only a slot-key change
+	// can create a duplicate, so the guard runs when contact_id, pipeline_id,
+	// or program_id change; stage moves never touch the key. An explicit empty
+	// program clears the program and targets the program-less slot. A move
+	// into a closing stage is exempt: the lead closes in this same update, so
+	// it never occupies the new slot.
+	contactID := old.ContactID
+	if req.ContactID != nil && *req.ContactID != "" {
+		contactID = *req.ContactID
+	}
+	pipelineID := old.PipelineID
+	if req.PipelineID != nil {
+		pipelineID = *req.PipelineID
+	}
+	programID := normalizeProgram(old.ProgramID)
+	if req.ProgramID != nil {
+		programID = normalizeProgram(req.ProgramID)
+	}
+	if (targetStage == nil || !targetStage.IsClosing) &&
+		(contactID != old.ContactID || pipelineID != old.PipelineID || !sameProgram(programID, old.ProgramID)) {
+		if err := s.refuseOpenLeadConflictTx(tx, contactID, pipelineID, programID); err != nil {
+			return nil, err
+		}
 	}
 
 	var programPrice *float64

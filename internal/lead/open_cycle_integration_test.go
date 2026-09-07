@@ -350,6 +350,63 @@ func TestUpdateSlotKeyBlockedOnCollisionIntegration(t *testing.T) {
 	}
 }
 
+func TestUpdateSlotKeyIntoClosingStageAllowedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var pipelineID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Close Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	var openStage, openStageB, wonStage string
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'New', 0) RETURNING id`, pipelineID).Scan(&openStage); err != nil {
+		t.Fatalf("seed open stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'Warm', 1) RETURNING id`, pipelineID).Scan(&openStageB); err != nil {
+		t.Fatalf("seed open stage B: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 2, true, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
+		t.Fatalf("seed won stage: %v", err)
+	}
+	programX := seedProgram(t, db, "Coaching", 25000)
+	programY := seedProgram(t, db, "Mentorship", 40000)
+
+	// The slot (contact, pipeline, program X) is held by lead A; lead B sits
+	// in program Y.
+	if _, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+		ProgramID:  &programX,
+	}, ""); err != nil {
+		t.Fatalf("create holder lead: %v", err)
+	}
+	b, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    openStage,
+		ProgramID:  &programY,
+	}, "")
+	if err != nil {
+		t.Fatalf("create mover lead: %v", err)
+	}
+
+	// A combined slot change + move into an OPEN stage still refuses: the
+	// lead would stay open in the held slot.
+	_, err = svc.update(b.ID, UpdateRequest{ProgramID: &programX, StageID: &openStageB}, "")
+	openLeadConflict(t, err)
+
+	// A combined slot change + move into a CLOSING stage is allowed: the lead
+	// closes in the same update and never occupies the slot.
+	updated, err := svc.update(b.ID, UpdateRequest{ProgramID: &programX, StageID: &wonStage}, "")
+	if err != nil {
+		t.Fatalf("close into held slot = %v, want allowed", err)
+	}
+	if updated.StageID != wonStage || updated.Outcome != "won" {
+		t.Errorf("updated lead = stage %q outcome %q, want terminal won in the new slot", updated.StageID, updated.Outcome)
+	}
+}
+
 func TestConcurrentCreatesOneOpenLeadWinsIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

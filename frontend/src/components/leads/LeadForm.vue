@@ -221,7 +221,8 @@ const selectedBannerLead = computed(() =>
 )
 
 // logEnquiry writes exactly one done Enquiry activity on the existing open
-// lead — the repeat enquiry is a touchpoint, not a new opportunity.
+// lead — the repeat enquiry is a touchpoint, not a new opportunity. The
+// server stamps occurred_at for done activities.
 async function logEnquiry() {
   const lead = selectedBannerLead.value
   if (!lead) return
@@ -230,7 +231,6 @@ async function logEnquiry() {
     await createLeadActivity(lead.id, {
       type: 'Enquiry',
       is_done: true,
-      occurred_at: new Date().toISOString(),
     })
     toast.success('Enquiry logged')
     emit('enquiry-logged')

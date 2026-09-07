@@ -50,8 +50,10 @@ export function useLeadDrawer(onSaved: () => void) {
       onSaved()
     } catch (e) {
       // A create refused because the slot is already held (409) is not an
-      // error toast: the banner offers the resolve-or-log path instead.
-      const conflictLead = openLeadConflictLead(e)
+      // error toast: the banner offers the resolve-or-log path instead. An
+      // edit refused the same way keeps the toast — the banner's log-enquiry
+      // framing only fits lead entry, so a failed edit must not be swallowed.
+      const conflictLead = editingLead.value ? null : openLeadConflictLead(e)
       if (conflictLead) {
         openLeadConflict.value = conflictLead
         return

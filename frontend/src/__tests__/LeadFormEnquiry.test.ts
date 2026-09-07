@@ -161,7 +161,6 @@ describe('LeadForm resolve-or-log banner', () => {
     expect(postMock).toHaveBeenCalledWith(`/api/leads/${openLead.id}/activities`, {
       type: 'Enquiry',
       is_done: true,
-      occurred_at: expect.any(String),
     })
     expect(logged).toBe(1)
     wrapper.unmount()
