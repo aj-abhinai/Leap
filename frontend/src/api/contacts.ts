@@ -1,4 +1,5 @@
 import { apiClient, type ApiResponse } from '@/composables/useApi'
+import type { OpenLeadRef } from './leads'
 
 // Contact entities and the contact endpoints. Every URL for the contacts and
 // notes resources lives here so callers never construct them by hand.
@@ -50,12 +51,15 @@ export interface ContactNote {
 export type ContactSaveBody = Record<string, any>
 
 // ResolveMatch is the compact contact result returned by the resolve
-// endpoint (lead entry phone lookup): id, name, and primary phone/email.
+// endpoint (lead entry phone lookup): id, name, primary phone/email, and the
+// contact's open leads so the form can offer the resolve-or-log path without
+// a second fetch.
 export interface ResolveMatch {
   id: string
   name: string
   phone?: string
   email?: string
+  open_leads: OpenLeadRef[]
 }
 
 // DuplicateMatch is a live contact returned in a 409 when a create collides

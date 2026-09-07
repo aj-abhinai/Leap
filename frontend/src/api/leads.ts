@@ -1,7 +1,34 @@
-import { apiClient, type ApiResponse } from '@/composables/useApi'
+import { apiClient, ApiError, type ApiResponse } from '@/composables/useApi'
 
 // Lead entities and the lead-scoped endpoints (leads, their activities, and
 // stage history). Reminders on a lead live in api/reminders.ts.
+
+// OpenLeadRef is the existing open lead returned with a 409 OPEN_LEAD_CONFLICT
+// refusal: identity plus the pipeline/program/stage context the resolve-or-log
+// banner needs without a second fetch.
+export interface OpenLeadRef {
+  id: string
+  display_name: string
+  stage_name?: string
+  program_name?: string
+  program_id?: string
+  pipeline_id: string
+  pipeline_name?: string
+}
+
+// OpenLeadConflictError is the parsed body of a 409 OPEN_LEAD_CONFLICT
+// response; data carries the open lead that holds the slot.
+export interface OpenLeadConflictError {
+  data: { existing_lead: OpenLeadRef } | null
+  error: { code: 'OPEN_LEAD_CONFLICT'; message: string }
+}
+
+// openLeadConflictLead extracts the existing open lead from a thrown ApiError
+// when the request was refused with an open-lead conflict, else null.
+export function openLeadConflictLead(err: unknown): OpenLeadRef | null {
+  if (!(err instanceof ApiError) || err.code !== 'OPEN_LEAD_CONFLICT') return null
+  return (err.payload as OpenLeadConflictError | undefined)?.data?.existing_lead ?? null
+}
 
 export interface Lead {
   id: string
