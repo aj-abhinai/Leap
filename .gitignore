@@ -14,8 +14,10 @@ vendor/
 
 # Node
 node_modules/
-dist/
-dist-ssr/
+# Build output only at its sources; internal/assets/testdata must stay tracked.
+/frontend/dist/
+/frontend/dist-ssr/
+/docs/dist/
 *.local
 
 # Environment
