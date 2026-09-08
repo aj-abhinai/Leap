@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -17,7 +18,7 @@ var (
 	ErrCustomValueRejected = errors.New("lead value is set from the program catalog price")
 	// ErrProgramNotActive marks program_id values that do not reference a
 	// live (non-archived) program.
-	ErrProgramNotActive    = errors.New("program not found or archived")
+	ErrProgramNotActive = errors.New("program not found or archived")
 	// ErrNotFound marks mutations targeting a lead that does not exist or
 	// has been deleted.
 	ErrNotFound = errors.New("lead not found")
@@ -87,7 +88,7 @@ const leadSelect = `
 		COALESCE(l.outcome, ''),
 		COALESCE(l.lost_reason, ''), l.value,
 		l.program_id, COALESCE(p.name, ''), COALESCE(l.notes, ''), l.assigned_to, l.created_at, l.updated_at,
-		COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at
+		COALESCE(nt.type, ''), nt.scheduled_at, nt.scheduled_end_at, COALESCE(lt.type, ''), lt.touched_at
 	FROM leads l
 	LEFT JOIN lead_stages ls ON l.stage_id = ls.id
 	LEFT JOIN contacts c ON l.contact_id = c.id
@@ -99,7 +100,7 @@ const leadSelect = `
 		SELECT value FROM contact_emails WHERE contact_id = l.contact_id AND is_primary LIMIT 1
 	) pce ON true
 	LEFT JOIN LATERAL (
-		SELECT type, scheduled_at FROM lead_activities
+		SELECT type, scheduled_at, scheduled_end_at FROM lead_activities
 		WHERE lead_id = l.id AND NOT is_done AND NOT is_cancelled AND scheduled_at IS NOT NULL
 		ORDER BY scheduled_at ASC LIMIT 1
 	) nt ON true
@@ -110,7 +111,7 @@ const leadSelect = `
 	) lt ON true`
 
 // scanLead scans one row produced by leadSelect (or a prefix of extra columns
-// followed by the 23 lead columns, as the board query does) into a Lead.
+// followed by the 24 lead columns, as the board query does) into a Lead.
 func scanLead(scan interface {
 	Scan(dest ...any) error
 }, prefix ...any) (Lead, error) {
@@ -119,7 +120,7 @@ func scanLead(scan interface {
 		&l.ID, &l.Nickname, &l.ContactName, &l.ContactID, &l.ContactPhone, &l.ContactEmail,
 		&l.PipelineID, &l.StageID, &l.StageName, &l.StageOutcome, &l.Outcome, &l.LostReason, &l.Value,
 		&l.ProgramID, &l.ProgramName, &l.Notes, &l.AssignedTo, &l.CreatedAt, &l.UpdatedAt,
-		&l.NextTaskType, &l.NextTaskAt, &l.LastTouchType, &l.LastTouchAt,
+		&l.NextTaskType, &l.NextTaskAt, &l.NextTaskEndAt, &l.LastTouchType, &l.LastTouchAt,
 	)
 	err := scan.Scan(dests...)
 	if err != nil {
@@ -185,7 +186,7 @@ const leadSelectOuter = `
 		COALESCE(sl.outcome, ''),
 		COALESCE(sl.lost_reason, ''), sl.value,
 		sl.program_id, COALESCE(p.name, ''), COALESCE(sl.notes, ''), sl.assigned_to, sl.created_at, sl.updated_at,
-		COALESCE(nt.type, ''), nt.scheduled_at, COALESCE(lt.type, ''), lt.touched_at`
+		COALESCE(nt.type, ''), nt.scheduled_at, nt.scheduled_end_at, COALESCE(lt.type, ''), lt.touched_at`
 
 func (s *Service) list(f ListFilters, page, perPage int) ([]Lead, int, error) {
 	w := leadFilters(f.Search, f.Outcome, f.AssignedTo)
@@ -301,7 +302,7 @@ func (s *Service) board(f BoardFilters) (*Board, error) {
 			SELECT value FROM contact_emails WHERE contact_id = sl.contact_id AND is_primary LIMIT 1
 		) pce ON true
 		LEFT JOIN LATERAL (
-			SELECT type, scheduled_at FROM lead_activities
+			SELECT type, scheduled_at, scheduled_end_at FROM lead_activities
 			WHERE lead_id = sl.id AND NOT is_done AND NOT is_cancelled AND scheduled_at IS NOT NULL
 			ORDER BY scheduled_at ASC LIMIT 1
 		) nt ON true
@@ -988,30 +989,108 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	}
 	l.DisplayName = l.displayName()
 
-	action := "update"
-	desc := "Updated lead"
-	if old.StageID != l.StageID && old.StageID != "" {
-		action = "move_stage"
-		oldStage, err := s.stageName(old.StageID)
-		if err != nil {
-			return nil, err
-		}
-		desc = fmt.Sprintf("Moved lead from %q to %q", oldStage, l.StageName)
-	} else if old.ContactID != "" && old.ContactID != l.ContactID {
-		oldName, newName := old.ContactName, l.ContactName
-		if oldName == "" {
-			oldName = old.ContactID
-		}
-		if newName == "" {
-			newName = l.ContactID
-		}
-		desc = fmt.Sprintf("Reassigned contact from %q to %q", oldName, newName)
+	// Audit only what no other surface records: a stage move is owned by the
+	// stage history, so a pure move writes no row. Field edits carry their
+	// before → after in the description.
+	parts := []string{}
+	if old.PipelineID != l.PipelineID {
+		parts = append(parts, fmt.Sprintf("pipeline %q → %q", s.pipelineIDToName(old.PipelineID), s.pipelineIDToName(l.PipelineID)))
 	}
-	s.logActivity(l.ID, "lead", action, desc, userID)
+	if old.ProgramName != l.ProgramName {
+		parts = append(parts, fmt.Sprintf("program %q → %q", old.ProgramName, l.ProgramName))
+	}
+	if (old.Value == nil) != (l.Value == nil) || (old.Value != nil && l.Value != nil && *old.Value != *l.Value) {
+		parts = append(parts, fmt.Sprintf("value %s → %s", valueLabel(old.Value), valueLabel(l.Value)))
+	}
+	if !sameID(old.AssignedTo, l.AssignedTo) {
+		parts = append(parts, fmt.Sprintf("assignee %q → %q", s.userIDToName(old.AssignedTo), s.userIDToName(l.AssignedTo)))
+	}
+	if old.ContactID != l.ContactID && old.ContactID != "" {
+		parts = append(parts, fmt.Sprintf("contact %q → %q", contactLabel(old.ContactName, old.ContactID), contactLabel(l.ContactName, l.ContactID)))
+	}
+	if old.LostReason != l.LostReason {
+		parts = append(parts, fmt.Sprintf("lost reason %q → %q", old.LostReason, l.LostReason))
+	}
+	if len(parts) > 0 {
+		s.logActivity(l.ID, "lead", "update", fmt.Sprintf("Updated lead %q: %s", l.DisplayName, strings.Join(parts, ", ")), userID)
+	} else if old.Nickname != l.Nickname || old.Notes != l.Notes {
+		// A notes/nickname edit leaves no other trace, so it still earns a
+		// bare attribution row; a pure stage move writes nothing.
+		s.logActivity(l.ID, "lead", "update", fmt.Sprintf("Updated lead %q", l.DisplayName), userID)
+	}
 	return &l, nil
 }
 
+// valueLabel renders an optional lead value for an audit description.
+func valueLabel(v *float64) string {
+	if v == nil {
+		return "none"
+	}
+	return strconv.FormatFloat(*v, 'f', -1, 64)
+}
+
+// sameID reports whether two optional uuids are equal, treating nil as "".
+func sameID(a, b *string) bool {
+	av, bv := "", ""
+	if a != nil {
+		av = *a
+	}
+	if b != nil {
+		bv = *b
+	}
+	return av == bv
+}
+
+// contactLabel renders a contact by name with a uuid fallback for audit text.
+func contactLabel(name, id string) string {
+	if name != "" {
+		return name
+	}
+	return id
+}
+
+// userIDToName resolves a user uuid to a display name for audit text; an
+// empty or unknown id falls back to the id itself (or "none" when empty).
+func (s *Service) userIDToName(id *string) string {
+	if id == nil || *id == "" {
+		return "none"
+	}
+	var name string
+	if err := s.db.QueryRow(`SELECT name FROM users WHERE id = $1`, *id).Scan(&name); err != nil || name == "" {
+		return *id
+	}
+	return name
+}
+
+// pipelineIDToName resolves a pipeline uuid to a display name for audit text;
+// an unknown or empty id falls back to the id itself.
+func (s *Service) pipelineIDToName(id string) string {
+	if id == "" {
+		return "none"
+	}
+	var name string
+	if err := s.db.QueryRow(`SELECT name FROM pipelines WHERE id = $1`, id).Scan(&name); err != nil || name == "" {
+		return id
+	}
+	return name
+}
+
 func (s *Service) delete(id string, userID string) error {
+	// The audit row is the last public trace of the deleted cycle (the journey
+	// hides soft-deleted leads), so capture the display name before hiding it.
+	var displayName string
+	err := s.db.QueryRow(
+		`SELECT COALESCE(NULLIF(l.nickname, ''), c.name, '') FROM leads l
+		LEFT JOIN contacts c ON c.id = l.contact_id
+		WHERE l.id = $1 AND l.deleted_at IS NULL`,
+		id,
+	).Scan(&displayName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("delete lead: load display name: %w", err)
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("delete lead: %w", err)
@@ -1041,7 +1120,7 @@ func (s *Service) delete(id string, userID string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit lead delete: %w", err)
 	}
-	s.logActivity(id, "lead", "delete", "deleted", userID)
+	s.logActivity(id, "lead", "delete", fmt.Sprintf("Deleted lead %q", displayName), userID)
 	return nil
 }
 

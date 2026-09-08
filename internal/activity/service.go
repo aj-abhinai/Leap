@@ -62,6 +62,25 @@ func (s *Service) LogPasswordChange(userID, userName, email string) {
 	}
 }
 
+// LogProfileUpdate records a self-service profile edit in the audit log. It
+// is the only trace of who changed a user's own display name or phone.
+func (s *Service) LogProfileUpdate(userID, userName, email, fields string) {
+	desc := "user updated own profile"
+	if email != "" {
+		desc = email + " updated own profile"
+	}
+	if fields != "" {
+		desc += " (" + fields + ")"
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO audit_logs (description, user_id, user_name, action, resource_type)
+		VALUES ($1, $2, $3, 'profile_update', 'user')`,
+		desc, userID, userName,
+	); err != nil {
+		slog.Error("log profile update", "error", err, "user_id", userID)
+	}
+}
+
 func (s *Service) list(page, perPage int, filters ActivityFilters) ([]Entry, int, error) {
 	var total int
 	baseWhere := "WHERE 1=1"

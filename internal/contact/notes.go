@@ -2,7 +2,8 @@ package contact
 
 import (
 	"crm/internal/util"
-	"encoding/json"
+	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -50,16 +51,25 @@ func (s *Service) createNote(contactID, userID, note string) (*Note, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create note: %w", err)
 	}
-	preview := note
-	if len(preview) > 50 {
-		preview = preview[:50]
-	}
-	changes, _ := json.Marshal(map[string]string{"note": preview})
-	s.logActivity(contactID, "contact_note", "create", string(changes), userID)
+	// No audit row: the note itself is visible in the contact detail and
+	// carries its author.
 	return &n, nil
 }
 
+// deleteNote hard-deletes a note; the audit row is the only surviving trace,
+// so it quotes the note's opening words instead of logging raw ids.
 func (s *Service) deleteNote(contactID, noteID, userID string, canDeleteAny bool) error {
+	var preview string
+	err := s.db.QueryRow(`SELECT note FROM contact_notes WHERE id = $1 AND contact_id = $2`, noteID, contactID).Scan(&preview)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("delete note: load preview: %w", err)
+	}
+	if len(preview) > 50 {
+		preview = preview[:50] + "…"
+	}
 	res, err := s.db.Exec(
 		`DELETE FROM contact_notes WHERE id = $1 AND contact_id = $2 AND (user_id = $3 OR $4)`,
 		noteID, contactID, userID, canDeleteAny,
@@ -74,7 +84,6 @@ func (s *Service) deleteNote(contactID, noteID, userID string, canDeleteAny bool
 	if affected == 0 {
 		return ErrNotFound
 	}
-	changes, _ := json.Marshal(map[string]string{"note_id": noteID})
-	s.logActivity(contactID, "contact_note", "delete", string(changes), userID)
+	s.auditLogDesc(fmt.Sprintf("Deleted note %q", preview), "contact_note", contactID, "delete", userID)
 	return nil
 }

@@ -166,8 +166,7 @@ func TestSeedSeedsTagCatalog(t *testing.T) {
 	}
 
 	// The five catalogs must appear exactly once each: four simple (name+type
-	// only) plus the quick-reply catalog (which adds its group/sort/behavior
-	// reconciliation). Enquiry rides the activity-type catalog as the
+	// only) plus the quick-reply catalog. Enquiry rides the activity-type catalog as the
 	// repeat-enquiry touchpoint preset.
 	want := map[string]int{
 		"tag":           3,
@@ -184,6 +183,35 @@ func TestSeedSeedsTagCatalog(t *testing.T) {
 		if got != count {
 			t.Errorf("tags of type %q = %d, want %d", typ, got, count)
 		}
+	}
+}
+
+func TestSeedNeverOverwritesQuickReplyEdits(t *testing.T) {
+	db := testdb.New(t)
+	superadmin := config.Superadmin{Email: "admin@admin.com", Password: "admin"}
+
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("initial Seed: %v", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE tags SET group_name = 'Custom', sort_order = 99, behavior = 'log'
+		WHERE name = 'No Reply' AND type = 'quick_reply'`,
+	); err != nil {
+		t.Fatalf("edit quick reply: %v", err)
+	}
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("second Seed: %v", err)
+	}
+
+	var group, behavior string
+	var order int
+	if err := db.QueryRow(
+		`SELECT group_name, sort_order, behavior FROM tags WHERE name = 'No Reply' AND type = 'quick_reply'`,
+	).Scan(&group, &order, &behavior); err != nil {
+		t.Fatalf("load quick reply: %v", err)
+	}
+	if group != "Custom" || order != 99 || behavior != "log" {
+		t.Fatalf("quick reply after second Seed = (%q, %d, %q), want admin edit", group, order, behavior)
 	}
 }
 

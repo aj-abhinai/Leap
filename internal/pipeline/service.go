@@ -165,14 +165,41 @@ func (s *Service) updatePipeline(id string, req UpdatePipelineRequest) (*Pipelin
 }
 
 func (s *Service) deletePipeline(id string) error {
-	_, err := s.db.Exec(`DELETE FROM pipelines WHERE id = $1`, id)
+	result, err := s.db.Exec(`DELETE FROM pipelines WHERE id = $1`, id)
 	if err != nil {
 		if respond.IsForeignKeyViolation(err) {
 			return ErrInUse
 		}
 		return fmt.Errorf("delete pipeline: %w", err)
 	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete pipeline: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
 	return nil
+}
+
+// pipelineName resolves a pipeline name for an audit description; an unknown
+// id falls back to the id so the row still names something.
+func (s *Service) pipelineName(id string) string {
+	var name string
+	if err := s.db.QueryRow(`SELECT name FROM pipelines WHERE id = $1`, id).Scan(&name); err != nil || name == "" {
+		return id
+	}
+	return name
+}
+
+// stageName resolves a stage name for an audit description with the same
+// uuid fallback as pipelineName.
+func (s *Service) stageName(id string) string {
+	var name string
+	if err := s.db.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, id).Scan(&name); err != nil || name == "" {
+		return id
+	}
+	return name
 }
 
 func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage, error) {
@@ -263,12 +290,19 @@ func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, e
 }
 
 func (s *Service) deleteStage(stageID string) error {
-	_, err := s.db.Exec(`DELETE FROM lead_stages WHERE id = $1`, stageID)
+	result, err := s.db.Exec(`DELETE FROM lead_stages WHERE id = $1`, stageID)
 	if err != nil {
 		if respond.IsForeignKeyViolation(err) {
 			return ErrInUse
 		}
 		return fmt.Errorf("delete stage: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete stage: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

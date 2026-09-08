@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useRouter } from 'vue-router'
@@ -33,7 +33,7 @@ import CsvImport from '@/components/contacts/CsvImport.vue'
 import ContactsToolbar, { type ContactViewMode } from '@/components/contacts/ContactsToolbar.vue'
 import ContactsPagination from '@/components/contacts/ContactsPagination.vue'
 import ContactDeleteDialog from '@/components/contacts/ContactDeleteDialog.vue'
-import ErrorAlert from '@/components/ui/ErrorAlert.vue'
+import ErrorAlert from '@/components/ErrorAlert.vue'
 import { getAvatarColor, getInitials } from '@/utils/avatar'
 import { errorMessage } from '@/utils/errors'
 

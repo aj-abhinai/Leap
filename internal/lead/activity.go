@@ -250,28 +250,29 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	}
 
 	// "Log attempt + next": a created-and-completed activity with a reschedule
-	// time spawns the next occurrence of the same type at the new time. A
-	// close_lost reply never spawns a next task — the deal ends here.
+	// time spawns the next occurrence of the same type at the new time, with
+	// its reminder set to the nudge lead time before the new schedule — the
+	// same default as a directly scheduled task. A close_lost reply never
+	// spawns a next task — the deal ends here.
 	if req.RescheduleAt != nil && behavior != closeLostBehavior {
-		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, req.Type, "", nil, req.RescheduleAt, nil, req.RescheduleAt, nil, nil, false); err != nil {
+		lead, err := settings.NudgeLeadMinutes(tx)
+		if err != nil {
+			return nil, err
+		}
+		nextRemind := req.RescheduleAt.Add(-time.Duration(lead) * time.Minute)
+		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, req.Type, "", nil, req.RescheduleAt, nil, &nextRemind, nil, nil, false); err != nil {
 			return nil, fmt.Errorf("create next activity: %w", err)
 		}
 	}
 
-	closeLostMoved := false
 	if behavior == closeLostBehavior && isDone {
-		moved, err := s.closeLostTx(tx, leadID, userID)
-		if err != nil {
+		if _, err := s.closeLostTx(tx, leadID, userID); err != nil {
 			return nil, err
 		}
-		closeLostMoved = moved
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit create activity: %w", err)
-	}
-	if closeLostMoved {
-		s.logActivity(leadID, "lead", "move_stage", "Closed lost via quick reply", userID)
 	}
 	return a, nil
 }
@@ -285,8 +286,8 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 //
 // The "log attempt + next" reschedule flow: when is_done=true and a
 // reschedule_at is supplied, the completed attempt is logged and a new task of
-// the same type is created for reschedule_at, defaulting its reminder to the
-// same time.
+// the same type is created for reschedule_at, with its reminder set to the
+// nudge lead time before the new schedule.
 //
 // A quick reply whose behavior is close_lost also moves the lead to its
 // pipeline's lost closing stage in the same transaction, so the logged reply
@@ -434,25 +435,37 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		}
 	}
 
-	closeLostMoved := false
 	if behavior == closeLostBehavior && markDone {
-		moved, err := s.closeLostTx(tx, leadID, userID)
-		if err != nil {
+		if _, err := s.closeLostTx(tx, leadID, userID); err != nil {
 			return nil, err
 		}
-		closeLostMoved = moved
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit update activity: %w", err)
 	}
-	if closeLostMoved {
-		s.logActivity(leadID, "lead", "move_stage", "Closed lost via quick reply", userID)
-	}
 	return &a, nil
 }
 
+// deleteActivity hard-deletes a task. The audit row is the only surviving
+// trace (the row vanishes and no history table covers tasks), so it names the
+// task type and the lead instead of logging raw ids.
 func (s *Service) deleteActivity(leadID, activityID, userID string) error {
+	var taskType, leadName string
+	err := s.db.QueryRow(
+		`SELECT la.type, COALESCE(NULLIF(l.nickname, ''), c.name, '')
+		FROM lead_activities la
+		JOIN leads l ON l.id = la.lead_id
+		LEFT JOIN contacts c ON c.id = l.contact_id
+		WHERE la.id = $1 AND la.lead_id = $2`,
+		activityID, leadID,
+	).Scan(&taskType, &leadName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("delete activity: load context: %w", err)
+	}
 	res, err := s.db.Exec(`DELETE FROM lead_activities WHERE id = $1 AND lead_id = $2`, activityID, leadID)
 	if err != nil {
 		return fmt.Errorf("delete activity: %w", err)
@@ -464,7 +477,7 @@ func (s *Service) deleteActivity(leadID, activityID, userID string) error {
 	if affected == 0 {
 		return ErrNotFound
 	}
-	s.logActivity(leadID, "lead", "activity/delete", "Deleted activity "+activityID, userID)
+	s.logActivity(leadID, "lead", "activity/delete", fmt.Sprintf("Deleted %q task on lead %q", taskType, leadName), userID)
 	return nil
 }
 
@@ -505,14 +518,14 @@ func (s *Service) dismissReminder(leadID, activityID, userID string) (bool, erro
 
 // snoozeReminder pushes an activity's reminder forward and re-opens it
 // (is_reminded = false) so it re-enters the pending pool. The task's scheduled
-// time shifts by the same delta as the reminder, so snooze behaves as a quick
-// reschedule of an open task. The new time must be future-only and
-// within the snooze horizon. Only open, non-cancelled activities that carry a
-// reminder or schedule are eligible — matching dismissReminder — so a missing
-// or reminder-less id is a clean (false, nil) instead of an error. The
-// recipient predicate matches the bell (getPendingReminders): a user may
-// snooze only the tasks they are responsible for, so a user cannot act on
-// someone else's nudge through the API directly.
+// start and end shift by the same delta as the reminder, so a range task keeps
+// its window and snooze behaves as a quick reschedule of an open task. The new
+// time must be future-only and within the snooze horizon. Only open,
+// non-cancelled activities that carry a reminder or schedule are eligible —
+// matching dismissReminder — so a missing or reminder-less id is a clean
+// (false, nil) instead of an error. The recipient predicate matches the bell
+// (getPendingReminders): a user may snooze only the tasks they are responsible
+// for, so a user cannot act on someone else's nudge through the API directly.
 func (s *Service) snoozeReminder(leadID, activityID, userID string, remindAt time.Time) (bool, error) {
 	now := time.Now()
 	if !remindAt.After(now) {
@@ -528,6 +541,10 @@ func (s *Service) snoozeReminder(leadID, activityID, userID string, remindAt tim
 			scheduled_at = CASE
 				WHEN scheduled_at IS NOT NULL AND remind_at IS NOT NULL THEN scheduled_at + ($2 - remind_at)
 				ELSE scheduled_at
+			END,
+			scheduled_end_at = CASE
+				WHEN scheduled_end_at IS NOT NULL AND remind_at IS NOT NULL THEN scheduled_end_at + ($2 - remind_at)
+				ELSE scheduled_end_at
 			END
 		FROM leads l
 		WHERE lead_activities.id = $1 AND lead_activities.lead_id = $3 AND l.id = $3
@@ -554,12 +571,11 @@ func (s *Service) snoozeReminder(leadID, activityID, userID string, remindAt tim
 // responsible for: tasks on leads assigned to me, or on unassigned leads
 // where I created the task, or genuinely unowned work (both null — visible
 // to everyone so someone picks it up). A team that never assigns leads
-// degrades gracefully back to a shared bell. Both overdue and upcoming are
-// included so the reminders page can
-// render Overdue / Upcoming / Done sections; dismissed (is_reminded) rows are
-// included too so the Dismissed section can list them. Each row carries the
-// lead display name and contact id so reminder surfaces can show whose lead
-// the task belongs to and open the lead drawer.
+// degrades gracefully back to a shared bell. Done and cancelled tasks never
+// appear; dismissed (is_reminded) rows are included so the Dismissed section
+// can list them. Each row carries the lead display name and contact id so
+// reminder surfaces can show whose lead the task belongs to and open the
+// lead drawer.
 func (s *Service) getPendingReminders(userID string) ([]ActivityListItem, error) {
 	rows, err := s.db.Query(`
 		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),

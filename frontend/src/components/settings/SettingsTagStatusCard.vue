@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, ref, shallowRef } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { toast } from 'vue-sonner'
@@ -20,7 +20,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { Plus, Trash2, Pencil, X } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
 
@@ -226,11 +226,11 @@ async function saveEdit() {
             </TableCell>
             <TableCell v-if="isQuickReply">
               <span v-if="item.group_name" class="text-xs text-muted-foreground">{{ item.group_name }}</span>
-              <span v-else class="text-xs text-muted-foreground/50">—</span>
+                <span v-else class="text-xs text-muted-foreground/50">—</span>
             </TableCell>
             <TableCell v-if="isQuickReply">
               <span v-if="item.behavior" class="text-xs">{{ behaviorLabels[item.behavior] || item.behavior }}</span>
-              <span v-else class="text-xs text-muted-foreground/50">—</span>
+                <span v-else class="text-xs text-muted-foreground/50">—</span>
             </TableCell>
             <TableCell v-if="!readonly" class="text-right">
               <Button

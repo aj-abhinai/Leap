@@ -8,34 +8,37 @@ import (
 // Lead is an opportunity moving through a pipeline. Identity comes from its
 // linked contact; the display name prefers the lead nickname.
 type Lead struct {
-	ID           string     `json:"id"`
-	Nickname     string     `json:"nickname,omitempty"`
-	DisplayName  string     `json:"display_name"`
-	ContactID    string     `json:"contact_id"`
-	ContactName  string     `json:"contact_name,omitempty"`
-	ContactPhone string     `json:"contact_phone,omitempty"`
-	ContactEmail string     `json:"contact_email,omitempty"`
-	PipelineID   string     `json:"pipeline_id"`
-	StageID      string     `json:"stage_id"`
-	StageName    string     `json:"stage_name,omitempty"`
+	ID           string `json:"id"`
+	Nickname     string `json:"nickname,omitempty"`
+	DisplayName  string `json:"display_name"`
+	ContactID    string `json:"contact_id"`
+	ContactName  string `json:"contact_name,omitempty"`
+	ContactPhone string `json:"contact_phone,omitempty"`
+	ContactEmail string `json:"contact_email,omitempty"`
+	PipelineID   string `json:"pipeline_id"`
+	StageID      string `json:"stage_id"`
+	StageName    string `json:"stage_name,omitempty"`
 	// StageOutcome is the linked stage's declared outcome ('open'|'won'|'lost'),
 	// the authoritative source for what reaching the stage means.
-	StageOutcome string     `json:"stage_outcome,omitempty"`
+	StageOutcome string `json:"stage_outcome,omitempty"`
 	// Outcome is a denormalized snapshot resolved on stage moves, kept for
 	// lost_reason and the close-lost flow; display should use StageOutcome.
-	Outcome      string     `json:"outcome,omitempty"`
-	LostReason   string     `json:"lost_reason,omitempty"`
-	ProgramID    *string    `json:"program_id,omitempty"`
-	ProgramName  string     `json:"program_name,omitempty"`
-	Value        *float64   `json:"value,omitempty"`
-	Notes        string     `json:"notes,omitempty"`
-	AssignedTo   *string    `json:"assigned_to,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+	Outcome     string     `json:"outcome,omitempty"`
+	LostReason  string     `json:"lost_reason,omitempty"`
+	ProgramID   *string    `json:"program_id,omitempty"`
+	ProgramName string     `json:"program_name,omitempty"`
+	Value       *float64   `json:"value,omitempty"`
+	Notes       string     `json:"notes,omitempty"`
+	AssignedTo  *string    `json:"assigned_to,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
 	// NextTaskType/NextTaskAt preview the soonest open scheduled activity.
-	NextTaskType string     `json:"next_task_type,omitempty"`
-	NextTaskAt   *time.Time `json:"next_task_at,omitempty"`
+	// NextTaskEndAt is that task's optional end; overdue comparisons use it
+	// when present (a range task is late only after its end).
+	NextTaskType  string     `json:"next_task_type,omitempty"`
+	NextTaskAt    *time.Time `json:"next_task_at,omitempty"`
+	NextTaskEndAt *time.Time `json:"next_task_end_at,omitempty"`
 	// LastTouchType/LastTouchAt describe the most recent completed touchpoint.
 	LastTouchType string     `json:"last_touch_type,omitempty"`
 	LastTouchAt   *time.Time `json:"last_touch_at,omitempty"`
@@ -179,11 +182,11 @@ type UpdateActivityRequest struct {
 	// null (clear it). A plain *time.Time cannot tell the two apart — both
 	// decode to nil — which made schedules impossible to clear via the edit
 	// form.
-	ScheduledAt   optionalTime `json:"scheduled_at,omitempty"`
+	ScheduledAt    optionalTime `json:"scheduled_at,omitempty"`
 	ScheduledEndAt optionalTime `json:"scheduled_end_at,omitempty"`
-	RemindAt      optionalTime `json:"remind_at,omitempty"`
-	OccurredAt    *time.Time   `json:"occurred_at,omitempty"`
-	IsCancelled   *bool        `json:"is_cancelled,omitempty"`
+	RemindAt       optionalTime `json:"remind_at,omitempty"`
+	OccurredAt     *time.Time   `json:"occurred_at,omitempty"`
+	IsCancelled    *bool        `json:"is_cancelled,omitempty"`
 	// RescheduleAt, when set with is_done=true, logs the completed attempt and
 	// auto-creates the next occurrence of the same type at this time.
 	RescheduleAt *time.Time `json:"reschedule_at,omitempty"`
@@ -227,18 +230,18 @@ type SnoozeRequest struct {
 
 // ActivityListFilters drives the global activities list (GET /api/activities).
 type ActivityListFilters struct {
-	Status   string
-	Overdue  bool
-	Mine     bool
-	UserID   string
-	Type     string
-	Search   string
-	From     *time.Time
-	To       *time.Time
-	Sort     string
-	Order    string
-	Page     int
-	PerPage  int
+	Status  string
+	Overdue bool
+	Mine    bool
+	UserID  string
+	Type    string
+	Search  string
+	From    *time.Time
+	To      *time.Time
+	Sort    string
+	Order   string
+	Page    int
+	PerPage int
 }
 
 // ActivityListItem is an Activity plus the lead context needed by the global

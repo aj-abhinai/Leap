@@ -21,13 +21,13 @@ const visible = computed(() => {
   return store.reminders.filter((r) => r.user_id === auth.user!.id)
 })
 
-// Buckets derive from the shared status derivation: overdue = past remind_at
-// not yet reminded; upcoming = open with a future remind/schedule; dismissed =
-// reminded but open; done = done or cancelled.
+// Buckets derive from the shared status derivation: overdue = past the due
+// boundary (task end, else start, else remind); upcoming = open with a future
+// due time; dismissed = reminded but still open. Done and cancelled tasks
+// never reach this feed.
 const overdue = computed(() => visible.value.filter((r) => statusLabel(r) === 'Overdue'))
 const upcoming = computed(() => visible.value.filter((r) => statusLabel(r) === 'Open'))
 const dismissed = computed(() => visible.value.filter((r) => statusLabel(r) === 'Reminded'))
-const done = computed(() => visible.value.filter((r) => r.is_done || r.is_cancelled))
 
 // snooze pushes the reminder forward by minutes; failures surface as a toast
 // and leave the card in place.
@@ -121,17 +121,6 @@ function hasAny(list: unknown[]): boolean {
             :reminder="reminder"
             @snooze="snooze(reminder, $event)"
             @dismiss="dismiss(reminder)"
-          />
-        </div>
-      </section>
-
-      <section v-if="hasAny(done)">
-        <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Done</h2>
-        <div class="space-y-3 opacity-70">
-          <ReminderCard
-            v-for="reminder in done"
-            :key="reminder.id"
-            :reminder="reminder"
           />
         </div>
       </section>

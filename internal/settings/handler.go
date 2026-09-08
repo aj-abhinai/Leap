@@ -1,13 +1,16 @@
 package settings
 
 import (
+	"crm/internal/audit"
+	"crm/internal/ctxutil"
 	"crm/internal/respond"
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
-// Handler serves the org settings endpoints. All routes are gated by
-// settings:manage at registration.
+// Handler serves the org settings endpoints. Reads are open to every
+// signed-in user; writes are gated by settings:manage at registration.
 type Handler struct {
 	svc *Service
 }
@@ -27,7 +30,8 @@ func (h *Handler) GetNudgeLeadMinutes(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, map[string]int{"minutes": minutes}, nil, nil)
 }
 
-// SetNudgeLeadMinutes serves PUT /api/settings/nudge-lead-minutes.
+// SetNudgeLeadMinutes serves PUT /api/settings/nudge-lead-minutes. The
+// change is audited with its before â†’ after value.
 func (h *Handler) SetNudgeLeadMinutes(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Minutes int `json:"minutes"`
@@ -42,6 +46,11 @@ func (h *Handler) SetNudgeLeadMinutes(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	old, err := h.svc.GetNudgeLeadMinutes()
+	if err != nil {
+		respond.ServerError(w, err)
+		return
+	}
 	if err := h.svc.SetNudgeLeadMinutes(req.Minutes); err != nil {
 		respond.JSON(
 			w,
@@ -52,6 +61,11 @@ func (h *Handler) SetNudgeLeadMinutes(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	audit.LogCustom(
+		h.svc.db,
+		fmt.Sprintf("Changed %q from %d to %d minutes", "Remind before tasks start", old, req.Minutes),
+		"settings", "", "update", "", ctxutil.GetUserID(r),
+	)
 	respond.JSON(w, http.StatusOK, map[string]int{"minutes": req.Minutes}, nil, nil)
 }
 
@@ -65,7 +79,8 @@ func (h *Handler) GetDefaultCountryCode(w http.ResponseWriter, r *http.Request) 
 	respond.JSON(w, http.StatusOK, map[string]string{"country_code": code}, nil, nil)
 }
 
-// SetDefaultCountryCode serves PUT /api/settings/default-country-code.
+// SetDefaultCountryCode serves PUT /api/settings/default-country-code. The
+// change is audited with its before â†’ after value.
 func (h *Handler) SetDefaultCountryCode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		CountryCode string `json:"country_code"`
@@ -80,6 +95,11 @@ func (h *Handler) SetDefaultCountryCode(w http.ResponseWriter, r *http.Request) 
 		)
 		return
 	}
+	old, err := h.svc.GetDefaultCountryCode()
+	if err != nil {
+		respond.ServerError(w, err)
+		return
+	}
 	if err := h.svc.SetDefaultCountryCode(req.CountryCode); err != nil {
 		respond.JSON(
 			w,
@@ -90,5 +110,10 @@ func (h *Handler) SetDefaultCountryCode(w http.ResponseWriter, r *http.Request) 
 		)
 		return
 	}
+	audit.LogCustom(
+		h.svc.db,
+		fmt.Sprintf("Changed %q from %s to %s", "Default country code", old, req.CountryCode),
+		"settings", "", "update", "", ctxutil.GetUserID(r),
+	)
 	respond.JSON(w, http.StatusOK, map[string]string{"country_code": req.CountryCode}, nil, nil)
 }

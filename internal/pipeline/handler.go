@@ -1,9 +1,12 @@
 package pipeline
 
 import (
+	"crm/internal/audit"
+	"crm/internal/ctxutil"
 	"crm/internal/respond"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -15,6 +18,28 @@ type Handler struct {
 
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
+}
+
+// auditConfig writes the best-effort audit row for a pipeline or stage
+// change — the only trace of who edited the sales configuration. Stages share
+// the pipeline resource type; the description names which changed.
+func (h *Handler) auditConfig(action, entity, name, id string, userID string) {
+	audit.LogCustom(
+		h.svc.db,
+		fmt.Sprintf("%s %s %q", action, entity, name),
+		"pipeline", id, auditAction(action), "", userID,
+	)
+}
+
+func auditAction(action string) string {
+	switch action {
+	case "Created":
+		return "create"
+	case "Updated":
+		return "update"
+	default:
+		return "delete"
+	}
 }
 
 // respondError maps service errors onto the HTTP contract.
@@ -91,6 +116,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	h.auditConfig("Created", "pipeline", p.Name, p.ID, ctxutil.GetUserID(r))
 	respond.JSON(
 		w,
 		http.StatusCreated,
@@ -118,6 +144,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	h.auditConfig("Updated", "pipeline", p.Name, p.ID, ctxutil.GetUserID(r))
 	respond.JSON(
 		w,
 		http.StatusOK,
@@ -129,10 +156,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	name := h.svc.pipelineName(id)
 	if err := h.svc.deletePipeline(id); err != nil {
 		respondError(w, err)
 		return
 	}
+	h.auditConfig("Deleted", "pipeline", name, id, ctxutil.GetUserID(r))
 	respond.JSON(
 		w,
 		http.StatusOK,
@@ -170,6 +199,7 @@ func (h *Handler) CreateStage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	h.auditConfig("Created", "stage", st.Name, st.ID, ctxutil.GetUserID(r))
 	respond.JSON(
 		w,
 		http.StatusCreated,
@@ -197,6 +227,7 @@ func (h *Handler) UpdateStage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	h.auditConfig("Updated", "stage", st.Name, st.ID, ctxutil.GetUserID(r))
 	respond.JSON(
 		w,
 		http.StatusOK,
@@ -208,10 +239,12 @@ func (h *Handler) UpdateStage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteStage(w http.ResponseWriter, r *http.Request) {
 	stageID := chi.URLParam(r, "stage_id")
+	name := h.svc.stageName(stageID)
 	if err := h.svc.deleteStage(stageID); err != nil {
 		respondError(w, err)
 		return
 	}
+	h.auditConfig("Deleted", "stage", name, stageID, ctxutil.GetUserID(r))
 	respond.JSON(
 		w,
 		http.StatusOK,

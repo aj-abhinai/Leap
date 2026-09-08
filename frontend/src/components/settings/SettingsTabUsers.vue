@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { onMounted, shallowRef, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRBACStore } from '@/stores/rbac'
@@ -30,7 +30,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { Plus, ShieldCheck, Pencil, KeyRound, UserX, UserCheck, User as UserIcon } from '@lucide/vue'
 import { PASSWORD_POLICY_HINT, isStrongPassword } from '@/lib/validation'
 import { errorMessage } from '@/utils/errors'

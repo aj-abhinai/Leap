@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useActivitiesStore, type ActivityListFilters } from '@/stores/activities'
 import { useSettingsStore } from '@/stores/settings'
@@ -15,7 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ContactsPagination from '@/components/contacts/ContactsPagination.vue'
 import PageState from '@/components/PageState.vue'
 import {

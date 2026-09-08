@@ -216,9 +216,12 @@ func main() {
 
 			r.Get("/api/reminders", middleware.RequirePermission(rbacSvc, "lead:read", leadH.PendingReminders))
 			r.Get("/api/activities", middleware.RequirePermission(rbacSvc, "lead:read", leadH.ListAllActivities))
-			r.Get("/api/settings/nudge-lead-minutes", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.GetNudgeLeadMinutes))
+			// Org-setting reads are open to every signed-in user (no permission
+			// gate): the values shape forms and prefills for the whole team,
+			// and reading a number leaks nothing. Writes stay settings:manage.
+			r.Get("/api/settings/nudge-lead-minutes", settingsH.GetNudgeLeadMinutes)
 			r.Put("/api/settings/nudge-lead-minutes", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.SetNudgeLeadMinutes))
-			r.Get("/api/settings/default-country-code", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.GetDefaultCountryCode))
+			r.Get("/api/settings/default-country-code", settingsH.GetDefaultCountryCode)
 			r.Put("/api/settings/default-country-code", middleware.RequirePermission(rbacSvc, "settings:manage", settingsH.SetDefaultCountryCode))
 			r.Patch("/api/leads/{lead_id}/reminders/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.DismissReminder))
 			r.Post("/api/leads/{lead_id}/reminders/{id}/snooze", middleware.RequirePermission(rbacSvc, "lead:write", leadH.SnoozeReminder))

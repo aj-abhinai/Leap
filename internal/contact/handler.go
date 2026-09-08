@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -120,6 +121,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	// The audit row is the only created-by trace — contacts carry no creator
+	// column.
+	h.svc.auditLogDesc(fmt.Sprintf("Created contact %q", c.Name), "contact", c.ID, "create", ctxutil.GetUserID(r))
 	respond.JSON(
 		w,
 		http.StatusCreated,
@@ -167,6 +171,11 @@ func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 		respond.ServerError(w, err)
 		return
 	}
+	// One summary row per import — per-row rows would bury the log.
+	h.svc.auditLogDesc(
+		fmt.Sprintf("Imported %d contacts, %d skipped", resp.Imported, resp.Failed),
+		"contact", "", "import", ctxutil.GetUserID(r),
+	)
 	respond.JSON(
 		w,
 		http.StatusOK,

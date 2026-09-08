@@ -346,16 +346,12 @@ func seedTagsAndStatuses(db *sql.DB) error {
 		{"Closed Lost", "Heard Details", 1, "close_lost"},
 	}
 	for _, st := range quickReplies {
-		// On conflict, reconcile group/sort/behavior so an existing DB picks up
-		// the quick-reply config instead of keeping the migration default
-		// (empty group, behavior 'log'). Name/type/color are never touched.
+		// Insert-only: admin edits to group/sort/behavior are live data and
+		// are never overwritten by a restart.
 		_, err := db.Exec(
 			`INSERT INTO tags (name, type, group_name, sort_order, behavior)
 			VALUES ($1, 'quick_reply', $2, $3, $4)
-			ON CONFLICT (name, type) DO UPDATE SET
-				group_name = EXCLUDED.group_name,
-				sort_order = EXCLUDED.sort_order,
-				behavior = EXCLUDED.behavior`,
+			ON CONFLICT (name, type) DO NOTHING`,
 			st.name, st.group, st.order, st.behavior,
 		)
 		if err != nil {

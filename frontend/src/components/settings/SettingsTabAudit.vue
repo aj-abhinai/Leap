@@ -80,6 +80,9 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
     user: 'outline',
     role: 'outline',
     pipeline: 'outline',
+    program: 'outline',
+    tag: 'outline',
+    settings: 'outline',
   }
   return map[type] ?? 'outline'
 }
@@ -113,7 +116,11 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
             <option value="create">Create</option>
             <option value="update">Update</option>
             <option value="delete">Delete</option>
-            <option value="move_stage">Move stage</option>
+            <option value="import">Import</option>
+            <option value="login">Login</option>
+            <option value="logout">Logout</option>
+            <option value="password_change">Password change</option>
+            <option value="profile_update">Profile update</option>
             <option value="reset_password">Reset password</option>
             <option value="reactivate">Reactivate</option>
           </select>
@@ -129,6 +136,8 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
             <option value="role">Role</option>
             <option value="pipeline">Pipeline</option>
             <option value="program">Program</option>
+            <option value="tag">Vocabulary</option>
+            <option value="settings">Org settings</option>
             <option value="contact_note">Note</option>
           </select>
         </div>

@@ -1,11 +1,13 @@
 package program
 
 import (
+	"crm/internal/audit"
+	"crm/internal/ctxutil"
+	"crm/internal/respond"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
-
-	"crm/internal/respond"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -16,6 +18,25 @@ type Handler struct {
 
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
+}
+
+// auditProgram writes the best-effort audit row for a catalog change — the
+// only trace of who edited the programs a lead's value is snapshotted from.
+func (h *Handler) auditProgram(action, name, id, userID string) {
+	auditAction := "update"
+	switch action {
+	case "Created":
+		auditAction = "create"
+	case "Updated":
+		auditAction = "update"
+	default:
+		auditAction = "update"
+	}
+	audit.LogCustom(
+		h.svc.db,
+		fmt.Sprintf("%s program %q", action, name),
+		"program", id, auditAction, "", userID,
+	)
 }
 
 func (h *Handler) ListActive(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +93,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.auditProgram("Created", p.Name, p.ID, ctxutil.GetUserID(r))
 	respond.JSON(w, http.StatusCreated, p, nil, nil)
 }
 
@@ -122,11 +144,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.auditProgram("Updated", p.Name, p.ID, ctxutil.GetUserID(r))
 	respond.JSON(w, http.StatusOK, p, nil, nil)
 }
 
 func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	name := h.svc.nameForAudit(id)
 	if err := h.svc.archive(id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			respond.JSON(
@@ -141,11 +165,13 @@ func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 		respond.ServerError(w, err)
 		return
 	}
+	h.auditProgram("Archived", name, id, ctxutil.GetUserID(r))
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Program archived"}, nil, nil)
 }
 
 func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	name := h.svc.nameForAudit(id)
 	if err := h.svc.restore(id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			respond.JSON(
@@ -160,5 +186,6 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 		respond.ServerError(w, err)
 		return
 	}
+	h.auditProgram("Restored", name, id, ctxutil.GetUserID(r))
 	respond.JSON(w, http.StatusOK, map[string]string{"message": "Program restored"}, nil, nil)
 }

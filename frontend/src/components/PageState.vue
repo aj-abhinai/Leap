@@ -1,6 +1,6 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { Skeleton } from '@/components/ui/skeleton'
-import ErrorAlert from '@/components/ui/ErrorAlert.vue'
+import ErrorAlert from '@/components/ErrorAlert.vue'
 import { ClipboardList } from '@lucide/vue'
 
 // PageState renders the standard page states — loading skeletons, an error

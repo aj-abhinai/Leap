@@ -1,10 +1,13 @@
 package tag
 
 import (
+	"crm/internal/audit"
+	"crm/internal/ctxutil"
 	"crm/internal/respond"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -16,6 +19,26 @@ type Handler struct {
 
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
+}
+
+// auditVocabulary writes the best-effort audit row for a vocabulary change —
+// the only trace of who edited Settings words.
+func (h *Handler) auditVocabulary(action, typ, name, id string, userID string) {
+	audit.LogCustom(
+		h.svc.db,
+		fmt.Sprintf("%s %s %q", action, TypeLabel(typ), name),
+		"tag", id, actionLabel(action), "", userID,
+	)
+}
+
+func actionLabel(action string) string {
+	if action == "Deleted" {
+		return "delete"
+	}
+	if action == "Created" {
+		return "create"
+	}
+	return "update"
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +116,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.auditVocabulary("Created", t.Type, t.Name, t.ID, ctxutil.GetUserID(r))
 	respond.JSON(
 		w,
 		http.StatusCreated,
@@ -104,7 +128,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.svc.delete(id); err != nil {
+	typ, name, err := h.svc.deleteWithTag(id)
+	if err != nil {
 		var inUse *InUseError
 		if errors.As(err, &inUse) {
 			respond.JSON(
@@ -118,6 +143,9 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 		respond.ServerError(w, err)
 		return
+	}
+	if typ != "" {
+		h.auditVocabulary("Deleted", typ, name, id, ctxutil.GetUserID(r))
 	}
 	respond.JSON(
 		w,
@@ -173,6 +201,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.auditVocabulary("Updated", t.Type, t.Name, t.ID, ctxutil.GetUserID(r))
 	respond.JSON(
 		w,
 		http.StatusOK,

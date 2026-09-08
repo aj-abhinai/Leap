@@ -384,6 +384,91 @@ func TestCreateActivityDescriptionOptionalHandlerIntegration(t *testing.T) {
 	}
 }
 
+func TestCreateActivityRejectsEmptyTypeHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	lead, err := NewService(db).create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/leads/"+lead.ID+"/activities", strings.NewReader(`{"description":"Call attempt"}`))
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", lead.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+	h.CreateActivity(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestCreateActivityInvalidRangeMapsBadRequestIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	lead, err := NewService(db).create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/leads/"+lead.ID+"/activities", strings.NewReader(`{"type":"Call","scheduled_at":"2026-09-08T15:00:00Z","scheduled_end_at":"2026-09-08T15:00:00Z"}`))
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", lead.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+	h.CreateActivity(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestStageMoveUsesStageHistoryNotAuditLogIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	pipelineID, firstStageID := seedPipelineAndStage(t, db)
+	var secondStageID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome)
+		VALUES ($1, 'Contacted', 2, false, 'open') RETURNING id`,
+		pipelineID,
+	).Scan(&secondStageID); err != nil {
+		t.Fatalf("create second stage: %v", err)
+	}
+	lead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    firstStageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.update(lead.ID, UpdateRequest{StageID: &secondStageID}, ""); err != nil {
+		t.Fatalf("move lead: %v", err)
+	}
+
+	var historyCount, auditCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM lead_stage_history WHERE lead_id = $1`, lead.ID).Scan(&historyCount); err != nil {
+		t.Fatalf("count stage history: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE resource_id = $1 AND action = 'move_stage'`, lead.ID).Scan(&auditCount); err != nil {
+		t.Fatalf("count move audit rows: %v", err)
+	}
+	if historyCount != 1 {
+		t.Fatalf("stage history rows = %d, want 1", historyCount)
+	}
+	if auditCount != 0 {
+		t.Fatalf("move audit rows = %d, want 0", auditCount)
+	}
+}
+
 func TestCreateLeadBlocksWhileProgramLockedIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -715,6 +800,18 @@ func TestStageMoveSetsOutcomeAndHistoryIntegration(t *testing.T) {
 	}
 	if history[0].FromStageName != "Open" || history[0].ToStageName != "Closed Lost" {
 		t.Errorf("history move = %q -> %q, want Open -> Closed Lost", history[0].FromStageName, history[0].ToStageName)
+	}
+
+	var description string
+	if err := db.QueryRow(
+		`SELECT description FROM audit_logs
+		WHERE resource_type = 'lead' AND resource_id = $1 AND action = 'update'`,
+		created.ID,
+	).Scan(&description); err != nil {
+		t.Fatalf("query lost reason audit row: %v", err)
+	}
+	if !strings.Contains(description, `lost reason "" → "Not intrested"`) {
+		t.Errorf("lost reason audit description = %q", description)
 	}
 }
 
@@ -1261,18 +1358,33 @@ func TestBoardReturnsStageCountsIntegration(t *testing.T) {
 	}
 
 	// Two leads in stage A, one in stage B.
+	var rangedLeadID string
 	for _, st := range []struct {
 		stage string
 		name  string
 		phone string
 	}{{stageA, "Alice", "1111111111"}, {stageA, "Bob", "2222222222"}, {stageB, "Carol", "3333333333"}} {
-		if _, err := svc.create(CreateRequest{
+		created, err := svc.create(CreateRequest{
 			NewContact: &NewContact{Name: st.name, Phone: st.phone},
 			PipelineID: pipelineID,
 			StageID:    st.stage,
-		}, ""); err != nil {
+		}, "")
+		if err != nil {
 			t.Fatalf("create lead %s: %v", st.name, err)
 		}
+		if st.name == "Alice" {
+			rangedLeadID = created.ID
+		}
+	}
+
+	scheduledAt := time.Date(2026, time.September, 8, 10, 0, 0, 0, time.UTC)
+	scheduledEndAt := scheduledAt.Add(time.Hour)
+	if _, err := svc.createActivity(rangedLeadID, stageA, "", CreateActivityRequest{
+		Type:           "Call",
+		ScheduledAt:    &scheduledAt,
+		ScheduledEndAt: &scheduledEndAt,
+	}); err != nil {
+		t.Fatalf("create range task: %v", err)
 	}
 
 	board, err := svc.board(BoardFilters{PipelineID: pipelineID})
@@ -1301,6 +1413,15 @@ func TestBoardReturnsStageCountsIntegration(t *testing.T) {
 	if len(leadsByStage[stageB]) != 1 {
 		t.Errorf("leads in stage B = %d, want 1", len(leadsByStage[stageB]))
 	}
+	for _, l := range leadsByStage[stageA] {
+		if l.ID == rangedLeadID {
+			if l.NextTaskEndAt == nil || !l.NextTaskEndAt.Equal(scheduledEndAt) {
+				t.Errorf("next_task_end_at = %v, want %v", l.NextTaskEndAt, scheduledEndAt)
+			}
+			return
+		}
+	}
+	t.Errorf("ranged lead %q missing from board", rangedLeadID)
 }
 
 func seedProgram(t *testing.T, db *sql.DB, name string, price float64) string {

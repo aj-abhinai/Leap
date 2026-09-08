@@ -53,6 +53,8 @@ export interface Lead {
   updated_at: string
   next_task_type?: string
   next_task_at?: string
+  /** Optional end of the next task's window; overdue uses it when present. */
+  next_task_end_at?: string
   last_touch_type?: string
   last_touch_at?: string
 }

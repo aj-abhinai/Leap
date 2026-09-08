@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { onMounted, shallowRef, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { Plus, Shield, ShieldCheck, Trash2, Pencil } from '@lucide/vue'
 import { listRoles, listPermissions, createRole, updateRole, setRolePermissions, deleteRole as apiDeleteRole, type Role as ApiRole } from '@/api/roles'
 import { errorMessage } from '@/utils/errors'

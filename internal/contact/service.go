@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -509,10 +510,10 @@ type valueEntry interface {
 	Val() string
 }
 
-func (p PhoneValue) Primary() bool  { return p.IsPrimary }
-func (p PhoneValue) Val() string    { return p.Value }
-func (e EmailValue) Primary() bool  { return e.IsPrimary }
-func (e EmailValue) Val() string    { return e.Value }
+func (p PhoneValue) Primary() bool { return p.IsPrimary }
+func (p PhoneValue) Val() string   { return p.Value }
+func (e EmailValue) Primary() bool { return e.IsPrimary }
+func (e EmailValue) Val() string   { return e.Value }
 
 // primaryValue returns the first marked-primary entry's value, else the first
 // entry's value, mirroring the insert's primary promotion so the duplicate
@@ -898,6 +899,20 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 			return nil, fmt.Errorf("update contact: sync tags: %w", err)
 		}
 	}
+	// A live contact always keeps at least one phone or one email, whatever
+	// combination of scalar and list fields the update sent; an update that
+	// would strip the last detail rolls back with ErrNoContactDetail.
+	var hasDetail bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM contact_phones WHERE contact_id = $1)
+			OR EXISTS(SELECT 1 FROM contact_emails WHERE contact_id = $1)`,
+		id,
+	).Scan(&hasDetail); err != nil {
+		return nil, fmt.Errorf("update contact: check contact detail: %w", err)
+	}
+	if !hasDetail {
+		return nil, ErrNoContactDetail
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit contact update: %w", err)
 	}
@@ -916,9 +931,40 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 
 	changes := diffContact(old, &c)
 	if changes != "" {
-		s.logActivity(id, "contact", "update", changes, userID)
+		s.auditLogDesc(
+			fmt.Sprintf("Updated contact %q (%s)", c.Name, strings.Join(diffFieldLabels(changes), ", ")),
+			"contact", id, "update", userID,
+		)
 	}
 	return &c, nil
+}
+
+// diffFieldLabels renders the changed-field keys of a diffContact payload as
+// human labels for the audit description.
+func diffFieldLabels(changes string) []string {
+	var diff map[string]any
+	if err := json.Unmarshal([]byte(changes), &diff); err != nil {
+		return []string{"details"}
+	}
+	labels := map[string]string{
+		"name": "name", "email": "email", "phone": "phone",
+		"location": "location", "age": "age", "tags": "tags",
+		"status": "status", "phones": "phones", "emails": "emails",
+	}
+	out := []string{}
+	for _, key := range []string{"name", "nickname", "email", "phone", "phones", "emails", "location", "age", "tags", "status"} {
+		if _, ok := diff[key]; ok {
+			if label, ok := labels[key]; ok {
+				out = append(out, label)
+			} else {
+				out = append(out, key)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return []string{"details"}
+	}
+	return out
 }
 
 // queryer is satisfied by both *sql.DB and *sql.Tx so tag syncing can run
@@ -970,6 +1016,15 @@ func syncTags(q queryer, contactID string, tagIDs []string) ([]string, error) {
 }
 
 func (s *Service) delete(id string, userID string) error {
+	// Capture the name before the soft delete so the audit row names the
+	// contact; the row hides from every read path afterwards.
+	var name string
+	if err := s.db.QueryRow(`SELECT name FROM contacts WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&name); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("delete contact: load name: %w", err)
+	}
 	res, err := s.db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
 		return fmt.Errorf("delete contact: %w", err)
@@ -981,7 +1036,7 @@ func (s *Service) delete(id string, userID string) error {
 	if affected == 0 {
 		return ErrNotFound
 	}
-	s.logActivity(id, "contact", "delete", `{"action":"deleted"}`, userID)
+	s.auditLogDesc(fmt.Sprintf("Deleted contact %q", name), "contact", id, "delete", userID)
 	return nil
 }
 
@@ -999,10 +1054,19 @@ func (s *Service) logActivity(resourceID, resourceType, action, changes, userID 
 	audit.Log(s.db, resourceID, resourceType, action, changes, userID)
 }
 
+// auditLogDesc writes a best-effort audit entry whose description is a human
+// sentence naming the entity — the description is the record an admin reads.
+func (s *Service) auditLogDesc(desc, resourceType, resourceID, action, userID string) {
+	audit.LogCustom(s.db, desc, resourceType, resourceID, action, "", userID)
+}
+
 func diffContact(old, new *Contact) string {
 	diff := map[string]any{}
 	if old.Name != new.Name {
 		diff["name"] = map[string]string{"old": old.Name, "new": new.Name}
+	}
+	if old.Nickname != new.Nickname {
+		diff["nickname"] = map[string]string{"old": old.Nickname, "new": new.Nickname}
 	}
 	if old.Email != new.Email {
 		diff["email"] = map[string]string{"old": old.Email, "new": new.Email}

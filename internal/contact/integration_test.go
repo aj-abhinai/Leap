@@ -144,6 +144,29 @@ func TestUpdateContactIntegration(t *testing.T) {
 	assertAuditRow(t, db, created.ID, "update")
 }
 
+func TestUpdateContactRejectsClearingLastScalarDetailsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210"})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+	empty := ""
+	_, err = svc.update(created.ID, UpdateRequest{Phone: &empty, Email: &empty}, "")
+	if !errors.Is(err, ErrNoContactDetail) {
+		t.Fatalf("update error = %v, want ErrNoContactDetail", err)
+	}
+
+	contact, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get contact after rejected update: %v", err)
+	}
+	if contact.Phone == "" {
+		t.Fatal("rejected update cleared the contact phone")
+	}
+}
+
 func TestSoftDeleteContactIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -763,7 +786,7 @@ func TestCreateContactRejectsListOnlyDuplicateIntegration(t *testing.T) {
 	// A list-only create (no scalar phone) must still hit the duplicate guard
 	// via the list's primary value.
 	_, err := svc.create(CreateRequest{
-		Name:  "Alice",
+		Name:   "Alice",
 		Phones: []PhoneValue{{Value: "9876543210", IsPrimary: true}},
 	})
 	var dupErr *DuplicateError

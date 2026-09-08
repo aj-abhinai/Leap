@@ -21,6 +21,16 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
+// nameForAudit resolves a program name for an audit description; an unknown
+// id falls back to the id so the row still names something.
+func (s *Service) nameForAudit(id string) string {
+	var name string
+	if err := s.db.QueryRow(`SELECT name FROM programs WHERE id = $1`, id).Scan(&name); err != nil || name == "" {
+		return id
+	}
+	return name
+}
+
 const selectColumns = `id, name, COALESCE(description, ''), price, (deleted_at IS NOT NULL), created_at, updated_at`
 
 func (s *Service) scanProgram(row interface{ Scan(...any) error }) (*Program, error) {

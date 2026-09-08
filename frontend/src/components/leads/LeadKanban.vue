@@ -316,8 +316,11 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
     }
   }
 }
+// Overdue boundary: the task's end when it has a window, else its single
+// start time — the same rule as every other task surface.
 function isNextTaskOverdue(lead: Lead): boolean {
-  return !!lead.next_task_at && new Date(lead.next_task_at).getTime() < Date.now()
+  const boundary = lead.next_task_end_at ?? lead.next_task_at
+  return !!boundary && new Date(boundary).getTime() < Date.now()
 }
 
 // stage_outcome is the authoritative won/lost signal for a lead; 'open'

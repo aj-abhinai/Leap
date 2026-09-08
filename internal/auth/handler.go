@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
@@ -186,6 +187,18 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeAuthError(w, http.StatusBadRequest, err)
 		return
+	}
+	// Best-effort audit: the profile edit is a people-data change with no
+	// other trace.
+	if h.actLog != nil {
+		var fields []string
+		if req.Name != nil {
+			fields = append(fields, "name")
+		}
+		if req.Phone != nil {
+			fields = append(fields, "phone")
+		}
+		h.actLog.LogProfileUpdate(u.ID, u.Name, u.Email, strings.Join(fields, ", "))
 	}
 	respond.JSON(
 		w,

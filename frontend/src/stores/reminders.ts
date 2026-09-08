@@ -8,11 +8,12 @@ export const useRemindersStore = defineStore('reminders', () => {
   const reminders = ref<api.Reminder[]>([])
   const loading = ref(false)
 
-  // Open tasks = not done, not cancelled, not yet reminded. Reminders surface
-  // open tasks that have a remind time or a scheduled time.
+  // Open tasks = not done, not cancelled, not yet reminded — a dismissed
+  // reminder leaves the bell (snooze re-opens it). The panel and the badge
+  // read the same set, so a dismissed row cannot be dismissed twice.
   const openReminders = computed(() =>
     reminders.value.filter(
-      (r) => !r.is_done && !r.is_cancelled && (!!r.remind_at || !!r.scheduled_at),
+      (r) => !r.is_done && !r.is_cancelled && !r.is_reminded && (!!r.remind_at || !!r.scheduled_at),
     ),
   )
 
@@ -22,7 +23,6 @@ export const useRemindersStore = defineStore('reminders', () => {
     // The badge is the day-start digest: all tasks due today — overdue plus
     // upcoming today — so the first open of the day reads "N tasks today".
     return openReminders.value.filter((r) => {
-      if (r.is_reminded) return false
       const due = new Date(r.scheduled_end_at ?? r.scheduled_at ?? r.remind_at ?? r.created_at).getTime()
       return due <= endOfToday.getTime() && !Number.isNaN(due)
     }).length

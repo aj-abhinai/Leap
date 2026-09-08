@@ -167,15 +167,21 @@ func (s *Service) update(id string, req UpdateRequest) (*Tag, error) {
 // deletion while history rows reference them (contacts.status_id,
 // lead_activities.quick_reply_id); the count is reported through InUseError.
 // Task types and loss reasons are free-text snapshots, so they delete freely.
-// Deleting a missing tag stays a no-op, as before.
+// Deleting a missing tag stays a no-op, as before. The deleted tag's type and
+// name are returned so the handler can write a readable audit row.
 func (s *Service) delete(id string) error {
+	_, _, err := s.deleteWithTag(id)
+	return err
+}
+
+func (s *Service) deleteWithTag(id string) (string, string, error) {
 	var typ, name string
 	err := s.db.QueryRow(`SELECT type, name FROM tags WHERE id = $1`, id).Scan(&typ, &name)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return "", "", nil
 	}
 	if err != nil {
-		return fmt.Errorf("delete tag: %w", err)
+		return "", "", fmt.Errorf("delete tag: %w", err)
 	}
 	var count int
 	switch typ {
@@ -185,10 +191,10 @@ func (s *Service) delete(id string) error {
 		err = s.db.QueryRow(`SELECT COUNT(*) FROM lead_activities WHERE quick_reply_id = $1`, id).Scan(&count)
 	}
 	if err != nil {
-		return fmt.Errorf("delete tag: count references: %w", err)
+		return "", "", fmt.Errorf("delete tag: count references: %w", err)
 	}
 	if count > 0 {
-		return &InUseError{Count: count, Type: typ, Name: name}
+		return typ, name, &InUseError{Count: count, Type: typ, Name: name}
 	}
 	if _, err := s.db.Exec(`DELETE FROM tags WHERE id = $1`, id); err != nil {
 		// A link can land between the count and the delete; the RESTRICT
@@ -202,10 +208,27 @@ func (s *Service) delete(id string) error {
 				err = s.db.QueryRow(`SELECT COUNT(*) FROM lead_activities WHERE quick_reply_id = $1`, id).Scan(&count)
 			}
 			if err == nil && count > 0 {
-				return &InUseError{Count: count, Type: typ, Name: name}
+				return typ, name, &InUseError{Count: count, Type: typ, Name: name}
 			}
 		}
-		return fmt.Errorf("delete tag: %w", err)
+		return "", "", fmt.Errorf("delete tag: %w", err)
 	}
-	return nil
+	return typ, name, nil
+}
+
+// TypeLabel renders a tag type as the user-facing vocabulary word for audit
+// descriptions.
+func TypeLabel(typ string) string {
+	switch typ {
+	case "status":
+		return "status"
+	case "quick_reply":
+		return "quick reply"
+	case "activity_type":
+		return "task type"
+	case "loss_reason":
+		return "loss reason"
+	default:
+		return "tag"
+	}
 }
