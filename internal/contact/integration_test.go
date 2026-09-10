@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCreateContactIntegration(t *testing.T) {
@@ -144,6 +145,87 @@ func TestUpdateContactIntegration(t *testing.T) {
 	assertAuditRow(t, db, created.ID, "update")
 }
 
+func TestContactDateOfBirthIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	dob := "1995-04-12"
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210", DateOfBirth: &dob})
+	if err != nil {
+		t.Fatalf("create contact with date of birth: %v", err)
+	}
+	if created.DateOfBirth == nil || *created.DateOfBirth != dob {
+		t.Fatalf("created date_of_birth = %v, want %q", created.DateOfBirth, dob)
+	}
+
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get contact: %v", err)
+	}
+	if got.DateOfBirth == nil || *got.DateOfBirth != dob {
+		t.Errorf("stored date_of_birth = %v, want %q", got.DateOfBirth, dob)
+	}
+
+	listed, _, err := svc.list(1, 20, "")
+	if err != nil {
+		t.Fatalf("list contacts: %v", err)
+	}
+	if len(listed) != 1 || listed[0].DateOfBirth == nil || *listed[0].DateOfBirth != dob {
+		t.Errorf("listed date_of_birth = %v, want %q", listed[0].DateOfBirth, dob)
+	}
+
+	// update moves the birth date
+	newDob := "1996-01-02"
+	updated, err := svc.update(created.ID, UpdateRequest{DateOfBirth: &newDob, Phone: &created.Phone}, "")
+	if err != nil {
+		t.Fatalf("update date of birth: %v", err)
+	}
+	if updated.DateOfBirth == nil || *updated.DateOfBirth != newDob {
+		t.Errorf("updated date_of_birth = %v, want %q", updated.DateOfBirth, newDob)
+	}
+
+	// an empty string clears it
+	empty := ""
+	cleared, err := svc.update(created.ID, UpdateRequest{DateOfBirth: &empty, Phone: &created.Phone}, "")
+	if err != nil {
+		t.Fatalf("clear date of birth: %v", err)
+	}
+	if cleared.DateOfBirth != nil {
+		t.Errorf("cleared date_of_birth = %v, want nil", cleared.DateOfBirth)
+	}
+}
+
+func TestContactDateOfBirthRejectsInvalidDatesIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210"})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	tomorrow := time.Now().AddDate(0, 0, 1).Format(time.DateOnly)
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{"not a calendar date", "2023-02-31"},
+		{"future date", tomorrow},
+		{"wrong shape", "12/04/1995"},
+		{"year zero", "0000-01-01"},
+		{"two-digit year", "0095-01-01"},
+	} {
+		_, err := svc.create(CreateRequest{Name: "Bob Example", Phone: "9876543211", DateOfBirth: &tc.value})
+		if !errors.Is(err, ErrInvalidDateOfBirth) {
+			t.Errorf("create with %s error = %v, want ErrInvalidDateOfBirth", tc.name, err)
+		}
+		_, err = svc.update(created.ID, UpdateRequest{DateOfBirth: &tc.value, Phone: &created.Phone}, "")
+		if !errors.Is(err, ErrInvalidDateOfBirth) {
+			t.Errorf("update with %s error = %v, want ErrInvalidDateOfBirth", tc.name, err)
+		}
+	}
+}
+
 func TestUpdateContactRejectsClearingLastScalarDetailsIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -164,6 +246,36 @@ func TestUpdateContactRejectsClearingLastScalarDetailsIntegration(t *testing.T) 
 	}
 	if contact.Phone == "" {
 		t.Fatal("rejected update cleared the contact phone")
+	}
+}
+
+// A partial update that clears one detail type is valid while the other type
+// still holds a value; only clearing every detail trips the invariant.
+func TestUpdateContactListClearKeepsRemainingDetailIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210", Email: "alice@example.com"})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	noPhones := []PhoneValue{}
+	updated, err := svc.update(created.ID, UpdateRequest{Phones: &noPhones}, "")
+	if err != nil {
+		t.Fatalf("clear phones with email retained: %v", err)
+	}
+	if updated.Phone != "" {
+		t.Errorf("phone = %q, want empty after the list clear", updated.Phone)
+	}
+	if updated.Email != "alice@example.com" {
+		t.Errorf("email = %q, want the retained value", updated.Email)
+	}
+
+	// Clearing the remaining detail type is rejected by the final-state check.
+	noEmails := []EmailValue{}
+	if _, err := svc.update(created.ID, UpdateRequest{Emails: &noEmails}, ""); !errors.Is(err, ErrNoContactDetail) {
+		t.Fatalf("clear all details error = %v, want ErrNoContactDetail", err)
 	}
 }
 
@@ -512,13 +624,19 @@ func TestUpdateContactClearsNullableFieldsIntegration(t *testing.T) {
 		t.Fatalf("create contact: %v", err)
 	}
 
+	// Clearing one detail type is valid while the other remains (the
+	// clear-all case is covered by
+	// TestUpdateContactRejectsClearingLastScalarDetailsIntegration).
 	empty := ""
-	updated, err := svc.update(created.ID, UpdateRequest{Email: &empty, Phone: &empty}, "")
+	updated, err := svc.update(created.ID, UpdateRequest{Email: &empty}, "")
 	if err != nil {
-		t.Fatalf("clear contact fields: %v", err)
+		t.Fatalf("clear contact email: %v", err)
 	}
-	if updated.Email != "" || updated.Phone != "" {
-		t.Errorf("email/phone = %q/%q, want cleared", updated.Email, updated.Phone)
+	if updated.Email != "" {
+		t.Errorf("email = %q, want cleared", updated.Email)
+	}
+	if updated.Phone != created.Phone {
+		t.Errorf("phone = %q, want retained %q", updated.Phone, created.Phone)
 	}
 	if updated.Location != "Pune" {
 		t.Errorf("location = %q, want unchanged 'Pune'", updated.Location)
@@ -528,8 +646,11 @@ func TestUpdateContactClearsNullableFieldsIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get contact: %v", err)
 	}
-	if got.Email != "" || got.Phone != "" {
-		t.Errorf("stored email/phone = %q/%q, want cleared", got.Email, got.Phone)
+	if got.Email != "" {
+		t.Errorf("stored email = %q, want cleared", got.Email)
+	}
+	if got.Phone == "" {
+		t.Error("stored phone was cleared along with the email")
 	}
 }
 

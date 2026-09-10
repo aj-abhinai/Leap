@@ -156,8 +156,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	name := h.svc.pipelineName(id)
-	if err := h.svc.deletePipeline(id); err != nil {
+	name, err := h.svc.deletePipeline(id)
+	if err != nil {
 		respondError(w, err)
 		return
 	}
@@ -239,8 +239,8 @@ func (h *Handler) UpdateStage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteStage(w http.ResponseWriter, r *http.Request) {
 	stageID := chi.URLParam(r, "stage_id")
-	name := h.svc.stageName(stageID)
-	if err := h.svc.deleteStage(stageID); err != nil {
+	name, err := h.svc.deleteStage(stageID)
+	if err != nil {
 		respondError(w, err)
 		return
 	}

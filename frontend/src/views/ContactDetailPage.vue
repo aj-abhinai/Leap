@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useContactsStore, type Contact } from '@/stores/contacts'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ import ContactNotes from '@/components/contacts/ContactNotes.vue'
 import { Mail, Phone, MapPin, ArrowLeft, Pencil } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { getAvatarColor, getInitials } from '@/utils/avatar'
+import { displayAge } from '@/utils/age'
 import { errorMessage } from '@/utils/errors'
 
 const route = useRoute()
@@ -29,6 +30,7 @@ const loading = shallowRef(true)
 const loadError = shallowRef('')
 const drawerOpen = shallowRef(false)
 const saving = shallowRef(false)
+const ageLabel = computed(() => displayAge(contact.value?.date_of_birth, contact.value?.age))
 
 // Watch the route param: navigating detail-to-detail reuses this instance,
 // so onMounted-only loading would leave the previous contact on screen.
@@ -170,8 +172,8 @@ async function handleSave(body: ContactSaveBody) {
           <div v-if="contact.location" class="flex items-center gap-2 text-sm text-muted-foreground">
             <MapPin class="size-4" /> {{ contact.location }}
           </div>
-          <div v-if="contact.age" class="text-sm text-muted-foreground">
-            Age: {{ contact.age }}
+          <div v-if="ageLabel !== null" class="text-sm text-muted-foreground">
+            Age: {{ ageLabel }}
           </div>
         </div>
 

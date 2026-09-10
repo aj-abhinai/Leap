@@ -15,31 +15,27 @@ var (
 	// ErrInUse marks deletions blocked because leads or activities still
 	// reference the pipeline or stage.
 	ErrInUse = errors.New("resource is in use and cannot be deleted")
-	// ErrInvalidStageOutcome marks a requested outcome that a closing stage
-	// cannot take; it is client-input validation, surfaced as a 400.
-	ErrInvalidStageOutcome = errors.New("closing stages must have outcome 'won' or 'lost'")
+	// ErrInvalidStageOutcome marks a requested outcome outside the open/won/
+	// lost vocabulary; it is client-input validation, surfaced as a 400.
+	ErrInvalidStageOutcome = errors.New("outcome must be 'open', 'won', or 'lost'")
 )
 
 // Stage outcome vocabulary. A stage's outcome is what
-// reaching it means for a lead: open (in play), won, or lost.
+// reaching it means for a lead: open (in play), won, or lost. A stage with
+// outcome 'won' or 'lost' closes the lead; 'open' does not.
 const (
 	OutcomeOpen = "open"
 	OutcomeWon  = "won"
 	OutcomeLost = "lost"
 )
 
-// stageOutcome resolves a stage's outcome from its closing flag and the
-// requested value. Non-closing stages are always 'open'; closing stages must
-// be 'won' or 'lost' (defaulting to 'lost' when not specified). An explicit
-// 'open' on a closing stage is rejected — it is not a valid win/loss.
-func stageOutcome(isClosing bool, outcome string) (string, error) {
-	if !isClosing {
-		return OutcomeOpen, nil
-	}
+// stageOutcome validates a requested stage outcome, defaulting an omitted
+// value to 'open'. 'won' and 'lost' make the stage a closing stage.
+func stageOutcome(outcome string) (string, error) {
 	switch outcome {
 	case "":
-		return OutcomeLost, nil
-	case OutcomeWon, OutcomeLost:
+		return OutcomeOpen, nil
+	case OutcomeOpen, OutcomeWon, OutcomeLost:
 		return outcome, nil
 	default:
 		return "", ErrInvalidStageOutcome
@@ -81,7 +77,7 @@ func (s *Service) list() ([]Pipeline, error) {
 }
 
 func (s *Service) listAllStages(pipelineIDs []string) (map[string][]Stage, error) {
-	query := `SELECT id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, outcome, created_at, updated_at
+	query := `SELECT id, pipeline_id, name, "order", COALESCE(color, ''), outcome, created_at, updated_at
 		FROM lead_stages
 		WHERE pipeline_id = ANY($1)
 		ORDER BY "order"`
@@ -95,10 +91,11 @@ func (s *Service) listAllStages(pipelineIDs []string) (map[string][]Stage, error
 	for rows.Next() {
 		var st Stage
 		if err := rows.Scan(
-			&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.Outcome, &st.CreatedAt, &st.UpdatedAt,
+			&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.Outcome, &st.CreatedAt, &st.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("list all stages: scan: %w", err)
 		}
+		st.IsClosing = st.Outcome != OutcomeOpen
 		stageMap[st.PipelineID] = append(stageMap[st.PipelineID], st)
 	}
 	if err := rows.Err(); err != nil {
@@ -164,145 +161,126 @@ func (s *Service) updatePipeline(id string, req UpdatePipelineRequest) (*Pipelin
 	return &p, nil
 }
 
-func (s *Service) deletePipeline(id string) error {
-	result, err := s.db.Exec(`DELETE FROM pipelines WHERE id = $1`, id)
+// deletePipeline removes a pipeline and returns its name for the audit row, so
+// the snapshot and the mutation are one query and cannot race a concurrent
+// rename. An empty name falls back to the id so the audit row still names
+// something.
+func (s *Service) deletePipeline(id string) (string, error) {
+	var name string
+	err := s.db.QueryRow(`DELETE FROM pipelines WHERE id = $1 RETURNING name`, id).Scan(&name)
 	if err != nil {
-		if respond.IsForeignKeyViolation(err) {
-			return ErrInUse
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
 		}
-		return fmt.Errorf("delete pipeline: %w", err)
+		if respond.IsForeignKeyViolation(err) {
+			return "", ErrInUse
+		}
+		return "", fmt.Errorf("delete pipeline: %w", err)
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete pipeline: rows affected: %w", err)
+	if name == "" {
+		name = id
 	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// pipelineName resolves a pipeline name for an audit description; an unknown
-// id falls back to the id so the row still names something.
-func (s *Service) pipelineName(id string) string {
-	var name string
-	if err := s.db.QueryRow(`SELECT name FROM pipelines WHERE id = $1`, id).Scan(&name); err != nil || name == "" {
-		return id
-	}
-	return name
-}
-
-// stageName resolves a stage name for an audit description with the same
-// uuid fallback as pipelineName.
-func (s *Service) stageName(id string) string {
-	var name string
-	if err := s.db.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, id).Scan(&name); err != nil || name == "" {
-		return id
-	}
-	return name
+	return name, nil
 }
 
 func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage, error) {
-	outcome, err := stageOutcome(req.IsClosing, req.Outcome)
+	outcome, err := stageOutcome(req.Outcome)
 	if err != nil {
 		return nil, err
 	}
 	var st Stage
 	err = s.db.QueryRow(
-		`INSERT INTO lead_stages (pipeline_id, name, "order", color, is_closing, outcome) VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, outcome, created_at, updated_at`,
+		`INSERT INTO lead_stages (pipeline_id, name, "order", color, outcome) VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), outcome, created_at, updated_at`,
 		pipelineID,
 		req.Name,
 		req.Order,
 		util.NullStr(req.Color),
-		req.IsClosing,
 		outcome,
-	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.Outcome, &st.CreatedAt, &st.UpdatedAt)
+	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.Outcome, &st.CreatedAt, &st.UpdatedAt)
 	if err != nil {
 		if respond.IsForeignKeyViolation(err) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("create stage: %w", err)
 	}
+	st.IsClosing = st.Outcome != OutcomeOpen
 	return &st, nil
 }
 
 func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, error) {
-	// Resolve the resulting closing flag and outcome together: only one may be
-	// present in a partial update, and the outcome rules depend on the final
-	// closing state (non-closing is always 'open', closing must be won/lost).
-	curIsClosing := false
-	var curOutcome string
+	// A missing stage surfaces as not-found before payload validation, matching
+	// the delete path: editing a stage that was removed in another tab gets a
+	// 404, not a validation error.
+	var exists bool
 	if err := s.db.QueryRow(
-		`SELECT is_closing, outcome FROM lead_stages WHERE id = $1`,
+		`SELECT EXISTS(SELECT 1 FROM lead_stages WHERE id = $1)`,
 		stageID,
-	).Scan(&curIsClosing, &curOutcome); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
+	).Scan(&exists); err != nil {
 		return nil, fmt.Errorf("load stage for update: %w", err)
 	}
-	isClosing := curIsClosing
-	if req.IsClosing != nil {
-		isClosing = *req.IsClosing
+	if !exists {
+		return nil, ErrNotFound
 	}
-	outcomeVal := curOutcome
+
+	// A partial update may change the outcome alone: the value is validated
+	// against the open/won/lost vocabulary, and closing is derived from it. An
+	// omitted outcome (nil) keeps the stored value; an explicit empty string is
+	// malformed rather than a quiet reset to open.
+	var outcome *string
 	if req.Outcome != nil {
-		outcomeVal = *req.Outcome
-	}
-	// Promoting a previously-open stage to closing without an explicit win/loss
-	// still carries outcome 'open' from the old row; treat that as unspecified
-	// so it defaults to 'lost'. An explicit 'open' on an already-closing stage
-	// is rejected by stageOutcome.
-	if isClosing && outcomeVal == OutcomeOpen && !curIsClosing {
-		outcomeVal = ""
-	}
-	outcome, err := stageOutcome(isClosing, outcomeVal)
-	if err != nil {
-		return nil, err
+		if *req.Outcome == "" {
+			return nil, ErrInvalidStageOutcome
+		}
+		resolved, err := stageOutcome(*req.Outcome)
+		if err != nil {
+			return nil, err
+		}
+		outcome = &resolved
 	}
 
 	var st Stage
-	err = s.db.QueryRow(
+	err := s.db.QueryRow(
 		`UPDATE lead_stages SET
 			name = CASE WHEN NULLIF($2::text, '') IS NOT NULL THEN $2 ELSE name END,
 			"order" = COALESCE($3::integer, "order"),
 			color = CASE WHEN $4::text IS NOT NULL THEN NULLIF($4, '') ELSE color END,
-			is_closing = $5,
-			outcome = $6,
+			outcome = COALESCE($5::text, outcome),
 			updated_at = now()
 		WHERE id = $1
-		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), is_closing, outcome, created_at, updated_at`,
+		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), outcome, created_at, updated_at`,
 		stageID,
 		req.Name,
 		req.Order,
 		req.Color,
-		isClosing,
 		outcome,
-	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.IsClosing, &st.Outcome, &st.CreatedAt, &st.UpdatedAt)
+	).Scan(&st.ID, &st.PipelineID, &st.Name, &st.Order, &st.Color, &st.Outcome, &st.CreatedAt, &st.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("update stage: %w", err)
 	}
+	st.IsClosing = st.Outcome != OutcomeOpen
 	return &st, nil
 }
 
-func (s *Service) deleteStage(stageID string) error {
-	result, err := s.db.Exec(`DELETE FROM lead_stages WHERE id = $1`, stageID)
+// deleteStage removes a stage and returns its name for the audit row with the
+// same one-query and fallback rules as deletePipeline.
+func (s *Service) deleteStage(stageID string) (string, error) {
+	var name string
+	err := s.db.QueryRow(`DELETE FROM lead_stages WHERE id = $1 RETURNING name`, stageID).Scan(&name)
 	if err != nil {
-		if respond.IsForeignKeyViolation(err) {
-			return ErrInUse
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
 		}
-		return fmt.Errorf("delete stage: %w", err)
+		if respond.IsForeignKeyViolation(err) {
+			return "", ErrInUse
+		}
+		return "", fmt.Errorf("delete stage: %w", err)
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete stage: rows affected: %w", err)
+	if name == "" {
+		name = stageID
 	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return name, nil
 }

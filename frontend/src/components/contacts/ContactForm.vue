@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { type Contact, type PhoneValue, type EmailValue } from '@/stores/contacts'
 import { useSettingsStore } from '@/stores/settings'
 import { contactSchema } from '@/lib/validation'
+import { computeAge } from '@/utils/age'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -38,6 +39,7 @@ export interface ContactSaveBody {
   nickname: string
   location: string
   age: number | null
+  date_of_birth: string
   tag_ids: string[]
   status_id: string
   phones: { value: string; is_primary: boolean }[]
@@ -70,6 +72,7 @@ const formName = shallowRef(props.editingContact?.name || '')
 const formNickname = shallowRef(props.editingContact?.nickname || '')
 const formLocation = shallowRef(props.editingContact?.location || '')
 const formAge = shallowRef<number | undefined>(props.editingContact?.age)
+const formDateOfBirth = shallowRef<string | undefined>(props.editingContact?.date_of_birth || undefined)
 const formStatusId = shallowRef(props.editingContact?.status?.id || '__none__')
 const selectedTags = ref<string[]>(props.editingContact?.tags?.map(t => t.id) || [])
 const phones = ref<Entry[]>(
@@ -79,6 +82,7 @@ const emails = ref<Entry[]>(
   (props.editingContact?.emails?.length ? props.editingContact.emails : props.editingContact?.email ? [{ value: props.editingContact.email, is_primary: true }] : [{ value: '', is_primary: true }]).map(e => mkEntry(e.value, e.is_primary)),
 )
 const formError = shallowRef('')
+const computedAge = computed(() => computeAge(formDateOfBirth.value))
 
 onMounted(() => {
   settings.fetchTags()
@@ -89,6 +93,7 @@ watch(() => props.editingContact, (c) => {
   formNickname.value = c?.nickname || ''
   formLocation.value = c?.location || ''
   formAge.value = c?.age
+  formDateOfBirth.value = c?.date_of_birth || undefined
   formStatusId.value = c?.status?.id || '__none__'
   selectedTags.value = c?.tags?.map(t => t.id) || []
   phones.value = (c?.phones?.length
@@ -148,6 +153,7 @@ async function handleSave() {
     phone: phoneVals[0] ?? '',
     location: formLocation.value || undefined,
     age: formAge.value || undefined,
+    date_of_birth: formDateOfBirth.value || '',
   })
   if (!result.success) {
     formError.value = result.error.issues[0]?.message || 'Validation failed'
@@ -164,6 +170,7 @@ async function handleSave() {
     nickname: formNickname.value,
     location: result.data.location ?? '',
     age: result.data.age ?? null,
+    date_of_birth: result.data.date_of_birth ?? '',
     tag_ids: selectedTags.value,
     status_id: formStatusId.value && formStatusId.value !== '__none__' ? formStatusId.value : '',
     phones: phoneList,
@@ -238,8 +245,13 @@ async function handleSave() {
       <Input id="clocation" v-model="formLocation" placeholder="Location" />
     </div>
     <div class="space-y-2">
-      <Label for="cage">Age</Label>
-      <Input id="cage" v-model.number="formAge" type="number" placeholder="Age" />
+      <Label for="cdob">Date of birth</Label>
+      <Input id="cdob" v-model="formDateOfBirth" type="date" />
+      <p v-if="computedAge !== null" class="text-xs text-muted-foreground">Age from date of birth: {{ computedAge }}</p>
+    </div>
+    <div class="space-y-2">
+      <Label for="cage">Approximate age</Label>
+      <Input id="cage" v-model.number="formAge" type="number" placeholder="Age (used when no birth date)" />
     </div>
     <div class="space-y-2">
       <Label>Status</Label>

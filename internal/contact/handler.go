@@ -53,7 +53,7 @@ func respondError(w http.ResponseWriter, err error) {
 			nil,
 		)
 	case errors.Is(err, ErrInvalidStatus), errors.Is(err, ErrNoContactDetail),
-		errors.Is(err, ErrCollectionLimit):
+		errors.Is(err, ErrInvalidDateOfBirth), errors.Is(err, ErrCollectionLimit):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,

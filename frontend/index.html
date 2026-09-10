@@ -9,7 +9,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Leap</title>
     <!-- CSP hash in internal/middleware/security.go is computed over this exact script content; keep it on one line, unchanged -->
-    <script>;(function(){var t=localStorage.getItem('crm-theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark')}})();</script>
+    <script>;(function(){var t=localStorage.getItem('crm-theme');var d=t==='dark'||(t!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d){document.documentElement.classList.add('dark')}})();</script>
     <style>
       /* #fbfbfc and #1b1b1d mirror the --background tokens in src/style.css (light/dark); keep them in sync */
       #splash{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:#fbfbfc;pointer-events:none;transition:opacity 300ms ease-out}

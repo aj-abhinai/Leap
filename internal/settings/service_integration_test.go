@@ -38,7 +38,7 @@ func TestDefaultCountryCodeReadsStoredValue(t *testing.T) {
 // Malformed stored values fall back to the default so a bad row can never
 // stamp a broken country code onto stored numbers.
 func TestDefaultCountryCodeFallsBackOnMalformed(t *testing.T) {
-	for _, raw := range []string{"91", "+", "+abc", "++91", "+91 ", ""} {
+	for _, raw := range []string{"91", "+", "+abc", "++91", "+91 ", "", "+1234"} {
 		db := testdb.New(t)
 		if _, err := db.Exec(
 			`INSERT INTO settings (key, value) VALUES ($1, $2)`,

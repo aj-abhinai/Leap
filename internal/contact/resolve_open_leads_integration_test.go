@@ -94,7 +94,7 @@ func TestResolveByPhoneOmitsClosedAndDeletedLeadsIntegration(t *testing.T) {
 	closedLead := seedLead(t, db, created.ID, pipelineID, stageID, &programID, "Closed Deal")
 	var closedStage string
 	if err := db.QueryRow(
-		`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 1, true, 'won') RETURNING id`,
+		`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Won', 1, 'won') RETURNING id`,
 		pipelineID,
 	).Scan(&closedStage); err != nil {
 		t.Fatalf("seed won stage: %v", err)

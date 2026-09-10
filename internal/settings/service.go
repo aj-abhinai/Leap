@@ -68,6 +68,22 @@ func (s *Service) GetNudgeLeadMinutes() (int, error) {
 	return NudgeLeadMinutes(s.db)
 }
 
+// validCountryCode reports whether a value is a '+' followed by one to three
+// digits (ITU calling codes). The same rule guards writes and stored values on
+// read, so a malformed code can neither be stored nor stamped onto a number;
+// a malformed persisted value falls back to the default.
+func validCountryCode(code string) bool {
+	if len(code) < 2 || len(code) > 4 || code[0] != '+' {
+		return false
+	}
+	for _, r := range code[1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // DefaultCountryCode returns the org's default country code — a '+' followed
 // by digits — defaulting to DefaultDefaultCountryCode when the setting is
 // absent or malformed. It runs on any Queryer so every phone entry point
@@ -83,17 +99,8 @@ func DefaultCountryCode(q Queryer) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("get default country code: %w", err)
 	}
-	if !strings.HasPrefix(raw, "+") {
+	if !validCountryCode(raw) {
 		return DefaultDefaultCountryCode, nil
-	}
-	digits := raw[1:]
-	if digits == "" {
-		return DefaultDefaultCountryCode, nil
-	}
-	for _, r := range digits {
-		if r < '0' || r > '9' {
-			return DefaultDefaultCountryCode, nil
-		}
 	}
 	return raw, nil
 }
@@ -122,19 +129,11 @@ func (s *Service) GetDefaultCountryCode() (string, error) {
 }
 
 // SetDefaultCountryCode stores the org's default country code. The value must
-// be a '+' followed by one to three digits (ITU calling codes); anything else
-// is rejected so a malformed code can never be stamped onto stored numbers.
+// pass the same validity rule as reads — a '+' followed by one to three
+// digits — so a malformed code can never be stamped onto stored numbers.
 func (s *Service) SetDefaultCountryCode(code string) error {
 	code = strings.TrimSpace(code)
-	if len(code) < 2 || code[0] != '+' {
-		return errors.New("country code must be '+' followed by 1 to 3 digits")
-	}
-	for _, r := range code[1:] {
-		if r < '0' || r > '9' {
-			return errors.New("country code must be '+' followed by 1 to 3 digits")
-		}
-	}
-	if len(code) > 4 {
+	if !validCountryCode(code) {
 		return errors.New("country code must be '+' followed by 1 to 3 digits")
 	}
 	if _, err := s.db.Exec(

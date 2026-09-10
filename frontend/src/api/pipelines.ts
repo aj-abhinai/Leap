@@ -9,8 +9,10 @@ export interface Stage {
   name: string
   order: number
   color?: string
+  // is_closing is derived by the server from outcome (outcome != 'open');
+  // outcome is the single writable source of truth.
   is_closing: boolean
-  outcome?: 'open' | 'won' | 'lost'
+  outcome: 'open' | 'won' | 'lost'
 }
 
 export interface Pipeline {
@@ -42,7 +44,7 @@ export function addStage(pipelineId: string, body: { name: string; order?: numbe
 
 export function updateStage(
   stageId: string,
-  body: { name?: string; order?: number; is_closing?: boolean; outcome?: string },
+  body: { name?: string; order?: number; outcome?: string },
 ): Promise<ApiResponse<Stage>> {
   return apiClient.patch(`/api/stages/${stageId}`, body)
 }

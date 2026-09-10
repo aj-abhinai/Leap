@@ -150,8 +150,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	name := h.svc.nameForAudit(id)
-	if err := h.svc.archive(id); err != nil {
+	name, err := h.svc.archive(id)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			respond.JSON(
 				w,
@@ -171,8 +171,8 @@ func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	name := h.svc.nameForAudit(id)
-	if err := h.svc.restore(id); err != nil {
+	name, err := h.svc.restore(id)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			respond.JSON(
 				w,

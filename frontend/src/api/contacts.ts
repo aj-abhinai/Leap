@@ -32,6 +32,7 @@ export interface Contact {
   emails?: EmailValue[]
   location?: string
   age?: number
+  date_of_birth?: string | null
   tags?: TagRef[]
   status?: TagRef
   created_at: string

@@ -787,19 +787,19 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	// a mislabel is fixed by a new cycle, not by re-closing the old row.
 	if req.StageID != nil && *req.StageID != "" && *req.StageID != old.StageID &&
 		old.StageOutcome != "open" {
-		// The target stage's closing flag decides: closed → open spawns a new
+		// The target stage's outcome decides: closed → open spawns a new
 		// cycle; closed → closed is rejected.
-		var targetClosing bool
+		var targetOutcome string
 		if err := s.db.QueryRow(
-			`SELECT is_closing FROM lead_stages WHERE id = $1`,
+			`SELECT outcome FROM lead_stages WHERE id = $1`,
 			*req.StageID,
-		).Scan(&targetClosing); err != nil {
+		).Scan(&targetOutcome); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, ErrStageNotInPipeline
 			}
 			return nil, fmt.Errorf("update lead: load target stage: %w", err)
 		}
-		if targetClosing {
+		if targetOutcome != "open" {
 			return nil, ErrClosedToClosedMove
 		}
 		return s.spawnCycle(old, *req.StageID, userID)
@@ -866,11 +866,8 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		targetStage = info
 		if info.IsClosing {
 			// The stage declares its outcome ('won' or 'lost'); both are valid.
-			// The pipeline package's stageOutcome enforces that closing stages
-			// are never 'open', but guard anyway for malformed data.
-			if info.Outcome == "" || info.Outcome == "open" {
-				info.Outcome = "lost"
-			}
+			// The pipeline package enforces that outcomes stay in the
+			// open/won/lost vocabulary, so a closing stage is never 'open'.
 			outcome = &info.Outcome
 			if req.LostReason != nil && info.Outcome == "lost" {
 				lostReason = req.LostReason
@@ -1229,26 +1226,28 @@ func (s *Service) stageName(stageID string) (string, error) {
 // stageInfo is the minimal stage shape needed for outcome resolution and
 // history snapshots.
 type stageInfo struct {
-	ID        string
-	Name      string
+	ID   string
+	Name string
+	// IsClosing is derived from Outcome (outcome != 'open').
 	IsClosing bool
 	// Outcome is the stage's declared outcome ('open' | 'won' | 'lost'),
 	// authoritative for lead outcome resolution.
 	Outcome string
 }
 
-// stageInfoTx loads a stage's name, closing flag, and outcome inside a
-// transaction so the outcome resolution and history insert see a consistent
-// view.
+// stageInfoTx loads a stage's name and outcome inside a transaction so the
+// outcome resolution and history insert see a consistent view. Closing is
+// derived from the outcome — the single stored source of truth.
 func (s *Service) stageInfoTx(tx *sql.Tx, stageID string) (*stageInfo, error) {
 	var info stageInfo
 	err := tx.QueryRow(
-		`SELECT id, name, is_closing, outcome FROM lead_stages WHERE id = $1`,
+		`SELECT id, name, outcome FROM lead_stages WHERE id = $1`,
 		stageID,
-	).Scan(&info.ID, &info.Name, &info.IsClosing, &info.Outcome)
+	).Scan(&info.ID, &info.Name, &info.Outcome)
 	if err != nil {
 		return nil, fmt.Errorf("load stage info: %w", err)
 	}
+	info.IsClosing = info.Outcome != "open"
 	return &info, nil
 }
 
@@ -1273,12 +1272,12 @@ func (s *Service) closeLostTx(tx *sql.Tx, leadID, userID string) (bool, error) {
 
 	var target stageInfo
 	err := tx.QueryRow(
-		`SELECT id, name, is_closing, outcome FROM lead_stages
-		WHERE pipeline_id = $1 AND is_closing AND outcome <> 'won'
+		`SELECT id, name, outcome FROM lead_stages
+		WHERE pipeline_id = $1 AND outcome = 'lost'
 		ORDER BY "order" ASC, created_at ASC
 		LIMIT 1`,
 		pipelineID,
-	).Scan(&target.ID, &target.Name, &target.IsClosing, &target.Outcome)
+	).Scan(&target.ID, &target.Name, &target.Outcome)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrNoLostStage
 	}
@@ -1290,9 +1289,6 @@ func (s *Service) closeLostTx(tx *sql.Tx, leadID, userID string) (bool, error) {
 	}
 
 	outcome := target.Outcome
-	if outcome == "" || outcome == "open" {
-		outcome = "lost"
-	}
 	if _, err := tx.Exec(
 		`UPDATE leads SET stage_id = $2, outcome = $3, updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL`,

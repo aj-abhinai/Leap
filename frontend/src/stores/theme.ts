@@ -3,16 +3,25 @@ import { ref, computed } from 'vue'
 
 const KEY = 'crm-theme'
 
-function getStored(): string | null {
-  return localStorage.getItem(KEY)
+// One theme vocabulary across the store and the first-paint bootstrap: an
+// explicit light/dark choice, or 'system' which follows the OS preference.
+// Anything else (missing, junk, legacy values) normalizes to 'system'.
+export type Theme = 'light' | 'dark' | 'system'
+
+function normalizeTheme(value: string | null): Theme {
+  return value === 'light' || value === 'dark' ? value : 'system'
 }
 
-function persist(value: string) {
+function getStored(): Theme {
+  return normalizeTheme(localStorage.getItem(KEY))
+}
+
+function persist(value: Theme) {
   localStorage.setItem(KEY, value)
 }
 
-function apply(cls: string) {
-  if (cls === 'dark') {
+function apply(resolved: 'light' | 'dark') {
+  if (resolved === 'dark') {
     document.documentElement.classList.add('dark')
   } else {
     document.documentElement.classList.remove('dark')
@@ -24,9 +33,9 @@ function systemPrefersDark(): boolean {
 }
 
 export const useThemeStore = defineStore('theme', () => {
-  const theme = ref<string>('system')
+  const theme = ref<Theme>('system')
 
-  const resolvedTheme = computed(() => {
+  const resolvedTheme = computed<'light' | 'dark'>(() => {
     if (theme.value === 'system') {
       return systemPrefersDark() ? 'dark' : 'light'
     }
@@ -34,8 +43,7 @@ export const useThemeStore = defineStore('theme', () => {
   })
 
   function init() {
-    const stored = getStored()
-    theme.value = stored || 'system'
+    theme.value = getStored()
     apply(resolvedTheme.value)
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', onSystemChange)
   }
@@ -47,7 +55,7 @@ export const useThemeStore = defineStore('theme', () => {
   }
 
   function toggle() {
-    const next =
+    const next: Theme =
       theme.value === 'system'
         ? systemPrefersDark()
           ? 'light'
@@ -58,7 +66,7 @@ export const useThemeStore = defineStore('theme', () => {
     set(next)
   }
 
-  function set(value: string) {
+  function set(value: Theme) {
     theme.value = value
     persist(value)
     apply(resolvedTheme.value)

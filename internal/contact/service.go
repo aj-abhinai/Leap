@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 var (
@@ -21,6 +22,9 @@ var (
 	ErrInvalidStatus = errors.New("status_id must reference a status tag")
 	// ErrNoContactDetail marks contacts created without a phone or an email.
 	ErrNoContactDetail = errors.New("contact must have at least one phone or one email")
+	// ErrInvalidDateOfBirth marks a date of birth that is not a real calendar
+	// date in YYYY-MM-DD form or lies in the future.
+	ErrInvalidDateOfBirth = errors.New("date of birth must be a real date (YYYY-MM-DD) in the past")
 	// ErrCollectionLimit marks requests whose phones, emails, or tag lists
 	// exceed the per-contact caps or whose value lengths exceed the maximum.
 	ErrCollectionLimit = errors.New("contact collection limit exceeded")
@@ -93,7 +97,7 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 	offset := util.Offset(page, perPage)
 
 	selectQuery := fmt.Sprintf(
-		`SELECT id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, created_at, updated_at
+		`SELECT id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, COALESCE(to_char(date_of_birth, 'YYYY-MM-DD'), ''), created_at, updated_at
 		FROM contacts %s
 		ORDER BY created_at DESC
 		LIMIT $%d OFFSET $%d`,
@@ -110,10 +114,14 @@ func (s *Service) list(page, perPage int, search string) ([]Contact, int, error)
 	contactIDs := []string{}
 	for rows.Next() {
 		var c Contact
+		var dob string
 		if err := rows.Scan(
-			&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+			&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &dob, &c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
+		}
+		if dob != "" {
+			c.DateOfBirth = &dob
 		}
 		contacts = append(contacts, c)
 		contactIDs = append(contactIDs, c.ID)
@@ -426,16 +434,20 @@ func (s *Service) attachOpenLeads(matches []ResolveMatch) error {
 
 func (s *Service) get(id string) (*Contact, error) {
 	var c Contact
+	var dob string
 	err := s.db.QueryRow(
-		`SELECT id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, created_at, updated_at
+		`SELECT id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, COALESCE(to_char(date_of_birth, 'YYYY-MM-DD'), ''), created_at, updated_at
 		FROM contacts
 		WHERE id = $1 AND deleted_at IS NULL`,
 		id,
 	).Scan(
-		&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &dob, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get contact: %w", err)
+	}
+	if dob != "" {
+		c.DateOfBirth = &dob
 	}
 	populated, err := s.populateTagsAndStatus([]Contact{c}, []string{c.ID})
 	if err != nil {
@@ -620,6 +632,23 @@ func validateCollectionLimits(phones []PhoneValue, emails []EmailValue, tagIDs [
 	return nil
 }
 
+// validateDateOfBirth accepts an absent value, an empty string (which clears
+// the field on update), or a real calendar date in YYYY-MM-DD form that is not
+// in the future. Years below 100 are rejected: no real birth year is that low,
+// and JavaScript's Date remaps two-digit years (0095 → 1995), so the client
+// cannot render them. The birth date is the truth for computed age; the
+// approximate integer age stays as the fallback.
+func validateDateOfBirth(value *string) error {
+	if value == nil || *value == "" {
+		return nil
+	}
+	d, err := time.ParseInLocation(time.DateOnly, *value, time.Local)
+	if err != nil || d.Year() < 100 || d.After(time.Now()) {
+		return ErrInvalidDateOfBirth
+	}
+	return nil
+}
+
 // insertContact inserts a contact and its child rows (phones, emails, tags)
 // in one transaction, then returns the fully populated contact.
 func (s *Service) insertContact(req CreateRequest) (*Contact, error) {
@@ -645,17 +674,28 @@ func (s *Service) insertContact(req CreateRequest) (*Contact, error) {
 	if len(req.Phones) == 0 && len(req.Emails) == 0 {
 		return nil, ErrNoContactDetail
 	}
+	if err := validateDateOfBirth(req.DateOfBirth); err != nil {
+		return nil, err
+	}
+	var dob any
+	if req.DateOfBirth != nil && *req.DateOfBirth != "" {
+		dob = *req.DateOfBirth
+	}
 
+	var dobOut string
 	err = tx.QueryRow(
-		`INSERT INTO contacts (name, nickname, location, age, status_id)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, created_at, updated_at`,
-		req.Name, util.NullStr(req.Nickname), util.NullStr(req.Location), req.Age, statusID,
+		`INSERT INTO contacts (name, nickname, location, age, date_of_birth, status_id)
+		VALUES ($1, $2, $3, $4, $5::date, $6)
+		RETURNING id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, COALESCE(to_char(date_of_birth, 'YYYY-MM-DD'), ''), created_at, updated_at`,
+		req.Name, util.NullStr(req.Nickname), util.NullStr(req.Location), req.Age, dob, statusID,
 	).Scan(
-		&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &dobOut, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create contact: %w", err)
+	}
+	if dobOut != "" {
+		c.DateOfBirth = &dobOut
 	}
 
 	if err := syncPhonesEmailsTx(tx, c.ID, req.Phones, req.Emails); err != nil {
@@ -823,32 +863,44 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		}
 	}
 
+	if err := validateDateOfBirth(req.DateOfBirth); err != nil {
+		return nil, err
+	}
+
 	var c Contact
+	var dobOut string
 	err = tx.QueryRow(
 		`UPDATE contacts SET
 			name = COALESCE(NULLIF($2, ''), name),
 			nickname = COALESCE($3, nickname),
 			location = COALESCE($4, location),
 			age = COALESCE($5, age),
+			date_of_birth = CASE WHEN $7::text IS NOT NULL THEN NULLIF($7::text, '')::date ELSE date_of_birth END,
 			status_id = CASE WHEN $6::text IS NOT NULL THEN NULLIF($6::text, '')::uuid ELSE status_id END,
 			updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, created_at, updated_at`,
+		RETURNING id, name, COALESCE(nickname, ''), COALESCE(location, ''), age, COALESCE(to_char(date_of_birth, 'YYYY-MM-DD'), ''), created_at, updated_at`,
 		id,
 		req.Name,
 		req.Nickname,
 		req.Location,
 		req.Age,
 		req.StatusID,
+		req.DateOfBirth,
 	).Scan(
-		&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &c.CreatedAt, &c.UpdatedAt,
+		&c.ID, &c.Name, &c.Nickname, &c.Location, &c.Age, &dobOut, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update contact: %w", err)
 	}
+	if dobOut != "" {
+		c.DateOfBirth = &dobOut
+	}
 
 	// Sync the phone/email child rows when the client sends a list. Each type is
-	// replaced only when sent, so a partial update never wipes the other.
+	// replaced only when sent, so a partial update never wipes the other. The
+	// final-state check below is the authority: clearing a type is valid while
+	// the other still holds a value.
 	if req.Phones != nil || req.Emails != nil {
 		var phones []PhoneValue
 		if req.Phones != nil {
@@ -857,9 +909,6 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		var emails []EmailValue
 		if req.Emails != nil {
 			emails = *req.Emails
-		}
-		if len(phones) == 0 && len(emails) == 0 {
-			return nil, ErrNoContactDetail
 		}
 		if err := syncPhonesEmailsTx(tx, id, phones, emails); err != nil {
 			return nil, fmt.Errorf("update contact: sync phones and emails: %w", err)
@@ -948,11 +997,11 @@ func diffFieldLabels(changes string) []string {
 	}
 	labels := map[string]string{
 		"name": "name", "email": "email", "phone": "phone",
-		"location": "location", "age": "age", "tags": "tags",
+		"location": "location", "age": "age", "date_of_birth": "date of birth", "tags": "tags",
 		"status": "status", "phones": "phones", "emails": "emails",
 	}
 	out := []string{}
-	for _, key := range []string{"name", "nickname", "email", "phone", "phones", "emails", "location", "age", "tags", "status"} {
+	for _, key := range []string{"name", "nickname", "email", "phone", "phones", "emails", "location", "age", "date_of_birth", "tags", "status"} {
 		if _, ok := diff[key]; ok {
 			if label, ok := labels[key]; ok {
 				out = append(out, label)
@@ -1079,6 +1128,17 @@ func diffContact(old, new *Contact) string {
 	}
 	if (old.Age == nil) != (new.Age == nil) || (old.Age != nil && *old.Age != *new.Age) {
 		diff["age"] = map[string]any{"old": old.Age, "new": new.Age}
+	}
+
+	oldDob, newDob := "", ""
+	if old.DateOfBirth != nil {
+		oldDob = *old.DateOfBirth
+	}
+	if new.DateOfBirth != nil {
+		newDob = *new.DateOfBirth
+	}
+	if oldDob != newDob {
+		diff["date_of_birth"] = map[string]string{"old": oldDob, "new": newDob}
 	}
 
 	oldTags := tagsToSet(old.Tags)

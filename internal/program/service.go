@@ -21,16 +21,6 @@ func NewService(db *sql.DB) *Service {
 	return &Service{db: db}
 }
 
-// nameForAudit resolves a program name for an audit description; an unknown
-// id falls back to the id so the row still names something.
-func (s *Service) nameForAudit(id string) string {
-	var name string
-	if err := s.db.QueryRow(`SELECT name FROM programs WHERE id = $1`, id).Scan(&name); err != nil || name == "" {
-		return id
-	}
-	return name
-}
-
 const selectColumns = `id, name, COALESCE(description, ''), price, (deleted_at IS NOT NULL), created_at, updated_at`
 
 func (s *Service) scanProgram(row interface{ Scan(...any) error }) (*Program, error) {
@@ -129,29 +119,48 @@ func (s *Service) update(id string, req UpdateRequest) (*Program, error) {
 }
 
 // archive soft-deletes a program so historical leads keep their reference;
-// restore clears deleted_at again.
-func (s *Service) archive(id string) error {
-	res, err := s.db.Exec(`UPDATE programs SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
+// restore clears deleted_at again. Both return the program name from the
+// mutation itself so the audit row cannot race a concurrent rename; an empty
+// name falls back to the id.
+func (s *Service) archive(id string) (string, error) {
+	var name string
+	err := s.db.QueryRow(
+		`UPDATE programs SET deleted_at = now(), updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING name`,
+		id,
+	).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
 	if err != nil {
-		return fmt.Errorf("archive program: %w", err)
+		return "", fmt.Errorf("archive program: %w", err)
 	}
-	if rows, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("archive program: rows affected: %w", err)
-	} else if rows == 0 {
-		return ErrNotFound
+	if name == "" {
+		name = id
 	}
-	return nil
+	return name, nil
 }
 
-func (s *Service) restore(id string) error {
-	res, err := s.db.Exec(`UPDATE programs SET deleted_at = NULL, updated_at = now() WHERE id = $1`, id)
+// restore clears the archive flag and returns the program name. Restoring an
+// already-live program stays a no-op success, matching the previous
+// pre-read-then-update behavior.
+func (s *Service) restore(id string) (string, error) {
+	var name string
+	err := s.db.QueryRow(
+		`UPDATE programs SET deleted_at = NULL, updated_at = now()
+		WHERE id = $1
+		RETURNING name`,
+		id,
+	).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
 	if err != nil {
-		return fmt.Errorf("restore program: %w", err)
+		return "", fmt.Errorf("restore program: %w", err)
 	}
-	if rows, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("restore program: rows affected: %w", err)
-	} else if rows == 0 {
-		return ErrNotFound
+	if name == "" {
+		name = id
 	}
-	return nil
+	return name, nil
 }

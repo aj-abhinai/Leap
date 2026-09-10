@@ -111,3 +111,33 @@ func TestDefaultCountryCodeHandlerRejectsMalformed(t *testing.T) {
 		t.Fatalf("PUT malformed = %d, want 400", rr.Code)
 	}
 }
+
+// An absent or null minutes value is a malformed client, not an instruction to
+// store zero; an explicit zero stays valid (no lead time).
+func TestSetNudgeLeadMinutesRequiresExplicitValue(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	r := chi.NewRouter()
+	r.Put("/api/settings/nudge-lead-minutes", h.SetNudgeLeadMinutes)
+
+	for _, body := range []string{`{}`, `{"minutes":null}`} {
+		req := httptest.NewRequest(http.MethodPut, "/api/settings/nudge-lead-minutes", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("PUT %s = %d, want 400", body, rr.Code)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/nudge-lead-minutes", strings.NewReader(`{"minutes":0}`))
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT zero = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	minutes, err := NewService(db).GetNudgeLeadMinutes()
+	if err != nil || minutes != 0 {
+		t.Errorf("stored minutes = (%d, %v), want (0, nil)", minutes, err)
+	}
+}

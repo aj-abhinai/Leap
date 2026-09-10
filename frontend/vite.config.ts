@@ -10,7 +10,7 @@ import { resolve } from 'path'
 // recomputes the hash from the actual inline theme script at build time and
 // fails the build if it ever drifts from the constant the backend allows —
 // a silent mismatch would block dark-mode theming in production.
-const themeScriptHash = 'sha256-v4bJLYBuBypQmhQj/loKmpY39P8zNvzk0lA3wiG8QbE='
+const themeScriptHash = 'sha256-LKh/DSvln4WNdab5WhVzQKPz/H9Q5TcG4NvqSUq1Ec8='
 
 function cspHashGuard(): Plugin {
   let htmlPath = ''

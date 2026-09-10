@@ -79,6 +79,39 @@ func migrateScratch(t *testing.T, dsn string, version uint) {
 	}
 }
 
+// A rollback must remove every table its up migration created: 000004 creates
+// the settings table, so a down-then-up round trip has to drop it and recreate
+// it cleanly.
+func TestMigration004RollbackOwnsSettings(t *testing.T) {
+	db, dsn := scratchDB(t)
+	migrateScratch(t, dsn, 4)
+
+	var exists bool
+	if err := db.QueryRow(`SELECT to_regclass('settings') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatalf("check settings after migrate to 4: %v", err)
+	}
+	if !exists {
+		t.Fatal("settings table missing after migrating to version 4")
+	}
+
+	migrateScratch(t, dsn, 3)
+	if err := db.QueryRow(`SELECT to_regclass('settings') IS NULL`).Scan(&exists); err != nil {
+		t.Fatalf("check settings after migrate to 3: %v", err)
+	}
+	if !exists {
+		t.Fatal("settings table still present after rolling back to version 3")
+	}
+
+	// Re-applying the migration must succeed now that the rollback removed it.
+	migrateScratch(t, dsn, 4)
+	if err := db.QueryRow(`SELECT to_regclass('settings') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatalf("check settings after re-migrate to 4: %v", err)
+	}
+	if !exists {
+		t.Fatal("settings table missing after re-migrating to version 4")
+	}
+}
+
 func TestUpgradeCleansInvalidLegacyLinks(t *testing.T) {
 	db, dsn := scratchDB(t)
 	migrateScratch(t, dsn, 5)
@@ -229,5 +262,64 @@ func TestDownMigrationRestoresSetNullSemantics(t *testing.T) {
 	}
 	if hasStatusType {
 		t.Error("status_type generated column survived the downgrade")
+	}
+}
+
+// 000007 replaces the is_closing flag with outcome; the down path must
+// reconstruct the flag from the authoritative outcome so the old schema keeps
+// the same meaning.
+func TestStageOutcomeOnlyMigrationRoundTrip(t *testing.T) {
+	db, dsn := scratchDB(t)
+	migrateScratch(t, dsn, 7)
+
+	var hasClosing bool
+	if err := db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name = 'lead_stages' AND column_name = 'is_closing')`,
+	).Scan(&hasClosing); err != nil {
+		t.Fatalf("check is_closing column: %v", err)
+	}
+	if hasClosing {
+		t.Fatal("is_closing still present after the outcome-only migration")
+	}
+
+	var pipelineID, lostStageID, wonStageID, openStageID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('P') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	for _, st := range []struct {
+		name    string
+		outcome string
+		target  *string
+	}{
+		{"Lost", "lost", &lostStageID},
+		{"Won", "won", &wonStageID},
+		{"Open", "open", &openStageID},
+	} {
+		if err := db.QueryRow(
+			`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, $2, 0, $3) RETURNING id`,
+			pipelineID, st.name, st.outcome,
+		).Scan(st.target); err != nil {
+			t.Fatalf("seed stage %s: %v", st.name, err)
+		}
+	}
+
+	migrateScratch(t, dsn, 6)
+
+	for _, tc := range []struct {
+		id       string
+		closing  bool
+		wantName string
+	}{
+		{lostStageID, true, "Lost"},
+		{wonStageID, true, "Won"},
+		{openStageID, false, "Open"},
+	} {
+		var closing bool
+		if err := db.QueryRow(`SELECT is_closing FROM lead_stages WHERE id = $1`, tc.id).Scan(&closing); err != nil {
+			t.Fatalf("load stage %s: %v", tc.wantName, err)
+		}
+		if closing != tc.closing {
+			t.Errorf("stage %s is_closing = %v, want %v", tc.wantName, closing, tc.closing)
+		}
 	}
 }

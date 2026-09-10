@@ -194,6 +194,115 @@ func TestSnoozeReminderBoundsIntegration(t *testing.T) {
 	}
 }
 
+// A snooze anchors on COALESCE(remind_at, scheduled_at) and shifts the
+// schedule by the same delta, so a schedule-only task moves out of overdue
+// instead of keeping its stale start, and a ranged task keeps its window.
+func TestSnoozeReminderShiftsScheduleFromSingleAnchorIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	// The recipient predicate compares against a uuid column, so the actor
+	// must be a real user id even for genuinely unowned work.
+	actorID := seedTestUser(t, db, "anchor@example.com")
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	// Schedule-only point task in the past: the schedule is the anchor.
+	pointStart := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
+	var pointID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type, scheduled_at)
+		VALUES ($1, $2, 'call', $3) RETURNING id`,
+		created.ID, stageID, pointStart,
+	).Scan(&pointID); err != nil {
+		t.Fatalf("seed point task: %v", err)
+	}
+	pointNew := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	if snoozed, err := svc.snoozeReminder(created.ID, pointID, actorID, pointNew); err != nil || !snoozed {
+		t.Fatalf("snooze point task = %v, %v; want true, nil", snoozed, err)
+	}
+	var pointStartOut time.Time
+	var pointRemind sql.NullTime
+	if err := db.QueryRow(
+		`SELECT scheduled_at, remind_at FROM lead_activities WHERE id = $1`, pointID,
+	).Scan(&pointStartOut, &pointRemind); err != nil {
+		t.Fatalf("load point task: %v", err)
+	}
+	if !pointStartOut.Equal(pointNew) {
+		t.Errorf("schedule-only snooze scheduled_at = %v, want %v", pointStartOut, pointNew)
+	}
+	if !pointRemind.Valid || !pointRemind.Time.Equal(pointNew) {
+		t.Errorf("schedule-only snooze remind_at = %v, want %v", pointRemind, pointNew)
+	}
+
+	// Range task with no reminder: both ends shift by the same delta.
+	rangeStart := time.Now().Add(-4 * time.Hour).UTC().Truncate(time.Second)
+	rangeEnd := rangeStart.Add(2 * time.Hour)
+	var rangeID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type, scheduled_at, scheduled_end_at)
+		VALUES ($1, $2, 'call', $3, $4) RETURNING id`,
+		created.ID, stageID, rangeStart, rangeEnd,
+	).Scan(&rangeID); err != nil {
+		t.Fatalf("seed range task: %v", err)
+	}
+	rangeNew := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	if snoozed, err := svc.snoozeReminder(created.ID, rangeID, actorID, rangeNew); err != nil || !snoozed {
+		t.Fatalf("snooze range task = %v, %v; want true, nil", snoozed, err)
+	}
+	var rangeNewStart, rangeNewEnd time.Time
+	if err := db.QueryRow(
+		`SELECT scheduled_at, scheduled_end_at FROM lead_activities WHERE id = $1`, rangeID,
+	).Scan(&rangeNewStart, &rangeNewEnd); err != nil {
+		t.Fatalf("load range task: %v", err)
+	}
+	if !rangeNewStart.Equal(rangeNew) {
+		t.Errorf("range snooze start = %v, want %v", rangeNewStart, rangeNew)
+	}
+	if got := rangeNewEnd.Sub(rangeNewStart); got != 2*time.Hour {
+		t.Errorf("range snooze window = %v, want 2h", got)
+	}
+
+	// Task with an explicit reminder: the reminder is the anchor, so the
+	// schedule shifts by the same delta as the reminder.
+	bothStart := time.Now().Add(3 * time.Hour).UTC().Truncate(time.Second)
+	bothRemind := bothStart.Add(-10 * time.Minute)
+	var bothID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type, scheduled_at, remind_at)
+		VALUES ($1, $2, 'call', $3, $4) RETURNING id`,
+		created.ID, stageID, bothStart, bothRemind,
+	).Scan(&bothID); err != nil {
+		t.Fatalf("seed anchored task: %v", err)
+	}
+	bothNew := bothStart.Add(5 * time.Hour)
+	if snoozed, err := svc.snoozeReminder(created.ID, bothID, actorID, bothNew); err != nil || !snoozed {
+		t.Fatalf("snooze anchored task = %v, %v; want true, nil", snoozed, err)
+	}
+	var bothStartOut time.Time
+	var bothRemindOut time.Time
+	if err := db.QueryRow(
+		`SELECT scheduled_at, remind_at FROM lead_activities WHERE id = $1`, bothID,
+	).Scan(&bothStartOut, &bothRemindOut); err != nil {
+		t.Fatalf("load anchored task: %v", err)
+	}
+	wantStart := bothStart.Add(bothNew.Sub(bothRemind))
+	if !bothStartOut.Equal(wantStart) {
+		t.Errorf("anchored snooze scheduled_at = %v, want %v", bothStartOut, wantStart)
+	}
+	if !bothRemindOut.Equal(bothNew) {
+		t.Errorf("anchored snooze remind_at = %v, want %v", bothRemindOut, bothNew)
+	}
+}
+
 // A user may dismiss or snooze only the reminders they are responsible for:
 // the lead's assignee, the task's creator on an unassigned lead, or genuinely
 // unowned work (both null). An unrelated user gets a clean (false, nil) — the
@@ -880,7 +989,7 @@ func seedClosingStage(t *testing.T, db *sql.DB, pipelineID string) string {
 	t.Helper()
 	var id string
 	if err := db.QueryRow(
-		`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Closed', 99, true, 'lost') RETURNING id`,
+		`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Closed', 99, 'lost') RETURNING id`,
 		pipelineID,
 	).Scan(&id); err != nil {
 		t.Fatalf("seed closing stage: %v", err)

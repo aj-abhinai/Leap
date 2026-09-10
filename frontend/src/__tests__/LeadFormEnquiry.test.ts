@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import LeadForm from '@/components/leads/LeadForm.vue'
 import { apiClient } from '@/composables/useApi'
+import type { Stage } from '@/api/pipelines'
 import type { OpenLeadRef } from '@/api/leads'
 
 vi.mock('@/composables/useApi', () => ({
@@ -54,9 +55,9 @@ const openLead: OpenLeadRef = {
   pipeline_name: 'Test Pipeline',
 }
 
-function makeStages() {
+function makeStages(): Stage[] {
   return [
-    { id: 's-open', pipeline_id: 'p1', name: 'New', order: 0, is_closing: false },
+    { id: 's-open', pipeline_id: 'p1', name: 'New', order: 0, is_closing: false, outcome: 'open' },
   ]
 }
 

@@ -35,6 +35,7 @@ import ContactsPagination from '@/components/contacts/ContactsPagination.vue'
 import ContactDeleteDialog from '@/components/contacts/ContactDeleteDialog.vue'
 import ErrorAlert from '@/components/ErrorAlert.vue'
 import { getAvatarColor, getInitials } from '@/utils/avatar'
+import { displayAge } from '@/utils/age'
 import { errorMessage } from '@/utils/errors'
 
 const store = useContactsStore()
@@ -257,7 +258,7 @@ async function handleDelete() {
                 </div>
               </TableCell>
               <TableCell class="text-muted-foreground">{{ c.location || '–' }}</TableCell>
-              <TableCell class="text-muted-foreground">{{ c.age || '–' }}</TableCell>
+              <TableCell class="text-muted-foreground">{{ displayAge(c.date_of_birth, c.age) ?? '–' }}</TableCell>
               <TableCell>
                 <div class="flex gap-1 text-muted-foreground">
                   <Button

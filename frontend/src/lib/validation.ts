@@ -21,6 +21,26 @@ export const profileSchema = z.object({
   phone: z.string().optional(),
 })
 
+// Date of birth is date-only (YYYY-MM-DD): a real calendar date, never in the
+// future. An empty string clears it on update; the approximate integer age
+// stays as the fallback.
+function localToday(): string {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+const dateOfBirthSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+  .refine((v) => {
+    const [y, m, d] = v.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
+  }, 'Enter a real date')
+  .refine((v) => v <= localToday(), 'Date of birth cannot be in the future')
+
 export const contactSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   nickname: z.string().optional(),
@@ -28,6 +48,7 @@ export const contactSchema = z.object({
   phone: z.string().optional(),
   location: z.string().optional(),
   age: z.number().int().positive().optional(),
+  date_of_birth: dateOfBirthSchema.optional().or(z.literal('')),
 }).refine((d) => d.phone || d.email, {
   message: 'A phone or email is required',
   path: ['phone'],

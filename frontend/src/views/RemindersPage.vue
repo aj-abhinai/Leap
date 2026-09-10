@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRemindersStore, type Reminder } from '@/stores/reminders'
-import { useAuthStore } from '@/stores/auth'
 import ReminderCard from '@/components/leads/ReminderCard.vue'
 import PageState from '@/components/PageState.vue'
 import { BellOff } from '@lucide/vue'
@@ -11,23 +10,16 @@ import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
 
 const store = useRemindersStore()
-const auth = useAuthStore()
-const myOnly = shallowRef(false)
 
 onMounted(() => store.fetchReminders())
 
-const visible = computed(() => {
-  if (!myOnly.value || !auth.user?.id) return store.reminders
-  return store.reminders.filter((r) => r.user_id === auth.user!.id)
-})
-
-// Buckets derive from the shared status derivation: overdue = past the due
-// boundary (task end, else start, else remind); upcoming = open with a future
-// due time; dismissed = reminded but still open. Done and cancelled tasks
-// never reach this feed.
-const overdue = computed(() => visible.value.filter((r) => statusLabel(r) === 'Overdue'))
-const upcoming = computed(() => visible.value.filter((r) => statusLabel(r) === 'Open'))
-const dismissed = computed(() => visible.value.filter((r) => statusLabel(r) === 'Reminded'))
+// /api/reminders is already the current user's recipient queue (lead assignee
+// → task creator on unassigned leads → everyone on genuinely unowned work), so
+// the page renders it as-is; filtering by task creator here would hide work the
+// user is responsible for.
+const overdue = computed(() => store.reminders.filter((r) => statusLabel(r) === 'Overdue'))
+const upcoming = computed(() => store.reminders.filter((r) => statusLabel(r) === 'Open'))
+const dismissed = computed(() => store.reminders.filter((r) => statusLabel(r) === 'Reminded'))
 
 // snooze pushes the reminder forward by minutes; failures surface as a toast
 // and leave the card in place.
@@ -61,21 +53,13 @@ function hasAny(list: unknown[]): boolean {
     <div class="mb-4 flex flex-col">
       <h1 class="text-2xl font-semibold tracking-tight">Reminders</h1>
       <p v-if="!store.loading && store.reminders.length" class="mt-0.5 text-sm text-muted-foreground">
-        <span class="tabular-nums">{{ overdue.length + upcoming.length }}</span>
-        {{ myOnly ? 'of my' : '' }} pending
+        <span class="tabular-nums">{{ overdue.length + upcoming.length }}</span> pending
       </p>
-    </div>
-
-    <div class="mb-4 flex items-center gap-3">
-      <label class="flex items-center gap-2 text-sm text-muted-foreground">
-        <input v-model="myOnly" type="checkbox" class="size-4" />
-        My reminders only
-      </label>
     </div>
 
     <PageState
       :loading="store.loading"
-      :empty="visible.length === 0"
+      :empty="store.reminders.length === 0"
       empty-title="No pending reminders"
       empty-hint="Create tasks with reminders from the leads kanban"
       :skeleton-count="5"

@@ -29,7 +29,7 @@ func TestUpdateBehaviorAndGroup(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	created, err := svc.create(CreateRequest{Name: "No Reply", Type: "status", GroupName: "Not Connected", SortOrder: 1})
+	created, err := svc.create(CreateRequest{Name: "No Reply", Type: "quick_reply", GroupName: "Not Connected", SortOrder: 1})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -53,6 +53,50 @@ func TestUpdateBehaviorAndGroup(t *testing.T) {
 	bogus := "side_effect"
 	if _, err := svc.update(created.ID, UpdateRequest{Behavior: &bogus}); !errors.Is(err, ErrInvalidBehavior) {
 		t.Errorf("update with bogus behavior = %v, want ErrInvalidBehavior", err)
+	}
+}
+
+// group_name and behavior belong to quick replies only: every other catalog
+// kind stores the neutral defaults, and the database constraint refuses a
+// non-quick-reply row that carries quick-reply metadata.
+func TestNonQuickReplyMetadataIsCanonicalized(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	status, err := svc.create(CreateRequest{Name: "New", Type: "status", GroupName: "Not Connected", Behavior: "next"})
+	if err != nil {
+		t.Fatalf("create status: %v", err)
+	}
+	if status.GroupName != "" || status.Behavior != "log" {
+		t.Errorf("status metadata = (%q, %q), want empty and log", status.GroupName, status.Behavior)
+	}
+
+	group := "Heard Details"
+	behavior := "close_lost"
+	updated, err := svc.update(status.ID, UpdateRequest{GroupName: &group, Behavior: &behavior})
+	if err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+	if updated.GroupName != "" || updated.Behavior != "log" {
+		t.Errorf("updated status metadata = (%q, %q), want empty and log", updated.GroupName, updated.Behavior)
+	}
+
+	// A quick reply keeps its own group and behavior.
+	reply, err := svc.create(CreateRequest{Name: "Interested", Type: "quick_reply", GroupName: "Connected", Behavior: "next"})
+	if err != nil {
+		t.Fatalf("create quick reply: %v", err)
+	}
+	if reply.GroupName != "Connected" || reply.Behavior != "next" {
+		t.Errorf("quick reply metadata = (%q, %q), want Connected and next", reply.GroupName, reply.Behavior)
+	}
+
+	// The constraint backstops the service: a direct bad row is refused, while
+	// the same metadata on a quick reply is accepted.
+	if _, err := db.Exec(`UPDATE tags SET group_name = 'X' WHERE id = $1`, status.ID); err == nil {
+		t.Error("constraint allowed group_name on a status tag")
+	}
+	if _, err := db.Exec(`UPDATE tags SET behavior = 'close_lost' WHERE id = $1`, status.ID); err == nil {
+		t.Error("constraint allowed behavior on a status tag")
 	}
 }
 

@@ -12,14 +12,16 @@ type Pipeline struct {
 }
 
 type Stage struct {
-	ID         string    `json:"id"`
-	PipelineID string    `json:"pipeline_id"`
-	Name       string    `json:"name"`
-	Order      int       `json:"order"`
-	Color      string    `json:"color,omitempty"`
-	IsClosing  bool      `json:"is_closing"`
+	ID         string `json:"id"`
+	PipelineID string `json:"pipeline_id"`
+	Name       string `json:"name"`
+	Order      int    `json:"order"`
+	Color      string `json:"color,omitempty"`
+	// IsClosing is derived from Outcome (outcome != 'open') for response
+	// consumers; the stored source of truth is Outcome alone.
+	IsClosing bool `json:"is_closing"`
 	// Outcome declares what reaching the stage means for a lead: 'open'
-	// (in play), 'won', or 'lost'. Closing stages must be won or lost.
+	// (in play), 'won', or 'lost'. Closing stages are won or lost.
 	Outcome   string    `json:"outcome"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -36,17 +38,15 @@ type UpdatePipelineRequest struct {
 }
 
 type CreateStageRequest struct {
-	Name      string `json:"name"`
-	Order     int    `json:"order"`
-	Color     string `json:"color,omitempty"`
-	IsClosing bool   `json:"is_closing,omitempty"`
-	Outcome   string `json:"outcome,omitempty"`
+	Name    string `json:"name"`
+	Order   int    `json:"order"`
+	Color   string `json:"color,omitempty"`
+	Outcome string `json:"outcome,omitempty"`
 }
 
 type UpdateStageRequest struct {
-	Name      *string `json:"name,omitempty"`
-	Order     *int    `json:"order,omitempty"`
-	Color     *string `json:"color,omitempty"`
-	IsClosing *bool   `json:"is_closing,omitempty"`
-	Outcome   *string `json:"outcome,omitempty"`
+	Name    *string `json:"name,omitempty"`
+	Order   *int    `json:"order,omitempty"`
+	Color   *string `json:"color,omitempty"`
+	Outcome *string `json:"outcome,omitempty"`
 }

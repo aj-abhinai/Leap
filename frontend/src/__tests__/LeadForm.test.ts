@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import LeadForm from '@/components/leads/LeadForm.vue'
+import type { Stage } from '@/api/pipelines'
 import { apiClient } from '@/composables/useApi'
 
 vi.mock('@/composables/useApi', () => ({
@@ -40,11 +41,11 @@ vi.mock('@/components/ui/select', () => ({
 
 const getMock = vi.mocked(apiClient.get)
 
-function makeStages() {
+function makeStages(): Stage[] {
   return [
-    { id: 's-open', pipeline_id: 'p1', name: 'New', order: 0, is_closing: false },
-    { id: 's-closed', pipeline_id: 'p1', name: 'Closed Lost', order: 1, is_closing: true },
-    { id: 's-won', pipeline_id: 'p1', name: 'Converted', order: 2, is_closing: true },
+    { id: 's-open', pipeline_id: 'p1', name: 'New', order: 0, is_closing: false, outcome: 'open' },
+    { id: 's-closed', pipeline_id: 'p1', name: 'Closed Lost', order: 1, is_closing: true, outcome: 'lost' },
+    { id: 's-won', pipeline_id: 'p1', name: 'Converted', order: 2, is_closing: true, outcome: 'won' },
   ]
 }
 

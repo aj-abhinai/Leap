@@ -1,10 +1,10 @@
 ﻿<script setup lang="ts">
 import { onMounted, ref, shallowRef } from 'vue'
+import { storeToRefs } from 'pinia'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -17,13 +17,18 @@ import { Badge } from '@/components/ui/badge'
 import { ArrowDown, ArrowUp, Check, Layers, Plus, Trash2, Pencil, X } from '@lucide/vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { errorMessage } from '@/utils/errors'
-import { listPipelines, createPipeline as apiCreatePipeline, updatePipeline as apiUpdatePipeline, deletePipeline as apiDeletePipeline, addStage, updateStage, deleteStage as apiDeleteStage, type Stage, type Pipeline } from '@/api/pipelines'
+import { usePipelineStore } from '@/stores/pipeline'
+import { createPipeline as apiCreatePipeline, updatePipeline as apiUpdatePipeline, deletePipeline as apiDeletePipeline, addStage, updateStage, deleteStage as apiDeleteStage, type Stage, type Pipeline } from '@/api/pipelines'
 
 // readonly renders pipelines and stages without any mutation control: the
 // read-only domain-tab view for users without settings:manage.
 defineProps<{ readonly?: boolean }>()
 
-const pipelines = shallowRef<Pipeline[]>([])
+// The shared store is the single frontend pipeline catalog: board and lead
+// consumers read it, so settings mutations refresh it instead of a private
+// copy that would leave other views stale.
+const pipelineStore = usePipelineStore()
+const { pipelines } = storeToRefs(pipelineStore)
 const newPipelineName = shallowRef('')
 const newPipelineDesc = shallowRef('')
 const newPipelineError = shallowRef('')
@@ -40,17 +45,11 @@ const savingPipelineEdit = shallowRef(false)
 const deletingPipeline = shallowRef<Pipeline | null>(null)
 const deletingStage = shallowRef<{ id: string; name: string } | null>(null)
 
-// Remember the last won/lost choice per stage: unchecking "Closing" forces the
-// stage to 'open' server-side, so without this the win/loss would be lost and
-// re-checking would silently default to 'lost'.
-const rememberedOutcome = shallowRef<Record<string, string>>({})
-
 onMounted(() => loadPipelines())
 
 async function loadPipelines() {
   try {
-    const res = await listPipelines()
-    pipelines.value = res.data
+    await pipelineStore.fetchPipelines()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load pipelines'))
   }
@@ -190,36 +189,16 @@ async function reorderStage(stageId: string, order: number) {
   }
 }
 
-// Closing stages resolve the deal (won/lost) and cancel open tasks; non-closing
-// stages stay 'open'. Outcome is chosen explicitly so close-lost never has to
-// guess by stage name.
-async function setClosing(stage: Stage, isClosing: boolean) {
-  const current = stage.outcome === 'won' || stage.outcome === 'lost' ? stage.outcome : ''
-  try {
-    if (isClosing) {
-      const outcome = rememberedOutcome.value[stage.id] || current || 'lost'
-      delete rememberedOutcome.value[stage.id]
-      await updateStage(stage.id, { is_closing: true, outcome })
-      toast.success('Stage marked as closing')
-    } else {
-      if (current) rememberedOutcome.value[stage.id] = current
-      await updateStage(stage.id, { is_closing: false, outcome: 'open' })
-      toast.success('Stage is now open')
-    }
-    loadPipelines()
-  } catch (e) {
-    toast.error(errorMessage(e, 'Failed to update stage'))
-  }
-}
-
+// A stage's outcome is the single source of truth: 'open' keeps the lead in
+// play, 'won'/'lost' make the stage closing (which cancels open tasks). The
+// outcome is chosen explicitly so close-lost never guesses by stage name.
 async function setStageOutcome(stage: Stage, outcome: string) {
-  delete rememberedOutcome.value[stage.id]
   try {
     await updateStage(stage.id, { outcome })
-    toast.success('Stage outcome updated')
+    toast.success(outcome === 'open' ? 'Stage is now open' : `Stage marked as ${outcome}`)
     loadPipelines()
   } catch (e) {
-    toast.error(errorMessage(e, 'Failed to update outcome'))
+    toast.error(errorMessage(e, 'Failed to update stage outcome'))
   }
 }
 </script>
@@ -307,28 +286,22 @@ async function setStageOutcome(stage: Stage, outcome: string) {
             <Badge variant="secondary" class="text-xs">
               {{ s.name }}
             </Badge>
-            <label v-if="!readonly" class="flex cursor-pointer items-center gap-1 text-xs text-muted-foreground" :title="`Mark ${s.name} as a closing stage`">
-              <Checkbox
-                :model-value="!!s.is_closing"
-                class="size-3.5"
-                :aria-label="`Mark ${s.name} as closing`"
-                @update:model-value="(v) => setClosing(s, v === true)"
-              />
-              Closing
-            </label>
-            <Select
-              v-if="!readonly && s.is_closing"
-              :model-value="s.outcome === 'won' ? 'won' : 'lost'"
-              @update:model-value="(v) => setStageOutcome(s, String(v ?? 'lost'))"
-            >
-              <SelectTrigger class="h-7 w-24 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="lost">Lost</SelectItem>
-                <SelectItem value="won">Won</SelectItem>
-              </SelectContent>
-            </Select>
+            <template v-if="!readonly">
+              <span class="text-xs text-muted-foreground">Outcome</span>
+              <Select
+                :model-value="s.outcome ?? 'open'"
+                @update:model-value="(v) => setStageOutcome(s, String(v ?? 'open'))"
+              >
+                <SelectTrigger class="h-7 w-28 text-xs" :aria-label="`Outcome for ${s.name}`">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="open">Open</SelectItem>
+                  <SelectItem value="won">Won</SelectItem>
+                  <SelectItem value="lost">Lost</SelectItem>
+                </SelectContent>
+              </Select>
+            </template>
             <div v-if="!readonly" class="ml-auto flex items-center gap-1">
               <template v-if="editingStageId === s.id">
                 <Input

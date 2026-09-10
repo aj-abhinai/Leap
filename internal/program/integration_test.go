@@ -35,7 +35,7 @@ func TestProgramCRUDIntegration(t *testing.T) {
 		t.Errorf("price = %v, want 28000", updated.Price)
 	}
 
-	if err := svc.archive(created.ID); err != nil {
+	if _, err := svc.archive(created.ID); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 	active, err = svc.listActive()
@@ -54,7 +54,7 @@ func TestProgramCRUDIntegration(t *testing.T) {
 		t.Errorf("all = %+v, want 1 archived program", all)
 	}
 
-	if err := svc.restore(created.ID); err != nil {
+	if _, err := svc.restore(created.ID); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 	active, err = svc.listActive()
@@ -82,7 +82,41 @@ func TestProgramArchiveMissingReturnsNotFoundIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
-	if err := svc.archive("00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.archive("00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// Archive and restore return the program name from the mutation itself so the
+// audit row cannot race a rename; repeated archive 404s and repeated restore
+// stays a successful no-op.
+func TestProgramArchiveRestoreReturnNameIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{Name: "Coaching", Price: 25000})
+	if err != nil {
+		t.Fatalf("create program: %v", err)
+	}
+	name, err := svc.archive(created.ID)
+	if err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if name != "Coaching" {
+		t.Errorf("archived name = %q, want Coaching", name)
+	}
+	if _, err := svc.archive(created.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("second archive = %v, want ErrNotFound", err)
+	}
+	name, err = svc.restore(created.ID)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if name != "Coaching" {
+		t.Errorf("restored name = %q, want Coaching", name)
+	}
+	name, err = svc.restore(created.ID)
+	if err != nil || name != "Coaching" {
+		t.Errorf("restore on a live program = (%q, %v), want (Coaching, nil)", name, err)
 	}
 }

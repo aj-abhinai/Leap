@@ -113,12 +113,19 @@ func (s *Service) create(req CreateRequest) (*Tag, error) {
 	if err != nil {
 		return nil, err
 	}
+	groupName := req.GroupName
+	if req.Type != "quick_reply" {
+		// group_name and behavior configure quick replies only; every other
+		// kind stores the neutral defaults.
+		groupName = ""
+		behavior = "log"
+	}
 	var t Tag
 	err = s.db.QueryRow(
 		`INSERT INTO tags (name, type, color, group_name, sort_order, behavior)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, name, type, COALESCE(color, ''), COALESCE(group_name, ''), sort_order, behavior, created_at`,
-		req.Name, req.Type, req.Color, req.GroupName, req.SortOrder, behavior,
+		req.Name, req.Type, req.Color, groupName, req.SortOrder, behavior,
 	).Scan(&t.ID, &t.Name, &t.Type, &t.Color, &t.GroupName, &t.SortOrder, &t.Behavior, &t.CreatedAt)
 	if err != nil {
 		if respond.IsDuplicate(err) {
@@ -131,6 +138,8 @@ func (s *Service) create(req CreateRequest) (*Tag, error) {
 
 // update applies partial edits (name, color, group, sort order, behavior) to a
 // tag. Behavior is validated; an explicit invalid value is rejected.
+// group_name/behavior are quick-reply-only concepts: for every other type the
+// row is canonicalized back to the neutral defaults.
 func (s *Service) update(id string, req UpdateRequest) (*Tag, error) {
 	if req.Behavior != nil {
 		b, err := normalizeBehavior(*req.Behavior)
@@ -144,9 +153,9 @@ func (s *Service) update(id string, req UpdateRequest) (*Tag, error) {
 		`UPDATE tags SET
 			name = COALESCE($2, name),
 			color = COALESCE($3, color),
-			group_name = COALESCE($4, group_name),
+			group_name = CASE WHEN type = 'quick_reply' THEN COALESCE($4, group_name) ELSE '' END,
 			sort_order = COALESCE($5, sort_order),
-			behavior = COALESCE($6, behavior)
+			behavior = CASE WHEN type = 'quick_reply' THEN COALESCE($6, behavior) ELSE 'log' END
 		WHERE id = $1
 		RETURNING id, name, type, COALESCE(color, ''), COALESCE(group_name, ''), sort_order, behavior, created_at`,
 		id, req.Name, req.Color, req.GroupName, req.SortOrder, req.Behavior,

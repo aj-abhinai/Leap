@@ -1,19 +1,10 @@
-import { test, expect, type Page } from '@playwright/test'
-
-async function login(page: Page) {
-  await page.goto('/login')
-  await page.getByLabel('Email').fill('admin@admin.com')
-  await page.getByLabel('Password').fill('admin')
-  await page.getByRole('button', { name: 'Sign In' }).click()
-  await expect(page).not.toHaveURL(/login/)
-}
+import { test, expect } from '@playwright/test'
 
 function uniqueName() {
   return `E2E Contact ${Date.now()} ${Math.random().toString(36).slice(2, 8)}`
 }
 
 test('contact converts into a lead from the contacts table', async ({ page }) => {
-  await login(page)
   const name = uniqueName()
 
   await page.goto('/contacts')

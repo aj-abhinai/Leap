@@ -517,10 +517,13 @@ func (s *Service) dismissReminder(leadID, activityID, userID string) (bool, erro
 }
 
 // snoozeReminder pushes an activity's reminder forward and re-opens it
-// (is_reminded = false) so it re-enters the pending pool. The task's scheduled
-// start and end shift by the same delta as the reminder, so a range task keeps
-// its window and snooze behaves as a quick reschedule of an open task. The new
-// time must be future-only and within the snooze horizon. Only open,
+// (is_reminded = false) so it re-enters the pending pool. The old due moment
+// is COALESCE(remind_at, scheduled_at): a task with an explicit reminder
+// anchors on it, and a schedule-only task anchors on its schedule. The
+// scheduled start and end shift by the same delta as the reminder, so a range
+// task keeps its window and snooze behaves as a quick reschedule of an open
+// task — a schedule-only task that was overdue is moved out of overdue.
+// The new time must be future-only and within the snooze horizon. Only open,
 // non-cancelled activities that carry a reminder or schedule are eligible —
 // matching dismissReminder — so a missing or reminder-less id is a clean
 // (false, nil) instead of an error. The recipient predicate matches the bell
@@ -539,11 +542,11 @@ func (s *Service) snoozeReminder(leadID, activityID, userID string, remindAt tim
 			remind_at = $2,
 			is_reminded = false,
 			scheduled_at = CASE
-				WHEN scheduled_at IS NOT NULL AND remind_at IS NOT NULL THEN scheduled_at + ($2 - remind_at)
+				WHEN scheduled_at IS NOT NULL THEN scheduled_at + ($2 - COALESCE(remind_at, scheduled_at))
 				ELSE scheduled_at
 			END,
 			scheduled_end_at = CASE
-				WHEN scheduled_end_at IS NOT NULL AND remind_at IS NOT NULL THEN scheduled_end_at + ($2 - remind_at)
+				WHEN scheduled_end_at IS NOT NULL THEN scheduled_end_at + ($2 - COALESCE(remind_at, scheduled_at))
 				ELSE scheduled_end_at
 			END
 		FROM leads l

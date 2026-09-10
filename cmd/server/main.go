@@ -318,6 +318,14 @@ func runMigrations(dsn string, appAssets *assets.Assets) error {
 	if err != nil {
 		return fmt.Errorf("migrate init: %w", err)
 	}
+	// The migration instance owns its own database connection and source;
+	// close them once migrations finish so startup (or a failed boot) does not
+	// leak them for the process lifetime.
+	defer func() {
+		if srcErr, dbErr := m.Close(); srcErr != nil || dbErr != nil {
+			slog.Warn("close migration driver", "source_error", srcErr, "database_error", dbErr)
+		}
+	}()
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		return fmt.Errorf("migrate up: %w", err)
 	}

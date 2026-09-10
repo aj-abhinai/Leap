@@ -52,7 +52,7 @@ func TestDeletePipelineWithLeadsReturnsInUseIntegration(t *testing.T) {
 		t.Fatalf("seed lead: %v", err)
 	}
 
-	err := svc.deletePipeline(pipelineID)
+	_, err := svc.deletePipeline(pipelineID)
 	if !errors.Is(err, ErrInUse) {
 		t.Errorf("delete pipeline with leads = %v, want ErrInUse", err)
 	}
@@ -103,7 +103,7 @@ func TestDeleteStageWithLeadsReturnsInUseIntegration(t *testing.T) {
 		t.Fatalf("seed lead: %v", err)
 	}
 
-	err := svc.deleteStage(stageID)
+	_, err := svc.deleteStage(stageID)
 	if !errors.Is(err, ErrInUse) {
 		t.Errorf("delete stage with leads = %v, want ErrInUse", err)
 	}
@@ -136,6 +136,43 @@ func TestDeleteMissingStageReturnsNotFoundWithoutAuditIntegration(t *testing.T) 
 	}
 }
 
+// The mutation itself returns the deleted row's name, so the audit snapshot
+// cannot race a rename; a missing row returns ErrNotFound.
+func TestDeletesReturnNameForAuditIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipeline, err := svc.createPipeline(CreatePipelineRequest{Name: "Sales"})
+	if err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+	stage, err := svc.createStage(pipeline.ID, CreateStageRequest{Name: "Qualified"})
+	if err != nil {
+		t.Fatalf("create stage: %v", err)
+	}
+	stageName, err := svc.deleteStage(stage.ID)
+	if err != nil {
+		t.Fatalf("delete stage: %v", err)
+	}
+	if stageName != "Qualified" {
+		t.Errorf("deleted stage name = %q, want Qualified", stageName)
+	}
+	if _, err := svc.deleteStage(stage.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("second stage delete = %v, want ErrNotFound", err)
+	}
+
+	name, err := svc.deletePipeline(pipeline.ID)
+	if err != nil {
+		t.Fatalf("delete pipeline: %v", err)
+	}
+	if name != "Sales" {
+		t.Errorf("deleted pipeline name = %q, want Sales", name)
+	}
+	if _, err := svc.deletePipeline(pipeline.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("second delete = %v, want ErrNotFound", err)
+	}
+}
+
 func TestUpdateStageRenamesAndReordersIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -157,6 +194,23 @@ func TestUpdateStageRenamesAndReordersIntegration(t *testing.T) {
 	}
 	if got := stages[pipelineID]; len(got) != 1 || got[0].Name != "Qualified" || got[0].Order != 3 {
 		t.Errorf("stages after update = %+v, want [Qualified order 3]", got)
+	}
+}
+
+// An explicit empty outcome is malformed input, not a quiet reopen.
+func TestUpdateStageRejectsEmptyOutcomeIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	_, stageID := seedPipeline(t, db)
+	empty := ""
+	if _, err := svc.updateStage(stageID, UpdateStageRequest{Outcome: &empty}); !errors.Is(err, ErrInvalidStageOutcome) {
+		t.Errorf("empty outcome update = %v, want ErrInvalidStageOutcome", err)
+	}
+
+	// A missing stage is not-found even when the payload is invalid.
+	if _, err := svc.updateStage("00000000-0000-0000-0000-000000000000", UpdateStageRequest{Outcome: &empty}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing stage with empty outcome = %v, want ErrNotFound", err)
 	}
 }
 

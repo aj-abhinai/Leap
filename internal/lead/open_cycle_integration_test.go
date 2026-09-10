@@ -159,7 +159,7 @@ func TestCloseThenCreateAllowedIntegration(t *testing.T) {
 	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'Open', 0) RETURNING id`, pipelineID).Scan(&openStage); err != nil {
 		t.Fatalf("seed open stage: %v", err)
 	}
-	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 1, true, 'won') RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Won', 1, 'won') RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
 		t.Fatalf("seed won stage: %v", err)
 	}
 	programID := seedProgram(t, db, "Coaching", 25000)
@@ -233,7 +233,7 @@ func TestSpawnCycleBlockedWhenSlotHeldIntegration(t *testing.T) {
 	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'Open', 0) RETURNING id`, pipelineID).Scan(&openStage); err != nil {
 		t.Fatalf("seed open stage: %v", err)
 	}
-	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Lost', 1, true, 'lost') RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Lost', 1, 'lost') RETURNING id`, pipelineID).Scan(&closedStage); err != nil {
 		t.Fatalf("seed lost stage: %v", err)
 	}
 	programID := seedProgram(t, db, "Coaching", 25000)
@@ -365,7 +365,7 @@ func TestUpdateSlotKeyIntoClosingStageAllowedIntegration(t *testing.T) {
 	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'Warm', 1) RETURNING id`, pipelineID).Scan(&openStageB); err != nil {
 		t.Fatalf("seed open stage B: %v", err)
 	}
-	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 2, true, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Won', 2, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
 		t.Fatalf("seed won stage: %v", err)
 	}
 	programX := seedProgram(t, db, "Coaching", 25000)
@@ -419,7 +419,7 @@ func TestClosedLeadSlotKeyEditAllowedIntegration(t *testing.T) {
 	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'Open', 0) RETURNING id`, pipelineID).Scan(&openStage); err != nil {
 		t.Fatalf("seed open stage: %v", err)
 	}
-	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, 'Won', 1, true, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
+	if err := db.QueryRow(`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Won', 1, 'won') RETURNING id`, pipelineID).Scan(&wonStage); err != nil {
 		t.Fatalf("seed won stage: %v", err)
 	}
 	programX := seedProgram(t, db, "Coaching", 25000)

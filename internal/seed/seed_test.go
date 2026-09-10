@@ -330,6 +330,93 @@ func TestSeedNeverReassertsEditedSystemRolePermissions(t *testing.T) {
 	}
 }
 
+// clearSeedFailureTrigger removes the forced-failure trigger a previous run
+// may have left in the persistent per-package test database (testdb truncates
+// tables but not functions/triggers), so the tests are self-healing after a
+// hard-killed run.
+func clearSeedFailureTrigger(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(`DROP TRIGGER IF EXISTS seed_fail_contacted ON lead_stages`); err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
+	}
+	if _, err := db.Exec(`DROP FUNCTION IF EXISTS seed_fail_contacted() CASCADE`); err != nil {
+		t.Fatalf("drop failure trigger function: %v", err)
+	}
+}
+
+func TestSeedDefaultPipelineIntegration(t *testing.T) {
+	db := testdb.New(t)
+	clearSeedFailureTrigger(t, db)
+
+	if err := seedDefaultPipeline(db); err != nil {
+		t.Fatalf("seedDefaultPipeline: %v", err)
+	}
+	var pipelineID string
+	if err := db.QueryRow(`SELECT id FROM pipelines WHERE name = 'Default Pipeline'`).Scan(&pipelineID); err != nil {
+		t.Fatalf("load default pipeline: %v", err)
+	}
+	var stages int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM lead_stages WHERE pipeline_id = $1`, pipelineID).Scan(&stages); err != nil {
+		t.Fatalf("count stages: %v", err)
+	}
+	if stages != 5 {
+		t.Fatalf("stages = %d, want 5", stages)
+	}
+
+	// A second boot must not duplicate the pipeline or its stages.
+	if err := seedDefaultPipeline(db); err != nil {
+		t.Fatalf("reseed default pipeline: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM lead_stages WHERE pipeline_id = $1`, pipelineID).Scan(&stages); err != nil {
+		t.Fatalf("recount stages: %v", err)
+	}
+	if stages != 5 {
+		t.Fatalf("stages after reseed = %d, want 5", stages)
+	}
+}
+
+func TestSeedDefaultPipelineRollsBackOnStageFailureIntegration(t *testing.T) {
+	db := testdb.New(t)
+	clearSeedFailureTrigger(t, db)
+
+	if _, err := db.Exec(`
+		CREATE OR REPLACE FUNCTION seed_fail_contacted() RETURNS trigger AS $$
+		BEGIN
+			IF NEW.name = 'Contacted' THEN
+				RAISE EXCEPTION 'forced stage failure';
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql`); err != nil {
+		t.Fatalf("create failure trigger function: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DROP FUNCTION IF EXISTS seed_fail_contacted() CASCADE`)
+	})
+	if _, err := db.Exec(`
+		CREATE TRIGGER seed_fail_contacted BEFORE INSERT ON lead_stages
+		FOR EACH ROW EXECUTE FUNCTION seed_fail_contacted()`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	if err := seedDefaultPipeline(db); err == nil {
+		t.Fatal("seedDefaultPipeline succeeded despite the forced stage failure")
+	}
+	var pipelines, stages int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pipelines`).Scan(&pipelines); err != nil {
+		t.Fatalf("count pipelines: %v", err)
+	}
+	if pipelines != 0 {
+		t.Fatalf("pipelines after failed seed = %d, want 0 (the seed must roll back)", pipelines)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM lead_stages`).Scan(&stages); err != nil {
+		t.Fatalf("count stages: %v", err)
+	}
+	if stages != 0 {
+		t.Fatalf("stages after failed seed = %d, want 0 (the seed must roll back)", stages)
+	}
+}
+
 func assertBootstrapAdmin(t *testing.T, db *sql.DB, email string, wantChangePassword bool) {
 	t.Helper()
 

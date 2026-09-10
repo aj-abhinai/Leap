@@ -245,9 +245,19 @@ func seedSystemRoles(db *sql.DB) error {
 	return nil
 }
 
+// seedDefaultPipeline creates the default pipeline and its fixed stage catalog
+// as one unit: the existence check, the pipeline insert, and every stage insert
+// run in a single transaction, so a failed boot cannot leave a pipeline without
+// its stages (a partial row would otherwise count as "already seeded" forever).
 func seedDefaultPipeline(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("seed default pipeline: %w", err)
+	}
+	defer tx.Rollback()
+
 	var exists bool
-	if err := db.QueryRow(
+	if err := tx.QueryRow(
 		`SELECT EXISTS(SELECT 1 FROM pipelines WHERE name = 'Default Pipeline')`,
 	).Scan(&exists); err != nil {
 		return fmt.Errorf("check default pipeline: %w", err)
@@ -256,31 +266,33 @@ func seedDefaultPipeline(db *sql.DB) error {
 		return nil
 	}
 	var pipelineID string
-	err := db.QueryRow(
+	err = tx.QueryRow(
 		`INSERT INTO pipelines (name, description) VALUES ('Default Pipeline', 'Default sales pipeline') RETURNING id`,
 	).Scan(&pipelineID)
 	if err != nil {
 		return fmt.Errorf("insert default pipeline: %w", err)
 	}
 	stages := []struct {
-		name      string
-		isClosing bool
-		outcome   string
+		name    string
+		outcome string
 	}{
-		{"New Customer", false, "open"},
-		{"Contacted", false, "open"},
-		{"Follow-up", false, "open"},
-		{"Closed Lost", true, "lost"},
-		{"Converted", true, "won"},
+		{"New Customer", "open"},
+		{"Contacted", "open"},
+		{"Follow-up", "open"},
+		{"Closed Lost", "lost"},
+		{"Converted", "won"},
 	}
 	for i, st := range stages {
-		_, err := db.Exec(
-			`INSERT INTO lead_stages (pipeline_id, name, "order", is_closing, outcome) VALUES ($1, $2, $3, $4, $5)`,
-			pipelineID, st.name, i, st.isClosing, st.outcome,
+		_, err := tx.Exec(
+			`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, $2, $3, $4)`,
+			pipelineID, st.name, i, st.outcome,
 		)
 		if err != nil {
 			return fmt.Errorf("seed stage %s: %w", st.name, err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("seed default pipeline: %w", err)
 	}
 	slog.Info("default pipeline seeded with 5 stages")
 	return nil

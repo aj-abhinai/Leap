@@ -8,11 +8,7 @@ const views = [
 ]
 
 test('sidebar navigation renders every view', async ({ page }) => {
-  await page.goto('/login')
-  await page.getByLabel('Email').fill('admin@admin.com')
-  await page.getByLabel('Password').fill('admin')
-  await page.getByRole('button', { name: 'Sign In' }).click()
-  await expect(page).not.toHaveURL(/login/)
+  await page.goto('/')
 
   const sidebar = page.locator('[data-sidebar="sidebar"]')
 
