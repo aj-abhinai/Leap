@@ -3,6 +3,7 @@ package export
 import (
 	"crm/internal/testdb"
 	"encoding/csv"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -142,6 +143,120 @@ func TestExportContactsCSVIntegration(t *testing.T) {
 	}
 	if evilRow[2] != "'+cmd" {
 		t.Errorf("evil nickname = %q, want apostrophe-prefixed formula", evilRow[2])
+	}
+}
+
+func TestExportContactsCSVIncludesDateOfBirthAndComputedAgeIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	// Seed the birth date relative to the database clock so the expected age is
+	// deterministic regardless of the host timezone: 25 years and one day ago
+	// is 25 years old at export time.
+	var expectedDOB string
+	const expectedAge = 25
+	if err := db.QueryRow(
+		`SELECT to_char(CURRENT_DATE - INTERVAL '25 years 1 day', 'YYYY-MM-DD')`,
+	).Scan(&expectedDOB); err != nil {
+		t.Fatalf("compute expected dob: %v", err)
+	}
+	// The stored age is deliberately wrong: the birth date is the truth.
+	if _, err := db.Exec(
+		`INSERT INTO contacts (name, date_of_birth, age) VALUES ('Dob Contact', $1, 99)`,
+		expectedDOB,
+	); err != nil {
+		t.Fatalf("seed dob contact: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO contacts (name, age) VALUES ('Age Only', 40)`); err != nil {
+		t.Fatalf("seed age contact: %v", err)
+	}
+
+	var sb strings.Builder
+	if err := svc.ExportContactsCSV(&sb); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	records, err := csv.NewReader(strings.NewReader(sb.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv: %v", err)
+	}
+	header := records[0]
+	if len(header) < 12 || header[11] != "date_of_birth" {
+		t.Fatalf("header = %v, want date_of_birth at index 11", header)
+	}
+
+	foundDob, foundAgeOnly := false, false
+	for _, r := range records[1:] {
+		switch r[1] {
+		case "Dob Contact":
+			foundDob = true
+			if r[11] != expectedDOB {
+				t.Errorf("date_of_birth = %q, want %q", r[11], expectedDOB)
+			}
+			if r[10] != strconv.Itoa(expectedAge) {
+				t.Errorf("age = %q, want computed %d (not the stored 99)", r[10], expectedAge)
+			}
+		case "Age Only":
+			foundAgeOnly = true
+			if r[10] != "40" || r[11] != "" {
+				t.Errorf("age-only row = %q/%q, want 40/empty", r[10], r[11])
+			}
+		}
+	}
+	if !foundDob || !foundAgeOnly {
+		t.Fatalf("export missing rows: dob=%v ageOnly=%v", foundDob, foundAgeOnly)
+	}
+}
+
+func TestExportLeadsCSVMasksDeletedContactIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var pipelineID, stageID, contactID string
+	if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ('Mask Pipeline') RETURNING id`).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name) VALUES ($1, 'New') RETURNING id`,
+		pipelineID,
+	).Scan(&stageID); err != nil {
+		t.Fatalf("seed stage: %v", err)
+	}
+	if err := db.QueryRow(`INSERT INTO contacts (name) VALUES ('Ghost') RETURNING id`).Scan(&contactID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO contact_phones (contact_id, value, is_primary) VALUES ($1, '+919876543210', true)`,
+		contactID,
+	); err != nil {
+		t.Fatalf("seed phone: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO leads (contact_id, pipeline_id, stage_id) VALUES ($1, $2, $3)`,
+		contactID, pipelineID, stageID,
+	); err != nil {
+		t.Fatalf("seed lead: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, contactID); err != nil {
+		t.Fatalf("soft-delete contact: %v", err)
+	}
+
+	var sb strings.Builder
+	if err := svc.ExportLeadsCSV(&sb); err != nil {
+		t.Fatalf("export leads: %v", err)
+	}
+	records, err := csv.NewReader(strings.NewReader(sb.String())).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("rows = %d, want header + lead", len(records))
+	}
+	row := records[1]
+	if row[2] != "Deleted contact" {
+		t.Errorf("contact_name = %q, want masked", row[2])
+	}
+	if row[3] != "" || row[4] != "" {
+		t.Errorf("contact phone/email = %q/%q, want empty", row[3], row[4])
 	}
 }
 

@@ -92,8 +92,11 @@ func NewService(db *sql.DB) *Service {
 // get. The FROM/joins are appended by each caller (board and get add the
 // phone/email laterals unconditionally; list only adds them for searches).
 const leadSelect = `
-	SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
-		l.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
+	SELECT l.id, COALESCE(l.nickname, ''),
+		CASE WHEN c.deleted_at IS NOT NULL THEN 'Deleted contact' ELSE COALESCE(c.name, '') END,
+		l.contact_id,
+		CASE WHEN c.deleted_at IS NULL THEN COALESCE(pcp.value, '') ELSE '' END,
+		CASE WHEN c.deleted_at IS NULL THEN COALESCE(pce.value, '') ELSE '' END,
 		l.pipeline_id, l.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
 		COALESCE(l.outcome, ''),
 		COALESCE(l.lost_reason, ''), l.value,
@@ -150,7 +153,11 @@ func leadFilters(search, outcome, assignedTo string) *util.WhereBuilder {
 	w := util.NewWhereBuilder("l.deleted_at IS NULL")
 	if search != "" {
 		pat := util.LikePattern(search)
-		w.Add(`(COALESCE(l.nickname, '') ILIKE $? ESCAPE '\' OR c.name ILIKE $? ESCAPE '\' OR pcp.value ILIKE $? ESCAPE '\' OR pce.value ILIKE $? ESCAPE '\' OR COALESCE(p.name, '') ILIKE $? ESCAPE '\')`,
+		w.Add(`(COALESCE(l.nickname, '') ILIKE $? ESCAPE '\'
+			OR (c.deleted_at IS NULL AND c.name ILIKE $? ESCAPE '\')
+			OR (c.deleted_at IS NULL AND pcp.value ILIKE $? ESCAPE '\')
+			OR (c.deleted_at IS NULL AND pce.value ILIKE $? ESCAPE '\')
+			OR COALESCE(p.name, '') ILIKE $? ESCAPE '\')`,
 			pat, pat, pat, pat, pat)
 	}
 	switch outcome {
@@ -190,8 +197,11 @@ const leadSearchFrom = `
 // (aliased sl, contact aliased ct); it joins the leading stage_id/count
 // columns, and the outer FROM/joins follow it.
 const leadSelectOuter = `
-	sl.id, COALESCE(sl.nickname, ''), COALESCE(ct.name, ''),
-		sl.contact_id, COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
+	sl.id, COALESCE(sl.nickname, ''),
+		CASE WHEN ct.deleted_at IS NOT NULL THEN 'Deleted contact' ELSE COALESCE(ct.name, '') END,
+		sl.contact_id,
+		CASE WHEN ct.deleted_at IS NULL THEN COALESCE(pcp.value, '') ELSE '' END,
+		CASE WHEN ct.deleted_at IS NULL THEN COALESCE(pce.value, '') ELSE '' END,
 		sl.pipeline_id, sl.stage_id, COALESCE(ls.name, ''), COALESCE(ls.outcome, 'open'),
 		COALESCE(sl.outcome, ''),
 		COALESCE(sl.lost_reason, ''), sl.value,
@@ -742,7 +752,10 @@ func (s *Service) openLeadForSlotTx(tx *sql.Tx, contactID, pipelineID string, pr
 	var ref OpenLeadRef
 	var programIDNull sql.NullString
 	err := tx.QueryRow(
-		`SELECT l.id, COALESCE(l.nickname, c.name, ''), COALESCE(ls.name, ''),
+		`SELECT l.id,
+			CASE WHEN c.deleted_at IS NOT NULL THEN COALESCE(NULLIF(l.nickname, ''), 'Deleted contact')
+				ELSE COALESCE(NULLIF(l.nickname, ''), c.name, '') END,
+			COALESCE(ls.name, ''),
 			COALESCE(p.name, ''), l.program_id, COALESCE(pl.name, '')
 		FROM leads l
 		JOIN contacts c ON c.id = l.contact_id
@@ -1193,7 +1206,9 @@ func (s *Service) populateNames(l *Lead) error {
 	}
 	var contactName, contactPhone, contactEmail string
 	err = s.db.QueryRow(
-		`SELECT COALESCE(c.name, ''), COALESCE(pcp.value, ''), COALESCE(pce.value, '')
+		`SELECT CASE WHEN c.deleted_at IS NOT NULL THEN 'Deleted contact' ELSE COALESCE(c.name, '') END,
+			CASE WHEN c.deleted_at IS NULL THEN COALESCE(pcp.value, '') ELSE '' END,
+			CASE WHEN c.deleted_at IS NULL THEN COALESCE(pce.value, '') ELSE '' END
 		FROM contacts c
 		LEFT JOIN LATERAL (
 			SELECT value FROM contact_phones WHERE contact_id = c.id AND is_primary LIMIT 1
@@ -1391,7 +1406,30 @@ func (s *Service) closeLostTx(tx *sql.Tx, leadID, userID string) (bool, error) {
 }
 
 // listHistory returns the chronological stage moves for a lead, oldest first.
+// requireLiveLead returns ErrNotFound unless the id is a live (non-deleted)
+// lead, so nested reads cannot surface rows of hidden leads. Malformed ids
+// report not-found rather than a database cast error.
+func (s *Service) requireLiveLead(leadID string) error {
+	if !util.IsUUID(leadID) {
+		return ErrNotFound
+	}
+	var live bool
+	if err := s.db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM leads WHERE id = $1 AND deleted_at IS NULL)`,
+		leadID,
+	).Scan(&live); err != nil {
+		return fmt.Errorf("check lead: %w", err)
+	}
+	if !live {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Service) listHistory(leadID string) ([]StageHistory, error) {
+	if err := s.requireLiveLead(leadID); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(
 		`SELECT id, lead_id, from_stage_id, to_stage_id,
 			COALESCE(from_stage_name, ''), COALESCE(to_stage_name, ''),

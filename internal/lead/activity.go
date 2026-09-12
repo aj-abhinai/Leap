@@ -123,6 +123,9 @@ func scanActivity(scan rowScanner) (Activity, error) {
 }
 
 func (s *Service) listActivities(leadID string, page, perPage int) ([]Activity, int, error) {
+	if err := s.requireLiveLead(leadID); err != nil {
+		return nil, 0, err
+	}
 	var total int
 	if err := s.db.QueryRow(
 		`SELECT COUNT(*) FROM lead_activities WHERE lead_id = $1`,
@@ -641,7 +644,8 @@ func (s *Service) getPendingReminders(userID string) ([]ActivityListItem, error)
 			la.type, la.description, la.quick_reply_id, COALESCE(t.name, ''),
 			la.scheduled_at, la.scheduled_end_at, la.remind_at, la.responded_at, la.occurred_at,
 			la.is_done, la.is_cancelled, la.is_reminded, la.created_at, la.updated_at,
-			COALESCE(NULLIF(l.nickname, ''), c.name, ''), l.contact_id
+			CASE WHEN c.deleted_at IS NOT NULL THEN COALESCE(NULLIF(l.nickname, ''), 'Deleted contact')
+				ELSE COALESCE(NULLIF(l.nickname, ''), c.name, '') END, l.contact_id
 		FROM lead_activities la
 		JOIN leads l ON l.id = la.lead_id AND l.deleted_at IS NULL
 		JOIN lead_stages lstage ON lstage.id = l.stage_id
@@ -739,7 +743,7 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 	}
 	if f.Search != "" {
 		pat := util.LikePattern(f.Search)
-		w.Add("(la.description ILIKE $? ESCAPE '\\' OR COALESCE(c.name, '') ILIKE $? ESCAPE '\\' OR COALESCE(l.nickname, '') ILIKE $? ESCAPE '\\')", pat, pat, pat)
+		w.Add("(la.description ILIKE $? ESCAPE '\\' OR (c.deleted_at IS NULL AND c.name ILIKE $? ESCAPE '\\') OR COALESCE(l.nickname, '') ILIKE $? ESCAPE '\\')", pat, pat, pat)
 	}
 	if f.From != nil {
 		w.Add("COALESCE(la.occurred_at, la.responded_at, la.scheduled_at, la.created_at) >= $?", *f.From)
@@ -780,7 +784,8 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 			la.type, la.description, la.quick_reply_id, COALESCE(t.name, ''),
 			la.scheduled_at, la.scheduled_end_at, la.remind_at, la.responded_at, la.occurred_at,
 			la.is_done, la.is_cancelled, la.is_reminded, la.created_at, la.updated_at,
-			COALESCE(NULLIF(l.nickname, ''), c.name, ''), l.contact_id
+			CASE WHEN c.deleted_at IS NOT NULL THEN COALESCE(NULLIF(l.nickname, ''), 'Deleted contact')
+				ELSE COALESCE(NULLIF(l.nickname, ''), c.name, '') END, l.contact_id
 		FROM lead_activities la
 		JOIN leads l ON l.id = la.lead_id
 		LEFT JOIN contacts c ON c.id = l.contact_id

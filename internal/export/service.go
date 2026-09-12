@@ -42,13 +42,15 @@ func (s *Service) ExportContactsCSV(w io.Writer) error {
 
 	if err := cw.Write([]string{
 		"id", "name", "nickname", "primary_phone", "all_phones", "primary_email", "all_emails",
-		"status", "tags", "location", "age", "created_at", "updated_at",
+		"status", "tags", "location", "age", "date_of_birth", "created_at", "updated_at",
 	}); err != nil {
 		return fmt.Errorf("write contacts header: %w", err)
 	}
 
 	rows, err := s.db.Query(`
 		SELECT c.id, COALESCE(c.name, ''), COALESCE(c.nickname, ''), COALESCE(c.location, ''), c.age,
+			COALESCE(to_char(c.date_of_birth, 'YYYY-MM-DD'), ''),
+			EXTRACT(YEAR FROM age(now(), c.date_of_birth))::int,
 			COALESCE(t.name, ''), c.created_at, c.updated_at
 		FROM contacts c
 		LEFT JOIN tags t ON t.id = c.status_id
@@ -62,6 +64,8 @@ func (s *Service) ExportContactsCSV(w io.Writer) error {
 	type row struct {
 		id, name, nickname, location string
 		age                          *int
+		dateOfBirth                  string
+		computedAge                  *int
 		status                       string
 		createdAt, updatedAt         time.Time
 	}
@@ -69,8 +73,18 @@ func (s *Service) ExportContactsCSV(w io.Writer) error {
 	var contactIDs []string
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.id, &r.name, &r.nickname, &r.location, &r.age, &r.status, &r.createdAt, &r.updatedAt); err != nil {
+		var dob sql.NullString
+		var computed sql.NullInt64
+		if err := rows.Scan(
+			&r.id, &r.name, &r.nickname, &r.location, &r.age,
+			&dob, &computed, &r.status, &r.createdAt, &r.updatedAt,
+		); err != nil {
 			return fmt.Errorf("scan contact: %w", err)
+		}
+		r.dateOfBirth = dob.String
+		if computed.Valid {
+			v := int(computed.Int64)
+			r.computedAge = &v
 		}
 		contacts = append(contacts, r)
 		contactIDs = append(contactIDs, r.id)
@@ -93,8 +107,12 @@ func (s *Service) ExportContactsCSV(w io.Writer) error {
 	}
 
 	for _, c := range contacts {
+		// The birth date is the truth: when present, its computed age wins over
+		// the stored approximate integer.
 		age := ""
-		if c.age != nil {
+		if c.computedAge != nil {
+			age = strconv.Itoa(*c.computedAge)
+		} else if c.age != nil {
 			age = strconv.Itoa(*c.age)
 		}
 		if err := cw.Write([]string{
@@ -109,6 +127,7 @@ func (s *Service) ExportContactsCSV(w io.Writer) error {
 			sanitizeCell(tags[c.id]),
 			sanitizeCell(c.location),
 			age,
+			c.dateOfBirth,
 			c.createdAt.UTC().Format(time.RFC3339), c.updatedAt.UTC().Format(time.RFC3339),
 		}); err != nil {
 			return fmt.Errorf("write contact row: %w", err)
@@ -217,8 +236,10 @@ func (s *Service) ExportLeadsCSV(w io.Writer) error {
 	}
 
 	rows, err := s.db.Query(`
-		SELECT l.id, COALESCE(l.nickname, ''), COALESCE(c.name, ''),
-			COALESCE(pcp.value, ''), COALESCE(pce.value, ''),
+		SELECT l.id, COALESCE(l.nickname, ''),
+			CASE WHEN c.deleted_at IS NOT NULL THEN 'Deleted contact' ELSE COALESCE(c.name, '') END,
+			CASE WHEN c.deleted_at IS NULL THEN COALESCE(pcp.value, '') ELSE '' END,
+			CASE WHEN c.deleted_at IS NULL THEN COALESCE(pce.value, '') ELSE '' END,
 			COALESCE(pl.name, ''), COALESCE(ls.name, ''), COALESCE(l.outcome, ''),
 			COALESCE(l.lost_reason, ''), COALESCE(pr.name, ''), l.value,
 			COALESCE(u.name, ''), COALESCE(l.notes, ''), l.created_at, l.updated_at

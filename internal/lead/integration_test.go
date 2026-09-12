@@ -1404,6 +1404,126 @@ func TestUpdateActivityRejectsMalformedQuickReplyIntegration(t *testing.T) {
 	}
 }
 
+func TestNestedReadsRejectDeletedLeadIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if err := svc.delete(created.ID, ""); err != nil {
+		t.Fatalf("delete lead: %v", err)
+	}
+
+	if _, _, err := svc.listActivities(created.ID, 1, 20); !errors.Is(err, ErrNotFound) {
+		t.Errorf("listActivities on deleted lead = %v, want ErrNotFound", err)
+	}
+	if _, err := svc.listHistory(created.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("listHistory on deleted lead = %v, want ErrNotFound", err)
+	}
+	if _, _, err := svc.listActivities("not-a-uuid", 1, 20); !errors.Is(err, ErrNotFound) {
+		t.Errorf("listActivities malformed id = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeletedContactIdentityMaskedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "9876543210"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, created.ContactID); err != nil {
+		t.Fatalf("soft-delete contact: %v", err)
+	}
+
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.ContactName != "Deleted contact" {
+		t.Errorf("contact name = %q, want masked", got.ContactName)
+	}
+	if got.ContactPhone != "" || got.ContactEmail != "" {
+		t.Errorf("phone/email = %q/%q, want empty", got.ContactPhone, got.ContactEmail)
+	}
+	if got.DisplayName != "Deleted contact" {
+		t.Errorf("display name = %q, want masked", got.DisplayName)
+	}
+
+	// The reminder feed masks the identity the same way.
+	if _, err := db.Exec(
+		`INSERT INTO lead_activities (lead_id, stage_id, type, remind_at) VALUES ($1, $2, 'call', $3)`,
+		created.ID, stageID, time.Now().Add(time.Hour),
+	); err != nil {
+		t.Fatalf("seed reminder: %v", err)
+	}
+	reminders, err := svc.getPendingReminders("00000000-0000-0000-0000-000000000000")
+	if err != nil {
+		t.Fatalf("pending reminders: %v", err)
+	}
+	if len(reminders) != 1 || reminders[0].LeadDisplayName != "Deleted contact" {
+		t.Errorf("reminder display = %+v, want masked", reminders)
+	}
+
+	// A lead nickname still identifies the deal.
+	nick := "Deal A"
+	if _, err := svc.update(created.ID, UpdateRequest{Nickname: &nick}, ""); err != nil {
+		t.Fatalf("set nickname: %v", err)
+	}
+	got, err = svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get lead after nickname: %v", err)
+	}
+	if got.DisplayName != "Deal A" {
+		t.Errorf("display name = %q, want the nickname", got.DisplayName)
+	}
+}
+
+// TestListHistoryDeletedLeadReturns404Integration pins the handler mapping:
+// a soft-deleted lead's history must be 404, not a logged 500.
+func TestListHistoryDeletedLeadReturns404Integration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	h := NewHandler(svc)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if err := svc.delete(created.ID, ""); err != nil {
+		t.Fatalf("delete lead: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/leads/"+created.ID+"/history", nil)
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", created.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+
+	h.ListHistory(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
 // TestPatchLeadClosedToClosedReturns422Integration seeds an open, a lost and
 // a won stage, moves a lead to lost, then PATCHes it to won and asserts the
 // handler responds 422 (not 500) — ErrClosedToClosedMove must map cleanly.

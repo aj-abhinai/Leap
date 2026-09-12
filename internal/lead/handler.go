@@ -333,7 +333,7 @@ func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	leadID := chi.URLParam(r, "id")
 	history, err := h.svc.listHistory(leadID)
 	if err != nil {
-		respond.ServerError(w, err)
+		respondLeadMutationError(w, err)
 		return
 	}
 	respond.JSON(w, http.StatusOK, history, nil, nil)
