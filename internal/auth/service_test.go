@@ -198,3 +198,38 @@ func TestValidateJWTRejectsExpiredToken(t *testing.T) {
 		t.Errorf("expected ErrInvalidToken for expired token, got %v", err)
 	}
 }
+
+func TestValidateJWTRejectsMissingIssuer(t *testing.T) {
+	cfg := authTestConfig()
+	svc := &Service{cfg: cfg}
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"sub": "user-1",
+		"exp": now.Add(time.Minute).Unix(),
+		"iat": now.Unix(),
+	}
+	tokenStr, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(cfg.JWTSecret))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	if _, err := svc.ValidateJWT(tokenStr); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("expected ErrInvalidToken for missing iss, got %v", err)
+	}
+}
+
+func TestValidateJWTRejectsMissingExpiration(t *testing.T) {
+	cfg := authTestConfig()
+	svc := &Service{cfg: cfg}
+	claims := jwt.MapClaims{
+		"sub": "user-1",
+		"iat": time.Now().Unix(),
+		"iss": cfg.JWTIssuer,
+	}
+	tokenStr, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(cfg.JWTSecret))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	if _, err := svc.ValidateJWT(tokenStr); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("expected ErrInvalidToken for missing exp, got %v", err)
+	}
+}

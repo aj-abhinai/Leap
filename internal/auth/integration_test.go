@@ -156,6 +156,42 @@ func TestRefreshRejectedAfterUserDeactivationIntegration(t *testing.T) {
 	if !errors.Is(err, ErrTokenRevoked) {
 		t.Errorf("expected ErrTokenRevoked after deactivation, got %v", err)
 	}
+	// The rejected token is persisted as revoked, not merely refused in memory.
+	var revoked bool
+	if err := db.QueryRow(`SELECT revoked FROM refresh_tokens WHERE user_id = $1`, userID).Scan(&revoked); err != nil {
+		t.Fatalf("load token state: %v", err)
+	}
+	if !revoked {
+		t.Error("expected the rejected token to be persisted as revoked")
+	}
+}
+
+func TestRefreshRevokesExpiredTokenIntegration(t *testing.T) {
+	db := testdb.New(t)
+	userID := seedUser(t, db, "alice@example.com", "correct-horse")
+	svc := NewService(db, authTestConfig())
+
+	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if _, err := db.Exec(
+		`UPDATE refresh_tokens SET expires_at = now() - interval '1 minute' WHERE user_id = $1`,
+		userID,
+	); err != nil {
+		t.Fatalf("expire token: %v", err)
+	}
+
+	if _, err := svc.refresh(resp.RefreshToken); !errors.Is(err, ErrTokenRevoked) {
+		t.Errorf("expected ErrTokenRevoked for an expired token, got %v", err)
+	}
+	var revoked bool
+	if err := db.QueryRow(`SELECT revoked FROM refresh_tokens WHERE user_id = $1`, userID).Scan(&revoked); err != nil {
+		t.Fatalf("load token state: %v", err)
+	}
+	if !revoked {
+		t.Error("expected the expired token to be persisted as revoked")
+	}
 }
 
 func TestAccessTokenValidationIntegration(t *testing.T) {

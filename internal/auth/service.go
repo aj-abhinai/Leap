@@ -113,6 +113,9 @@ func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {
 		if _, err := tx.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash); err != nil {
 			return nil, fmt.Errorf("refresh: revoke stale token: %w", err)
 		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("refresh: revoke stale token: %w", err)
+		}
 		return nil, ErrTokenRevoked
 	}
 	_, err = tx.Exec(`UPDATE refresh_tokens SET revoked = true WHERE token_hash = $1`, hash)
@@ -193,7 +196,7 @@ func (s *Service) createJWT(userID string, expiresAt time.Time) (string, error) 
 func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 		return []byte(s.cfg.JWTSecret), nil
-	}, jwt.WithValidMethods([]string{"HS256"}))
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer(s.cfg.JWTIssuer), jwt.WithExpirationRequired())
 	if err != nil {
 		return "", ErrInvalidToken
 	}
@@ -203,9 +206,6 @@ func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 	}
 	sub, _ := claims["sub"].(string)
 	if sub == "" {
-		return "", ErrInvalidToken
-	}
-	if iss, ok := claims["iss"].(string); ok && iss != s.cfg.JWTIssuer {
 		return "", ErrInvalidToken
 	}
 	return sub, nil
