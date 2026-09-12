@@ -73,16 +73,40 @@ var (
 )
 
 type Service struct {
-	db *sql.DB
+	db         *sql.DB
+	bcryptCost int
 }
 
-func NewService(db *sql.DB) *Service {
-	return &Service{db: db}
+// defaultBcryptCost mirrors the auth default for deployments that do not
+// thread the configured cost through.
+const defaultBcryptCost = 12
+
+// Option configures a Service.
+type Option func(*Service)
+
+// WithBcryptCost sets the password hashing cost for admin-created and
+// admin-reset passwords, mirroring auth.bcrypt_cost for the self-service
+// paths. A non-positive cost keeps the default.
+func WithBcryptCost(cost int) Option {
+	return func(s *Service) {
+		if cost > 0 {
+			s.bcryptCost = cost
+		}
+	}
 }
 
-// logActivity records a best-effort audit entry for an RBAC mutation.
-func (s *Service) logActivity(resourceID, resourceType, action, changes, userID string) {
-	audit.Log(s.db, resourceID, resourceType, action, changes, userID)
+func NewService(db *sql.DB, opts ...Option) *Service {
+	s := &Service{db: db, bcryptCost: defaultBcryptCost}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// auditChange records a best-effort audit entry with a human-readable
+// description that names the changed entity, never a bare id.
+func (s *Service) auditChange(description, resourceType, resourceID, action, changes, userID string) {
+	audit.LogCustom(s.db, description, resourceType, resourceID, action, changes, userID)
 }
 
 // nullName maps an empty role name to JSON null so an absent role renders as
@@ -184,7 +208,7 @@ func (s *Service) createRole(req CreateRoleRequest, actorID string) (*Role, erro
 		return nil, fmt.Errorf("create role: %w", err)
 	}
 	changes, _ := json.Marshal(map[string]string{"name": r.Name, "description": r.Description})
-	s.logActivity(r.ID, "role", "create", string(changes), actorID)
+	s.auditChange(fmt.Sprintf("Created role %q", r.Name), "role", r.ID, "create", string(changes), actorID)
 	return &r, nil
 }
 
@@ -239,7 +263,7 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest, actorID string) (
 	}
 	if len(changes) > 0 {
 		if b, err := json.Marshal(changes); err == nil {
-			s.logActivity(r.ID, "role", "update", string(b), actorID)
+			s.auditChange(fmt.Sprintf("Updated role %q", r.Name), "role", r.ID, "update", string(b), actorID)
 		}
 	}
 	return &r, nil
@@ -247,7 +271,7 @@ func (s *Service) updateRole(id string, req UpdateRoleRequest, actorID string) (
 
 func (s *Service) deleteRole(id, actorID string) error {
 	if !validUUID(id) {
-		return nil
+		return ErrNotFound
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -295,7 +319,7 @@ func (s *Service) deleteRole(id, actorID string) error {
 		return fmt.Errorf("delete role: %w", err)
 	}
 	changes, _ := json.Marshal(map[string]string{"name": name})
-	s.logActivity(id, "role", "delete", string(changes), actorID)
+	s.auditChange(fmt.Sprintf("Deleted role %q", name), "role", id, "delete", string(changes), actorID)
 	return nil
 }
 
@@ -329,7 +353,7 @@ func (s *Service) assignPermission(roleID, permissionID, actorID string) error {
 	if roleName != "superadmin" && permName == "*" {
 		return ErrWildcardRestricted
 	}
-	_, err = tx.Exec(
+	res, err := tx.Exec(
 		`INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 		roleID, permissionID,
 	)
@@ -339,11 +363,22 @@ func (s *Service) assignPermission(roleID, permissionID, actorID string) error {
 		}
 		return fmt.Errorf("assign permission: %w", err)
 	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("assign permission: rows affected: %w", err)
+	}
+	if affected == 0 {
+		// Already granted: a no-op, not an event.
+		return nil
+	}
+	if _, err := tx.Exec(`UPDATE roles SET updated_at = now() WHERE id = $1`, roleID); err != nil {
+		return fmt.Errorf("assign permission: touch role: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("assign permission: %w", err)
 	}
 	changes, _ := json.Marshal(map[string]any{"permissions": map[string]any{"added": []string{permName}}})
-	s.logActivity(roleID, "role", "update", string(changes), actorID)
+	s.auditChange(fmt.Sprintf("Granted %q to role %q", permName, roleName), "role", roleID, "update", string(changes), actorID)
 	return nil
 }
 
@@ -377,11 +412,20 @@ func (s *Service) removePermission(roleID, permissionID, actorID string) error {
 	if roleName == "superadmin" && permName == "*" {
 		return ErrSuperadminRoleProtected
 	}
-	if _, err := tx.Exec(
+	res, err := tx.Exec(
 		`DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2`,
 		roleID, permissionID,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("remove permission: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("remove permission: rows affected: %w", err)
+	}
+	if affected == 0 {
+		// Not granted: a no-op, not an event.
+		return nil
 	}
 
 	// Removing a permission that grants RBAC management must not orphan the
@@ -396,11 +440,14 @@ func (s *Service) removePermission(roleID, permissionID, actorID string) error {
 			return ErrLastManagerProtected
 		}
 	}
+	if _, err := tx.Exec(`UPDATE roles SET updated_at = now() WHERE id = $1`, roleID); err != nil {
+		return fmt.Errorf("remove permission: touch role: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("remove permission: %w", err)
 	}
 	changes, _ := json.Marshal(map[string]any{"permissions": map[string]any{"removed": []string{permName}}})
-	s.logActivity(roleID, "role", "update", string(changes), actorID)
+	s.auditChange(fmt.Sprintf("Removed %q from role %q", permName, roleName), "role", roleID, "update", string(changes), actorID)
 	return nil
 }
 
@@ -577,6 +624,11 @@ func (s *Service) setRolePermissions(roleID string, permissionIDs []string, acto
 			}
 		}
 	}
+	if len(addedIDs) > 0 || len(removedIDs) > 0 {
+		if _, err := tx.Exec(`UPDATE roles SET updated_at = now() WHERE id = $1`, roleID); err != nil {
+			return nil, fmt.Errorf("set role permissions: touch role: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("set role permissions: %w", err)
 	}
@@ -585,7 +637,7 @@ func (s *Service) setRolePermissions(roleID string, permissionIDs []string, acto
 		changes, _ := json.Marshal(map[string]any{
 			"permissions": map[string]any{"added": added, "removed": removed},
 		})
-		s.logActivity(roleID, "role", "update", string(changes), actorID)
+		s.auditChange(fmt.Sprintf("Updated permissions for role %q", roleName), "role", roleID, "update", string(changes), actorID)
 	}
 
 	perms, err := s.getRolePermissions(roleID)
@@ -628,6 +680,16 @@ func (s *Service) GetUserPermissions(userID string) ([]string, error) {
 }
 
 func (s *Service) getRolePermissions(roleID string) ([]Permission, error) {
+	if !validUUID(roleID) {
+		return nil, ErrNotFound
+	}
+	var exists bool
+	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM roles WHERE id = $1)`, roleID).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("get role permissions: %w", err)
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
 	rows, err := s.db.Query(`
 		SELECT p.id, p.name, COALESCE(p.description, ''), p.created_at FROM permissions p
 		JOIN role_permissions rp ON p.id = rp.permission_id
@@ -680,14 +742,15 @@ func (s *Service) setUserRole(userID, roleID, actorID string) error {
 			return ErrNotFound
 		}
 	}
+	var userName string
 	if err := tx.QueryRow(
-		`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`,
+		`SELECT name FROM users WHERE id = $1 AND deleted_at IS NULL`,
 		userID,
-	).Scan(&exists); err != nil {
+	).Scan(&userName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return fmt.Errorf("set user role: %w", err)
-	}
-	if !exists {
-		return ErrNotFound
 	}
 
 	cur, err := userRoleStatus(tx, userID)
@@ -733,6 +796,11 @@ func (s *Service) setUserRole(userID, roleID, actorID string) error {
 		}
 	}
 
+	if nullName(cur.name) == nullName(next.name) {
+		// Same role: a no-op, not an event.
+		return nil
+	}
+
 	// Clearing passes NULL, not an empty string, so the role_id column is
 	// actually cleared instead of raising a 22P02 uuid error.
 	var roleArg any
@@ -751,7 +819,7 @@ func (s *Service) setUserRole(userID, roleID, actorID string) error {
 	changes, _ := json.Marshal(map[string]any{
 		"role": map[string]any{"old": nullName(cur.name), "new": nullName(next.name)},
 	})
-	s.logActivity(userID, "user", "update", string(changes), actorID)
+	s.auditChange(fmt.Sprintf("Changed role for %q from %q to %q", userName, cur.name, next.name), "user", userID, "update", string(changes), actorID)
 	return nil
 }
 
@@ -851,7 +919,10 @@ func (s *Service) createUser(name, email, password, roleID, actorID string) (*Us
 	if roleID != "" && !validUUID(roleID) {
 		return nil, ErrNotFound
 	}
-	hash, err := auth.HashPassword(password, 12)
+	if err := auth.ValidatePassword(password); err != nil {
+		return nil, err
+	}
+	hash, err := auth.HashPassword(password, s.bcryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
@@ -927,7 +998,7 @@ func (s *Service) createUser(name, email, password, roleID, actorID string) (*Us
 			"role":  map[string]string{"new": roleName},
 		})
 	}
-	s.logActivity(u.ID, "user", "create", string(changes), actorID)
+	s.auditChange(fmt.Sprintf("Created user %q", u.Name), "user", u.ID, "create", string(changes), actorID)
 	return &u, nil
 }
 
@@ -945,6 +1016,17 @@ func (s *Service) deleteUser(id, actorID string) error {
 	defer tx.Rollback()
 
 	if err := lockRBACMutations(tx); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+
+	var targetName string
+	if err := tx.QueryRow(
+		`SELECT name FROM users WHERE id = $1 AND deleted_at IS NULL`,
+		id,
+	).Scan(&targetName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return fmt.Errorf("delete user: %w", err)
 	}
 
@@ -988,7 +1070,7 @@ func (s *Service) deleteUser(id, actorID string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
-	s.logActivity(id, "user", "delete", `{"action":"deleted"}`, actorID)
+	s.auditChange(fmt.Sprintf("Deactivated user %q", targetName), "user", id, "delete", `{"action":"deleted"}`, actorID)
 	return nil
 }
 
@@ -1091,7 +1173,7 @@ func (s *Service) updateUser(id string, req UpdateUserRequest, actorID string) (
 	}
 	if len(changes) > 0 {
 		if b, err := json.Marshal(changes); err == nil {
-			s.logActivity(id, "user", "update", string(b), actorID)
+			s.auditChange(fmt.Sprintf("Updated user %q", u.Name), "user", id, "update", string(b), actorID)
 		}
 	}
 	return &u, nil
@@ -1117,15 +1199,15 @@ func (s *Service) resetPassword(id, password, actorID string) error {
 		return fmt.Errorf("reset password: %w", err)
 	}
 
-	var exists bool
+	var targetName string
 	if err := tx.QueryRow(
-		`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`,
+		`SELECT name FROM users WHERE id = $1 AND deleted_at IS NULL`,
 		id,
-	).Scan(&exists); err != nil {
+	).Scan(&targetName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return fmt.Errorf("reset password: %w", err)
-	}
-	if !exists {
-		return ErrNotFound
 	}
 
 	// Same rule as role assignment and user edits: only a wildcard holder may
@@ -1146,7 +1228,7 @@ func (s *Service) resetPassword(id, password, actorID string) error {
 
 	// The hash is computed after the guards so a refused reset costs no
 	// bcrypt work.
-	hash, err := auth.HashPassword(password, 12)
+	hash, err := auth.HashPassword(password, s.bcryptCost)
 	if err != nil {
 		return fmt.Errorf("hash reset password: %w", err)
 	}
@@ -1171,7 +1253,7 @@ func (s *Service) resetPassword(id, password, actorID string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("reset password: %w", err)
 	}
-	s.logActivity(id, "user", "reset_password", `{"password":"reset"}`, actorID)
+	s.auditChange(fmt.Sprintf("Reset password for user %q", targetName), "user", id, "reset_password", `{"password":"reset"}`, actorID)
 	return nil
 }
 
@@ -1259,7 +1341,7 @@ func (s *Service) reactivateUser(id, actorID string) (*UserInfo, error) {
 		return nil, fmt.Errorf("reactivate user: %w", err)
 	}
 	u.Active = true
-	s.logActivity(id, "user", "reactivate", `{"action":"reactivated"}`, actorID)
+	s.auditChange(fmt.Sprintf("Reactivated user %q", u.Name), "user", id, "reactivate", `{"action":"reactivated"}`, actorID)
 	return &u, nil
 }
 

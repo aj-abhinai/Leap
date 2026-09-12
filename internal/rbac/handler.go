@@ -247,6 +247,16 @@ func (h *Handler) GetRolePermissions(w http.ResponseWriter, r *http.Request) {
 	roleID := chi.URLParam(r, "id")
 	perms, err := h.svc.getRolePermissions(roleID)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			respond.JSON(
+				w,
+				http.StatusNotFound,
+				nil,
+				&respond.Error{Code: "NOT_FOUND", Message: ErrNotFound.Error()},
+				nil,
+			)
+			return
+		}
 		respond.ServerError(w, err)
 		return
 	}

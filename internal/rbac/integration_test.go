@@ -1557,6 +1557,102 @@ func TestSetRolePermissionsWritesAuditLog(t *testing.T) {
 	}
 }
 
+func TestCreateUserUsesConfiguredBcryptCostIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db, WithBcryptCost(4))
+
+	user, err := svc.createUser("Rep", "rep-cost@example.com", "Sup3r-Secret!", "", "")
+	if err != nil {
+		t.Fatalf("createUser: %v", err)
+	}
+	var hash string
+	if err := db.QueryRow(`SELECT password_hash FROM users WHERE id = $1`, user.ID).Scan(&hash); err != nil {
+		t.Fatalf("load hash: %v", err)
+	}
+	if !strings.HasPrefix(hash, "$2a$04$") {
+		t.Errorf("hash prefix = %q, want the configured cost 04", hash)
+	}
+}
+
+func TestRBACNoOpMutationsWriteNoAuditIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	var actorID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Admin', 'noop@example.com', 'hash') RETURNING id`,
+	).Scan(&actorID); err != nil {
+		t.Fatalf("insert actor: %v", err)
+	}
+	role, err := svc.createRole(CreateRoleRequest{Name: "noop-role"}, actorID)
+	if err != nil {
+		t.Fatalf("createRole: %v", err)
+	}
+	permID := insertPermission(t, db, "contact:read")
+
+	countRows := func() int {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM audit_logs`).Scan(&n); err != nil {
+			t.Fatalf("count audit rows: %v", err)
+		}
+		return n
+	}
+
+	if err := svc.assignPermission(role.ID, permID, actorID); err != nil {
+		t.Fatalf("assignPermission: %v", err)
+	}
+	afterFirst := countRows()
+	if err := svc.assignPermission(role.ID, permID, actorID); err != nil {
+		t.Fatalf("assignPermission again: %v", err)
+	}
+	if got := countRows(); got != afterFirst {
+		t.Errorf("re-assign wrote an audit row: %d -> %d", afterFirst, got)
+	}
+
+	if err := svc.removePermission(role.ID, permID, actorID); err != nil {
+		t.Fatalf("removePermission: %v", err)
+	}
+	afterRemove := countRows()
+	if err := svc.removePermission(role.ID, permID, actorID); err != nil {
+		t.Fatalf("removePermission again: %v", err)
+	}
+	if got := countRows(); got != afterRemove {
+		t.Errorf("re-remove wrote an audit row: %d -> %d", afterRemove, got)
+	}
+
+	var userID string
+	if err := db.QueryRow(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Rep', 'noop-rep@example.com', 'hash') RETURNING id`,
+	).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if err := svc.setUserRole(userID, role.ID, actorID); err != nil {
+		t.Fatalf("setUserRole: %v", err)
+	}
+	afterSet := countRows()
+	if err := svc.setUserRole(userID, role.ID, actorID); err != nil {
+		t.Fatalf("setUserRole same role: %v", err)
+	}
+	if got := countRows(); got != afterSet {
+		t.Errorf("same-role setUserRole wrote an audit row: %d -> %d", afterSet, got)
+	}
+}
+
+func TestRoleLookupErrorsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.getRolePermissions("00000000-0000-0000-0000-000000000009"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing role permissions = %v, want ErrNotFound", err)
+	}
+	if _, err := svc.getRolePermissions("not-a-uuid"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("malformed role permissions = %v, want ErrNotFound", err)
+	}
+	if err := svc.deleteRole("not-a-uuid", ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("malformed deleteRole = %v, want ErrNotFound", err)
+	}
+}
+
 func TestRBACMutationsWriteAuditLog(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

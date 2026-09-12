@@ -106,7 +106,7 @@ func main() {
 	authSvc := auth.NewService(database, cfg.Auth)
 	authH := auth.NewHandler(authSvc, activitySvc)
 
-	rbacSvc := rbac.NewService(database)
+	rbacSvc := rbac.NewService(database, rbac.WithBcryptCost(cfg.Auth.BcryptCost))
 	rbacH := rbac.NewHandler(rbacSvc)
 
 	contactSvc := contact.NewService(database)

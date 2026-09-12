@@ -134,6 +134,29 @@ func TestInvalidEnvPortFails(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsBcryptCostOutOfRange(t *testing.T) {
+	cfg := &Config{}
+	cfg.App.Environment = "development"
+	cfg.Auth.AccessTokenTTL = 15 * time.Minute
+	cfg.Auth.RefreshTokenTTL = time.Hour
+	cfg.Auth.JWTSecret = "0123456789abcdef0123456789abcdef"
+	cfg.Auth.BcryptCost = 3
+	cfg.Superadmin.Email = "admin@admin.com"
+	cfg.Superadmin.Password = "admin"
+
+	if err := Validate(*cfg); err == nil {
+		t.Fatal("expected error for bcrypt_cost 3")
+	}
+	cfg.Auth.BcryptCost = 40
+	if err := Validate(*cfg); err == nil {
+		t.Fatal("expected error for bcrypt_cost 40")
+	}
+	cfg.Auth.BcryptCost = 12
+	if err := Validate(*cfg); err != nil {
+		t.Fatalf("bcrypt_cost 12 rejected: %v", err)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	cfg := &Config{}
 	cfg.App.Environment = "development"

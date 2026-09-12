@@ -86,6 +86,9 @@ func setDefaults(cfg *Config) {
 	if cfg.App.Environment == "" {
 		cfg.App.Environment = "production"
 	}
+	if cfg.Auth.BcryptCost == 0 {
+		cfg.Auth.BcryptCost = 12
+	}
 	if cfg.Superadmin.Email == "" {
 		cfg.Superadmin.Email = "admin@admin.com"
 	}
@@ -175,6 +178,12 @@ func Validate(cfg Config) error {
 	}
 	if cfg.Auth.RefreshTokenTTL.Seconds() < 1 {
 		problems = append(problems, fmt.Errorf("auth.refresh_token_ttl must be at least one second (set refresh_token_ttl)"))
+	}
+	// bcrypt accepts costs 4–31; anything below the default weakens every hash
+	// silently, so it is rejected instead of warned about. Zero means unset and
+	// is defaulted by setDefaults.
+	if cfg.Auth.BcryptCost != 0 && (cfg.Auth.BcryptCost < 4 || cfg.Auth.BcryptCost > 31) {
+		problems = append(problems, fmt.Errorf("auth.bcrypt_cost must be between 4 and 31 (got %d)", cfg.Auth.BcryptCost))
 	}
 
 	secret := strings.TrimSpace(cfg.Auth.JWTSecret)
