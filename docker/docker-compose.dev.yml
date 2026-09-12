@@ -11,8 +11,8 @@ services:
   app:
     environment:
       APP_ENV: development
-      # The committed dev credentials: the base file requires these to be set,
-      # and development must not need a docker/.env.
+      # The committed dev credentials: the base file leaves these empty
+      # (production rejects that), and development must not need a docker/.env.
       DB_PASSWORD: ${DB_PASSWORD:-crm}
     # !override replaces the base compose's 0.0.0.0:9000 publish with a loopback
     # bind (compose merge would otherwise keep both mappings and conflict).

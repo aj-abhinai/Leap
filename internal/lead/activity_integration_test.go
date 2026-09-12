@@ -1369,6 +1369,25 @@ func TestUpdateActivityOnClosedLeadAllowsRecordFixesIntegration(t *testing.T) {
 		t.Fatalf("completing a historical row on a closed lead: %v", err)
 	}
 
+	// A historical row whose flags are already false (seeded directly, as
+	// legacy rows can be) accepts a resubmitted false: it is a no-op, not a
+	// reactivation.
+	var quietID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, type, is_done, is_cancelled)
+		VALUES ($1, $2, 'Note', false, false) RETURNING id`,
+		created.ID, closingStage,
+	).Scan(&quietID); err != nil {
+		t.Fatalf("seed historical open row: %v", err)
+	}
+	stillDone, stillCancelled := false, false
+	if _, err := svc.updateActivity(created.ID, quietID, "", UpdateActivityRequest{IsDone: &stillDone}); err != nil {
+		t.Fatalf("resubmitting stored is_done=false on a closed lead: %v", err)
+	}
+	if _, err := svc.updateActivity(created.ID, quietID, "", UpdateActivityRequest{IsCancelled: &stillCancelled}); err != nil {
+		t.Fatalf("resubmitting stored is_cancelled=false on a closed lead: %v", err)
+	}
+
 	// Reactivation attempts are refused.
 	uncancel := false
 	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsCancelled: &uncancel}); !errors.Is(err, ErrLeadClosed) {

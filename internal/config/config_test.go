@@ -157,6 +157,42 @@ func TestValidateRejectsBcryptCostOutOfRange(t *testing.T) {
 	}
 }
 
+// The shipped config template carries the development database password; a
+// production boot must supply a real one (usually via DB_PASSWORD).
+func TestValidateRejectsDevelopmentDatabasePasswordOutsideDevelopment(t *testing.T) {
+	base := func(env string) *Config {
+		cfg := &Config{}
+		cfg.App.Environment = env
+		cfg.Auth.AccessTokenTTL = 15 * time.Minute
+		cfg.Auth.RefreshTokenTTL = time.Hour
+		cfg.Auth.JWTSecret = "0123456789abcdef0123456789abcdef"
+		cfg.Superadmin.Email = "admin@admin.com"
+		cfg.Superadmin.Password = "admin"
+		return cfg
+	}
+
+	dev := base("development")
+	dev.DB.Password = "crm"
+	if err := Validate(*dev); err != nil {
+		t.Fatalf("development config with the committed db password rejected: %v", err)
+	}
+
+	production := base("production")
+	production.Superadmin.Email = "ops@example.com"
+	production.Superadmin.Password = "a-long-production-password"
+	if err := Validate(*production); err == nil {
+		t.Fatal("expected error for an empty db password in production")
+	}
+	production.DB.Password = "crm"
+	if err := Validate(*production); err == nil {
+		t.Fatal("expected error for the development db password in production")
+	}
+	production.DB.Password = "a-real-production-database-password"
+	if err := Validate(*production); err != nil {
+		t.Fatalf("production config with a real db password rejected: %v", err)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	cfg := &Config{}
 	cfg.App.Environment = "development"
@@ -341,6 +377,7 @@ func TestValidateAllowsDevSecretInDevelopment(t *testing.T) {
 func TestLoadForcesSecureCookiesOutsideDevelopment(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("APP_ENV", "production")
+	t.Setenv("DB_PASSWORD", "a-strong-db-password")
 	t.Setenv("SUPERADMIN_EMAIL", "admin@example.com")
 	t.Setenv("SUPERADMIN_PASSWORD", "a-strong-password-12+")
 

@@ -629,6 +629,12 @@ func (s *Service) setRolePermissions(roleID string, permissionIDs []string, acto
 			return nil, fmt.Errorf("set role permissions: touch role: %w", err)
 		}
 	}
+	// Build the response inside the transaction: a read failure rolls the
+	// write back instead of reporting an error after the change committed.
+	perms, err := getRolePermissionsFrom(tx, roleID)
+	if err != nil {
+		return nil, fmt.Errorf("set role permissions: load response: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("set role permissions: %w", err)
 	}
@@ -640,10 +646,6 @@ func (s *Service) setRolePermissions(roleID string, permissionIDs []string, acto
 		s.auditChange(fmt.Sprintf("Updated permissions for role %q", roleName), "role", roleID, "update", string(changes), actorID)
 	}
 
-	perms, err := s.getRolePermissions(roleID)
-	if err != nil {
-		return nil, fmt.Errorf("set role permissions: reload: %w", err)
-	}
 	return &Role{
 		ID:          roleID,
 		Name:        roleName,
@@ -680,17 +682,31 @@ func (s *Service) GetUserPermissions(userID string) ([]string, error) {
 }
 
 func (s *Service) getRolePermissions(roleID string) ([]Permission, error) {
+	return getRolePermissionsFrom(s.db, roleID)
+}
+
+// rolePermissionQuerier is the read surface a role-permission load needs, so
+// the set path can build its response inside the transaction instead of
+// re-reading after commit. Both *sql.DB and *sql.Tx satisfy it.
+type rolePermissionQuerier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// getRolePermissionsFrom loads a role's permissions through q; a missing or
+// malformed role is not-found.
+func getRolePermissionsFrom(q rolePermissionQuerier, roleID string) ([]Permission, error) {
 	if !validUUID(roleID) {
 		return nil, ErrNotFound
 	}
 	var exists bool
-	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM roles WHERE id = $1)`, roleID).Scan(&exists); err != nil {
+	if err := q.QueryRow(`SELECT EXISTS(SELECT 1 FROM roles WHERE id = $1)`, roleID).Scan(&exists); err != nil {
 		return nil, fmt.Errorf("get role permissions: %w", err)
 	}
 	if !exists {
 		return nil, ErrNotFound
 	}
-	rows, err := s.db.Query(`
+	rows, err := q.Query(`
 		SELECT p.id, p.name, COALESCE(p.description, ''), p.created_at FROM permissions p
 		JOIN role_permissions rp ON p.id = rp.permission_id
 		WHERE rp.role_id = $1 ORDER BY p.name

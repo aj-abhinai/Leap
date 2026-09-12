@@ -323,14 +323,15 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		return nil, err
 	}
 
-	// Load the current row so we only stamp response times on the null->set edge.
+	// Load the current row so the guard compares flags against stored values
+	// and response times stamp only on the null->set edge.
 	var cur Activity
 	var curQuickReplyID sql.NullString
 	err = tx.QueryRow(`
-		SELECT id, quick_reply_id, responded_at, is_done, type, description, scheduled_at, scheduled_end_at, remind_at
+		SELECT id, quick_reply_id, responded_at, is_done, is_cancelled, type, description, scheduled_at, scheduled_end_at, remind_at
 		FROM lead_activities WHERE id = $1 AND lead_id = $2`,
 		activityID, leadID,
-	).Scan(&cur.ID, &curQuickReplyID, &cur.RespondedAt, &cur.IsDone, &cur.Type, &cur.Description, &cur.ScheduledAt, &cur.ScheduledEndAt, &cur.RemindAt)
+	).Scan(&cur.ID, &curQuickReplyID, &cur.RespondedAt, &cur.IsDone, &cur.IsCancelled, &cur.Type, &cur.Description, &cur.ScheduledAt, &cur.ScheduledEndAt, &cur.RemindAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -481,12 +482,13 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 // moving a schedule or reminder to a new non-nil value, or the
 // log-attempt-plus-next reschedule. Record-only edits (type, description,
 // quick reply, occurred time), completing a historical row, clearing a
-// timestamp, and resubmitting the stored value are not reactivation.
+// timestamp, and resubmitting the stored value are not reactivation: a flag
+// that matches the stored row is a no-op, whichever way it points.
 func activityReactivationRequested(req UpdateActivityRequest, cur Activity) bool {
-	if req.IsCancelled != nil && !*req.IsCancelled {
+	if req.IsCancelled != nil && !*req.IsCancelled && cur.IsCancelled {
 		return true
 	}
-	if req.IsDone != nil && !*req.IsDone {
+	if req.IsDone != nil && !*req.IsDone && cur.IsDone {
 		return true
 	}
 	if req.RescheduleAt != nil {

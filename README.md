@@ -117,11 +117,12 @@ Secrets can be supplied via environment variables, which override the config fil
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSLMODE` | `[db] *` |
 | `JWT_SECRET` / `JWT_ISSUER` | `[auth] jwt_secret` / `jwt_issuer` |
 | `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | `[superadmin] *` |
-| `POSTGRES_PASSWORD` / `DB_PASSWORD` | the compose database password (both required by the production compose file; set them to the same value) |
+| `POSTGRES_PASSWORD` / `DB_PASSWORD` | the compose database password (production requires both; set them to the same value) |
 
-Required secrets: `JWT_SECRET` (at least 32 characters) and a superadmin email with a
-password of at least 12 characters. The application refuses to start with placeholder,
-empty, or known development secrets in production. Point `DB_*` at any existing PostgreSQL
+Required secrets: `JWT_SECRET` (at least 32 characters), a superadmin email with a
+password of at least 12 characters, and a database password other than the shipped
+development `crm`. The application refuses to start with placeholder, empty, or known
+development secrets in production. Point `DB_*` at any existing PostgreSQL
 instance to run the app without the bundled `db` service.
 
 In production the refresh and CSRF cookies are always `Secure`, so the app must be

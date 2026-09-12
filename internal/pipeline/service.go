@@ -163,6 +163,9 @@ func (s *Service) createPipeline(req CreatePipelineRequest) (*Pipeline, error) {
 }
 
 func (s *Service) updatePipeline(id string, req UpdatePipelineRequest) (*Pipeline, error) {
+	if !util.IsUUID(id) {
+		return nil, ErrNotFound
+	}
 	var p Pipeline
 	err := s.db.QueryRow(
 		`UPDATE pipelines SET
@@ -189,6 +192,9 @@ func (s *Service) updatePipeline(id string, req UpdatePipelineRequest) (*Pipelin
 // rename. An empty name falls back to the id so the audit row still names
 // something.
 func (s *Service) deletePipeline(id string) (string, error) {
+	if !util.IsUUID(id) {
+		return "", ErrNotFound
+	}
 	var name string
 	err := s.db.QueryRow(`DELETE FROM pipelines WHERE id = $1 RETURNING name`, id).Scan(&name)
 	if err != nil {
@@ -207,6 +213,9 @@ func (s *Service) deletePipeline(id string) (string, error) {
 }
 
 func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage, error) {
+	if !util.IsUUID(pipelineID) {
+		return nil, ErrNotFound
+	}
 	outcome, err := stageOutcome(req.Outcome)
 	if err != nil {
 		return nil, err
@@ -235,6 +244,9 @@ func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage
 }
 
 func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, error) {
+	if !util.IsUUID(stageID) {
+		return nil, ErrNotFound
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("update stage: %w", err)
@@ -346,6 +358,9 @@ func guardLastStageTx(tx *sql.Tx, stageID, pipelineID, outcome string) error {
 // lead row pins the stage (live leads show it, soft-deleted rows still hold
 // the FK), and the pipeline must keep its last open and lost stages.
 func (s *Service) deleteStage(stageID string) (string, error) {
+	if !util.IsUUID(stageID) {
+		return "", ErrNotFound
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return "", fmt.Errorf("delete stage: %w", err)
@@ -392,6 +407,9 @@ func (s *Service) deleteStage(stageID string) (string, error) {
 // list every stage exactly once; a mismatch is rejected so a stale client
 // cannot drop or duplicate columns.
 func (s *Service) reorderStages(pipelineID string, stageIDs []string) error {
+	if !util.IsUUID(pipelineID) {
+		return ErrNotFound
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("reorder stages: %w", err)

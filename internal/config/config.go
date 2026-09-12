@@ -186,6 +186,16 @@ func Validate(cfg Config) error {
 		problems = append(problems, fmt.Errorf("auth.bcrypt_cost must be between 4 and 31 (got %d)", cfg.Auth.BcryptCost))
 	}
 
+	// The shipped config template carries the development database password.
+	// A production boot must supply a real one (set DB_PASSWORD); the dev
+	// config keeps "crm" and is exempt.
+	if !development {
+		dbPassword := strings.TrimSpace(cfg.DB.Password)
+		if dbPassword == "" || strings.EqualFold(dbPassword, "crm") {
+			problems = append(problems, fmt.Errorf("db.password must be an explicit non-development value (set DB_PASSWORD)"))
+		}
+	}
+
 	secret := strings.TrimSpace(cfg.Auth.JWTSecret)
 	switch {
 	case secret == "":

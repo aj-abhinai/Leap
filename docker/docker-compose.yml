@@ -25,7 +25,8 @@ services:
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${DB_USER:-crm}
-      # No default: bare production compose must supply docker/.env. The dev
+      # Empty falls through to the config template's development password,
+      # which production validation rejects; set it in docker/.env. The dev
       # override fills the committed development value.
       DB_PASSWORD: ${DB_PASSWORD:-}
       DB_NAME: ${DB_NAME:-crm}
