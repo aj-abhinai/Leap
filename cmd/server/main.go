@@ -233,6 +233,7 @@ func main() {
 			r.Post("/api/programs/{id}/restore", middleware.RequirePermission(rbacSvc, "settings:manage", programH.Restore))
 
 			r.Post("/api/pipelines/{id}/stages", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.CreateStage))
+			r.Put("/api/pipelines/{id}/stages/order", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.ReorderStages))
 			r.Patch("/api/stages/{stage_id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.UpdateStage))
 			r.Delete("/api/stages/{stage_id}", middleware.RequirePermission(rbacSvc, "settings:manage", pipelineH.DeleteStage))
 

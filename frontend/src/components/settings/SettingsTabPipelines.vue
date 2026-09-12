@@ -18,7 +18,7 @@ import { ArrowDown, ArrowUp, Check, Layers, Plus, Trash2, Pencil, X } from '@luc
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { errorMessage } from '@/utils/errors'
 import { usePipelineStore } from '@/stores/pipeline'
-import { createPipeline as apiCreatePipeline, updatePipeline as apiUpdatePipeline, deletePipeline as apiDeletePipeline, addStage, updateStage, deleteStage as apiDeleteStage, type Stage, type Pipeline } from '@/api/pipelines'
+import { createPipeline as apiCreatePipeline, updatePipeline as apiUpdatePipeline, deletePipeline as apiDeletePipeline, addStage, updateStage, deleteStage as apiDeleteStage, reorderStages, type Stage, type Pipeline } from '@/api/pipelines'
 
 // readonly renders pipelines and stages without any mutation control: the
 // read-only domain-tab view for users without settings:manage.
@@ -180,9 +180,17 @@ async function renameStage(stageId: string) {
   }
 }
 
-async function reorderStage(stageId: string, order: number) {
+// moveStage swaps a stage with its neighbor and submits the complete order in
+// one call, so the server never sees a tie or a partial reorder.
+async function moveStage(pipeline: Pipeline, stageId: string, direction: -1 | 1) {
+  const stages = [...(pipeline.stages ?? [])].sort((a, b) => a.order - b.order)
+  const idx = stages.findIndex((s) => s.id === stageId)
+  const target = idx + direction
+  if (idx < 0 || target < 0 || target >= stages.length) return
+  const ordered = stages.map((s) => s.id)
+  ;[ordered[idx], ordered[target]] = [ordered[target], ordered[idx]]
   try {
-    await updateStage(stageId, { order })
+    await reorderStages(pipeline.id, ordered)
     loadPipelines()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to reorder stage'))
@@ -328,7 +336,7 @@ async function setStageOutcome(stage: Stage, outcome: string) {
                   :disabled="idx === 0"
                   :title="`Move ${s.name} up`"
                   :aria-label="`Move ${s.name} up`"
-                  @click="reorderStage(s.id, s.order - 1)"
+                  @click="moveStage(p, s.id, -1)"
                 >
                   <ArrowUp class="size-3.5" />
                 </Button>
@@ -338,7 +346,7 @@ async function setStageOutcome(stage: Stage, outcome: string) {
                   :disabled="idx === (p.stages?.length ?? 0) - 1"
                   :title="`Move ${s.name} down`"
                   :aria-label="`Move ${s.name} down`"
-                  @click="reorderStage(s.id, s.order + 1)"
+                  @click="moveStage(p, s.id, 1)"
                 >
                   <ArrowDown class="size-3.5" />
                 </Button>

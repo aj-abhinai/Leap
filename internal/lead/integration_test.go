@@ -1524,6 +1524,117 @@ func TestListHistoryDeletedLeadReturns404Integration(t *testing.T) {
 	}
 }
 
+// TestActivityStageNameSurvivesStageDeletionIntegration pins the snapshot: a
+// deleted stage clears only the activity's link, and the stored name keeps the
+// timeline readable.
+func TestActivityStageNameSurvivesStageDeletionIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	var otherStageID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'Other', 1) RETURNING id`,
+		pipelineID,
+	).Scan(&otherStageID); err != nil {
+		t.Fatalf("seed other stage: %v", err)
+	}
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"}); err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	// Move the lead out, then delete the stage directly: the guard blocks the
+	// delete while a lead sits on it, and the snapshot must survive the FK
+	// going null.
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &otherStageID}, ""); err != nil {
+		t.Fatalf("move lead: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM lead_stages WHERE id = $1`, stageID); err != nil {
+		t.Fatalf("delete stage: %v", err)
+	}
+
+	acts, _, err := svc.listActivities(created.ID, 1, 20)
+	if err != nil {
+		t.Fatalf("list activities: %v", err)
+	}
+	if len(acts) != 1 {
+		t.Fatalf("activities = %d, want 1", len(acts))
+	}
+	if acts[0].StageName != "New" {
+		t.Errorf("stage name = %q, want the snapshot New", acts[0].StageName)
+	}
+	if acts[0].StageID != "" {
+		t.Errorf("stage id = %q, want empty after the stage was deleted", acts[0].StageID)
+	}
+}
+
+// TestRescheduleAfterStageDeletionUsesCurrentStageIntegration covers the new
+// SET NULL window: the completed task's stage may be deleted, but the spawned
+// follow-up must land in the lead's current stage.
+func TestRescheduleAfterStageDeletionUsesCurrentStageIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageA := seedPipelineAndStage(t, db)
+	var stageB string
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'Other', 1) RETURNING id`,
+		pipelineID,
+	).Scan(&stageB); err != nil {
+		t.Fatalf("seed stage B: %v", err)
+	}
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageA,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	task, err := svc.createActivity(created.ID, stageA, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &stageB}, ""); err != nil {
+		t.Fatalf("move lead: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM lead_stages WHERE id = $1`, stageA); err != nil {
+		t.Fatalf("delete stage: %v", err)
+	}
+
+	done := true
+	next := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	if _, err := svc.updateActivity(created.ID, task.ID, "", UpdateActivityRequest{IsDone: &done, RescheduleAt: &next}); err != nil {
+		t.Fatalf("reschedule after stage deletion: %v", err)
+	}
+
+	acts, _, err := svc.listActivities(created.ID, 1, 20)
+	if err != nil {
+		t.Fatalf("list activities: %v", err)
+	}
+	var nextTask *Activity
+	for i := range acts {
+		if acts[i].ScheduledAt != nil && acts[i].ScheduledAt.Equal(next) {
+			nextTask = &acts[i]
+		}
+	}
+	if nextTask == nil {
+		t.Fatalf("spawned next task not found among %d activities", len(acts))
+	}
+	if nextTask.StageID != stageB {
+		t.Errorf("next task stage = %q, want the lead's current stage %q", nextTask.StageID, stageB)
+	}
+}
+
 // TestPatchLeadClosedToClosedReturns422Integration seeds an open, a lost and
 // a won stage, moves a lead to lost, then PATCHes it to won and asserts the
 // handler responds 422 (not 500) — ErrClosedToClosedMove must map cleanly.

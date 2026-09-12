@@ -44,6 +44,8 @@ func auditAction(action string) string {
 
 // respondError maps service errors onto the HTTP contract.
 func respondError(w http.ResponseWriter, err error) {
+	var stageInUse *StageInUseError
+	var lastStage *LastStageError
 	switch {
 	case errors.Is(err, ErrNotFound), respond.IsNotFound(err):
 		respond.JSON(
@@ -51,6 +53,22 @@ func respondError(w http.ResponseWriter, err error) {
 			http.StatusNotFound,
 			nil,
 			&respond.Error{Code: "NOT_FOUND", Message: ErrNotFound.Error()},
+			nil,
+		)
+	case errors.As(err, &stageInUse):
+		respond.JSON(
+			w,
+			http.StatusConflict,
+			nil,
+			&respond.Error{Code: "STAGE_IN_USE", Message: stageInUse.Error()},
+			nil,
+		)
+	case errors.As(err, &lastStage):
+		respond.JSON(
+			w,
+			http.StatusConflict,
+			nil,
+			&respond.Error{Code: "LAST_STAGE", Message: lastStage.Error()},
 			nil,
 		)
 	case errors.Is(err, ErrInUse):
@@ -61,7 +79,7 @@ func respondError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "CONFLICT", Message: "Delete the leads using this pipeline or stage first"},
 			nil,
 		)
-	case errors.Is(err, ErrInvalidStageOutcome):
+	case errors.Is(err, ErrInvalidStageOutcome), errors.Is(err, ErrInvalidStageOrder):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -249,6 +267,36 @@ func (h *Handler) DeleteStage(w http.ResponseWriter, r *http.Request) {
 		w,
 		http.StatusOK,
 		map[string]string{"message": "Stage deleted"},
+		nil,
+		nil,
+	)
+}
+
+// ReorderStages serves PUT /api/pipelines/{id}/stages/order. The request must
+// list every stage of the pipeline exactly once; the array order becomes the
+// stored order.
+func (h *Handler) ReorderStages(w http.ResponseWriter, r *http.Request) {
+	pipelineID := chi.URLParam(r, "id")
+	var req ReorderStagesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	if err := h.svc.reorderStages(pipelineID, req.StageIDs); err != nil {
+		respondError(w, err)
+		return
+	}
+	audit.LogCustom(h.svc.db, "Reordered pipeline stages", "pipeline", pipelineID, "update", "", ctxutil.GetUserID(r))
+	respond.JSON(
+		w,
+		http.StatusOK,
+		map[string]string{"message": "Stages reordered"},
 		nil,
 		nil,
 	)

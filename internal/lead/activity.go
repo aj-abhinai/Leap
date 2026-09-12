@@ -31,7 +31,7 @@ var ErrSnoozeTooFar = errors.New("remind_at is too far in the future")
 const maxSnoozeHorizon = 365 * 24 * time.Hour
 
 const activitySelect = `
-	SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
+	SELECT la.id, la.lead_id, COALESCE(la.stage_id::text, ''), COALESCE(ls.name, la.stage_name, ''), la.user_id, COALESCE(u.name, ''),
 		la.type, la.description, la.quick_reply_id, t.name,
 		la.scheduled_at, la.scheduled_end_at, la.remind_at, la.responded_at, la.occurred_at,
 		la.is_done, la.is_cancelled, la.is_reminded, la.created_at, la.updated_at
@@ -163,12 +163,12 @@ func (s *Service) insertActivityTx(tx *sql.Tx, leadID, stageID, userID, typeValu
 	var quickReplyIDOut, quickReplyName sql.NullString
 	err := tx.QueryRow(`
 		WITH ins AS (
-			INSERT INTO lead_activities (lead_id, stage_id, user_id, type, description, quick_reply_id, scheduled_at, scheduled_end_at, remind_at, responded_at, occurred_at, is_done)
-			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, NULLIF($6, '')::uuid, $7, $8, $9, $10, $11, $12)
-			RETURNING id, lead_id, stage_id, user_id, type, description, quick_reply_id,
+			INSERT INTO lead_activities (lead_id, stage_id, stage_name, user_id, type, description, quick_reply_id, scheduled_at, scheduled_end_at, remind_at, responded_at, occurred_at, is_done)
+			VALUES ($1, $2, (SELECT name FROM lead_stages WHERE id = $2), NULLIF($3, '')::uuid, $4, $5, NULLIF($6, '')::uuid, $7, $8, $9, $10, $11, $12)
+			RETURNING id, lead_id, stage_id, stage_name, user_id, type, description, quick_reply_id,
 				scheduled_at, scheduled_end_at, remind_at, responded_at, occurred_at, is_done, is_cancelled, is_reminded, created_at, updated_at
 		)
-		SELECT ins.id, ins.lead_id, ins.stage_id, COALESCE(ls.name, ''), ins.user_id, COALESCE(u.name, ''),
+		SELECT ins.id, ins.lead_id, COALESCE(ins.stage_id::text, ''), COALESCE(ls.name, ins.stage_name, ''), ins.user_id, COALESCE(u.name, ''),
 			ins.type, ins.description, ins.quick_reply_id, COALESCE(t.name, ''),
 			ins.scheduled_at, ins.scheduled_end_at, ins.remind_at, ins.responded_at, ins.occurred_at,
 			ins.is_done, ins.is_cancelled, ins.is_reminded, ins.created_at, ins.updated_at
@@ -413,7 +413,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 			is_cancelled = COALESCE($15, is_cancelled),
 			updated_at = now()
 		WHERE id = $1 AND lead_id = $2
-		RETURNING id, lead_id, stage_id, '', user_id, '', type, description, quick_reply_id, '',
+		RETURNING id, lead_id, COALESCE(stage_id::text, ''), '', user_id, '', type, description, quick_reply_id, '',
 			scheduled_at, scheduled_end_at, remind_at, responded_at, occurred_at, is_done, is_cancelled, is_reminded, created_at, updated_at`,
 		activityID, leadID, req.QuickReplyID, req.IsDone, respondedAt, req.Type, desc,
 		req.ScheduledAt.Set, req.ScheduledAt.Value, req.ScheduledEndAt.Set, req.ScheduledEndAt.Value,
@@ -452,7 +452,17 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 			t := req.RescheduleAt.Add(-time.Duration(lead) * time.Minute)
 			nextRemind = &t
 		}
-		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, mergedType, "", nil, req.RescheduleAt, nil, nextRemind, nil, nil, false); err != nil {
+		// The next task belongs to where the lead is now: the completed row's
+		// stage may have been deleted (its link is SET NULL), while the lead
+		// is guaranteed open by the guard above.
+		var currentStageID string
+		if err := tx.QueryRow(
+			`SELECT stage_id::text FROM leads WHERE id = $1 AND deleted_at IS NULL`,
+			leadID,
+		).Scan(&currentStageID); err != nil {
+			return nil, fmt.Errorf("create next activity: load lead stage: %w", err)
+		}
+		if _, err := s.insertActivityTx(tx, leadID, currentStageID, userID, mergedType, "", nil, req.RescheduleAt, nil, nextRemind, nil, nil, false); err != nil {
 			return nil, fmt.Errorf("create next activity: %w", err)
 		}
 	}
@@ -640,7 +650,7 @@ func (s *Service) snoozeReminder(leadID, activityID, userID string, remindAt tim
 // and open the lead drawer.
 func (s *Service) getPendingReminders(userID string) ([]ActivityListItem, error) {
 	rows, err := s.db.Query(`
-		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
+		SELECT la.id, la.lead_id, COALESCE(la.stage_id::text, ''), COALESCE(ls.name, la.stage_name, ''), la.user_id, COALESCE(u.name, ''),
 			la.type, la.description, la.quick_reply_id, COALESCE(t.name, ''),
 			la.scheduled_at, la.scheduled_end_at, la.remind_at, la.responded_at, la.occurred_at,
 			la.is_done, la.is_cancelled, la.is_reminded, la.created_at, la.updated_at,
@@ -780,7 +790,7 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 	// The WHERE placeholders were renumbered 1..N; LIMIT/OFFSET follow after.
 	limitArg := w.NextArg()
 	rows, err := s.db.Query(`
-		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
+		SELECT la.id, la.lead_id, COALESCE(la.stage_id::text, ''), COALESCE(ls.name, la.stage_name, ''), la.user_id, COALESCE(u.name, ''),
 			la.type, la.description, la.quick_reply_id, COALESCE(t.name, ''),
 			la.scheduled_at, la.scheduled_end_at, la.remind_at, la.responded_at, la.occurred_at,
 			la.is_done, la.is_cancelled, la.is_reminded, la.created_at, la.updated_at,

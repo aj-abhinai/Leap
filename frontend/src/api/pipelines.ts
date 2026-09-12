@@ -49,6 +49,12 @@ export function updateStage(
   return apiClient.patch(`/api/stages/${stageId}`, body)
 }
 
+// reorderStages submits the complete stage order for a pipeline; the server
+// rejects a list that does not contain every stage exactly once.
+export function reorderStages(pipelineId: string, stageIds: string[]): Promise<ApiResponse<{ message: string }>> {
+  return apiClient.put(`/api/pipelines/${pipelineId}/stages/order`, { stage_ids: stageIds })
+}
+
 export function deleteStage(stageId: string): Promise<ApiResponse<null>> {
   return apiClient.delete(`/api/stages/${stageId}`)
 }

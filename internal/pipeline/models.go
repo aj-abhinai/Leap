@@ -50,3 +50,9 @@ type UpdateStageRequest struct {
 	Color   *string `json:"color,omitempty"`
 	Outcome *string `json:"outcome,omitempty"`
 }
+
+// ReorderStagesRequest carries the full stage order for a pipeline; every
+// stage id must appear exactly once.
+type ReorderStagesRequest struct {
+	StageIDs []string `json:"stage_ids"`
+}

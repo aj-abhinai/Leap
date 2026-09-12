@@ -18,7 +18,30 @@ var (
 	// ErrInvalidStageOutcome marks a requested outcome outside the open/won/
 	// lost vocabulary; it is client-input validation, surfaced as a 400.
 	ErrInvalidStageOutcome = errors.New("outcome must be 'open', 'won', or 'lost'")
+	// ErrInvalidStageOrder marks a reorder request that does not list every
+	// stage of the pipeline exactly once.
+	ErrInvalidStageOrder = errors.New("stage order must list every stage of the pipeline exactly once")
 )
+
+// StageInUseError refuses a stage change while leads reference the stage; the
+// count lets the client name the blocker.
+type StageInUseError struct {
+	LeadCount int
+}
+
+func (e *StageInUseError) Error() string {
+	return fmt.Sprintf("%d leads use this stage; move them before changing or deleting it", e.LeadCount)
+}
+
+// LastStageError refuses removing the pipeline's last open or lost stage:
+// lead entry needs an open stage and close-lost needs a lost one.
+type LastStageError struct {
+	Outcome string
+}
+
+func (e *LastStageError) Error() string {
+	return fmt.Sprintf("the pipeline needs at least one %s stage", e.Outcome)
+}
 
 // Stage outcome vocabulary. A stage's outcome is what
 // reaching it means for a lead: open (in play), won, or lost. A stage with
@@ -80,7 +103,7 @@ func (s *Service) listAllStages(pipelineIDs []string) (map[string][]Stage, error
 	query := `SELECT id, pipeline_id, name, "order", COALESCE(color, ''), outcome, created_at, updated_at
 		FROM lead_stages
 		WHERE pipeline_id = ANY($1)
-		ORDER BY "order"`
+		ORDER BY "order", created_at, id`
 	rows, err := s.db.Query(query, pipelineIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list all stages: %w", err)
@@ -190,7 +213,10 @@ func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage
 	}
 	var st Stage
 	err = s.db.QueryRow(
-		`INSERT INTO lead_stages (pipeline_id, name, "order", color, outcome) VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO lead_stages (pipeline_id, name, "order", color, outcome)
+		VALUES ($1, $2,
+			COALESCE(NULLIF($3::integer, 0), (SELECT COALESCE(MAX("order"), -1) + 1 FROM lead_stages WHERE pipeline_id = $1)),
+			$4, $5)
 		RETURNING id, pipeline_id, name, "order", COALESCE(color, ''), outcome, created_at, updated_at`,
 		pipelineID,
 		req.Name,
@@ -209,18 +235,25 @@ func (s *Service) createStage(pipelineID string, req CreateStageRequest) (*Stage
 }
 
 func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, error) {
-	// A missing stage surfaces as not-found before payload validation, matching
-	// the delete path: editing a stage that was removed in another tab gets a
-	// 404, not a validation error.
-	var exists bool
-	if err := s.db.QueryRow(
-		`SELECT EXISTS(SELECT 1 FROM lead_stages WHERE id = $1)`,
-		stageID,
-	).Scan(&exists); err != nil {
-		return nil, fmt.Errorf("load stage for update: %w", err)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("update stage: %w", err)
 	}
-	if !exists {
+	defer tx.Rollback()
+
+	// Lock the stage so concurrent outcome edits serialize. A missing stage
+	// surfaces as not-found before payload validation, matching the delete
+	// path: editing a stage that was removed in another tab gets a 404.
+	var pipelineID, currentOutcome string
+	err = tx.QueryRow(
+		`SELECT pipeline_id, outcome FROM lead_stages WHERE id = $1 FOR UPDATE`,
+		stageID,
+	).Scan(&pipelineID, &currentOutcome)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load stage for update: %w", err)
 	}
 
 	// A partial update may change the outcome alone: the value is validated
@@ -237,10 +270,15 @@ func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, e
 			return nil, err
 		}
 		outcome = &resolved
+		if resolved != currentOutcome {
+			if err := s.guardOutcomeChangeTx(tx, stageID, pipelineID, currentOutcome); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	var st Stage
-	err := s.db.QueryRow(
+	err = tx.QueryRow(
 		`UPDATE lead_stages SET
 			name = CASE WHEN NULLIF($2::text, '') IS NOT NULL THEN $2 ELSE name END,
 			"order" = COALESCE($3::integer, "order"),
@@ -261,26 +299,158 @@ func (s *Service) updateStage(stageID string, req UpdateStageRequest) (*Stage, e
 		}
 		return nil, fmt.Errorf("update stage: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit stage update: %w", err)
+	}
 	st.IsClosing = st.Outcome != OutcomeOpen
 	return &st, nil
 }
 
-// deleteStage removes a stage and returns its name for the audit row with the
-// same one-query and fallback rules as deletePipeline.
+// guardOutcomeChangeTx refuses an outcome change that would strand live leads
+// in the stage or leave the pipeline without a usable open/lost stage.
+func (s *Service) guardOutcomeChangeTx(tx *sql.Tx, stageID, pipelineID, currentOutcome string) error {
+	var leads int
+	if err := tx.QueryRow(
+		`SELECT COUNT(*) FROM leads WHERE stage_id = $1 AND deleted_at IS NULL`,
+		stageID,
+	).Scan(&leads); err != nil {
+		return fmt.Errorf("count stage leads: %w", err)
+	}
+	if leads > 0 {
+		return &StageInUseError{LeadCount: leads}
+	}
+	return guardLastStageTx(tx, stageID, pipelineID, currentOutcome)
+}
+
+// guardLastStageTx refuses removing (or stopping use of) the pipeline's last
+// open or lost stage: lead entry needs an open stage and close-lost needs a
+// lost one.
+func guardLastStageTx(tx *sql.Tx, stageID, pipelineID, outcome string) error {
+	if outcome != OutcomeOpen && outcome != OutcomeLost {
+		return nil
+	}
+	var others int
+	if err := tx.QueryRow(
+		`SELECT COUNT(*) FROM lead_stages WHERE pipeline_id = $1 AND id <> $2 AND outcome = $3`,
+		pipelineID, stageID, outcome,
+	).Scan(&others); err != nil {
+		return fmt.Errorf("count sibling stages: %w", err)
+	}
+	if others == 0 {
+		return &LastStageError{Outcome: outcome}
+	}
+	return nil
+}
+
+// deleteStage removes a stage and returns its name for the audit row. Any
+// lead row pins the stage (live leads show it, soft-deleted rows still hold
+// the FK), and the pipeline must keep its last open and lost stages.
 func (s *Service) deleteStage(stageID string) (string, error) {
-	var name string
-	err := s.db.QueryRow(`DELETE FROM lead_stages WHERE id = $1 RETURNING name`, stageID).Scan(&name)
+	tx, err := s.db.Begin()
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrNotFound
-		}
-		if respond.IsForeignKeyViolation(err) {
-			return "", ErrInUse
-		}
 		return "", fmt.Errorf("delete stage: %w", err)
+	}
+	defer tx.Rollback()
+
+	var name, pipelineID, outcome string
+	err = tx.QueryRow(
+		`SELECT name, pipeline_id, outcome FROM lead_stages WHERE id = $1 FOR UPDATE`,
+		stageID,
+	).Scan(&name, &pipelineID, &outcome)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("delete stage: %w", err)
+	}
+
+	var leads int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM leads WHERE stage_id = $1`, stageID).Scan(&leads); err != nil {
+		return "", fmt.Errorf("count stage leads: %w", err)
+	}
+	if leads > 0 {
+		return "", &StageInUseError{LeadCount: leads}
+	}
+	if err := guardLastStageTx(tx, stageID, pipelineID, outcome); err != nil {
+		return "", err
+	}
+
+	if _, err := tx.Exec(`DELETE FROM lead_stages WHERE id = $1`, stageID); err != nil {
+		return "", fmt.Errorf("delete stage: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit stage delete: %w", err)
 	}
 	if name == "" {
 		name = stageID
 	}
 	return name, nil
+}
+
+// reorderStages sets the pipeline's stage order to the given ids in one
+// transaction. The pipeline's stages are locked first, and the request must
+// list every stage exactly once; a mismatch is rejected so a stale client
+// cannot drop or duplicate columns.
+func (s *Service) reorderStages(pipelineID string, stageIDs []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("reorder stages: %w", err)
+	}
+	defer tx.Rollback()
+
+	var pipelineExists bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM pipelines WHERE id = $1)`,
+		pipelineID,
+	).Scan(&pipelineExists); err != nil {
+		return fmt.Errorf("reorder stages: check pipeline: %w", err)
+	}
+	if !pipelineExists {
+		return ErrNotFound
+	}
+
+	rows, err := tx.Query(
+		`SELECT id FROM lead_stages WHERE pipeline_id = $1 FOR UPDATE`,
+		pipelineID,
+	)
+	if err != nil {
+		return fmt.Errorf("reorder stages: lock stages: %w", err)
+	}
+	existing := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("reorder stages: scan stage: %w", err)
+		}
+		existing[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("reorder stages: iterate stages: %w", err)
+	}
+	rows.Close()
+
+	if len(stageIDs) == 0 || len(stageIDs) != len(existing) {
+		return ErrInvalidStageOrder
+	}
+	seen := map[string]bool{}
+	for _, id := range stageIDs {
+		if !existing[id] || seen[id] {
+			return ErrInvalidStageOrder
+		}
+		seen[id] = true
+	}
+	for i, id := range stageIDs {
+		if _, err := tx.Exec(
+			`UPDATE lead_stages SET "order" = $2, updated_at = now() WHERE id = $1 AND pipeline_id = $3`,
+			id, i, pipelineID,
+		); err != nil {
+			return fmt.Errorf("reorder stages: update: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("reorder stages: commit: %w", err)
+	}
+	return nil
 }
