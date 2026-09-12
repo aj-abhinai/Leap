@@ -1,7 +1,7 @@
-FROM node:22-alpine AS frontend
+FROM node:22.22-alpine AS frontend
 WORKDIR /build
 COPY frontend/pnpm-lock.yaml frontend/package.json frontend/pnpm-workspace.yaml ./
-RUN npm install -g pnpm@11.10.0 && pnpm install --frozen-lockfile --config.dangerouslyAllowAllBuilds=true
+RUN npm install -g pnpm@11.10.0 && pnpm install --frozen-lockfile
 COPY frontend/ .
 RUN pnpm build
 
@@ -12,11 +12,11 @@ RUN go mod download
 COPY . .
 COPY --from=frontend /build/dist ./frontend/dist
 RUN CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=unknown' -X 'main.versionString=v0.1.0'" -o crm ./cmd/server/ \
-    && go install github.com/knadh/stuffbin/stuffbin@latest \
+    && go install github.com/knadh/stuffbin/stuffbin@v1.3.0 \
     && "$(go env GOPATH)/bin/stuffbin" -a stuff -in crm -out crm.stuffed frontend/dist:/frontend/dist migrations:/migrations \
     && mv crm.stuffed crm
 
-FROM alpine:latest
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S -g 10001 crm \
     && adduser -S -D -H -u 10001 -G crm crm

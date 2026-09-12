@@ -62,9 +62,11 @@ Go to `http://localhost:9000` and log in with `admin@admin.com` / `admin`.
 ```shell
 # 1. Copy and edit the production env file (compose reads it from docker/)
 cp docker/.env.example docker/.env
-# 2. Edit docker/.env — set JWT_SECRET, SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD
+# 2. Edit docker/.env — set JWT_SECRET, SUPERADMIN_EMAIL, SUPERADMIN_PASSWORD,
+#    POSTGRES_PASSWORD and DB_PASSWORD (use the same value for both DB fields)
 
-# 3. Start (the app exits immediately if a secret is missing or a placeholder remains)
+# 3. Start (fails fast if a secret or the database password is missing, or a
+#    placeholder remains)
 docker compose -f docker/docker-compose.yml up -d
 ```
 
@@ -115,6 +117,7 @@ Secrets can be supplied via environment variables, which override the config fil
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSLMODE` | `[db] *` |
 | `JWT_SECRET` / `JWT_ISSUER` | `[auth] jwt_secret` / `jwt_issuer` |
 | `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | `[superadmin] *` |
+| `POSTGRES_PASSWORD` / `DB_PASSWORD` | the compose database password (both required by the production compose file; set them to the same value) |
 
 Required secrets: `JWT_SECRET` (at least 32 characters) and a superadmin email with a
 password of at least 12 characters. The application refuses to start with placeholder,

@@ -11,6 +11,9 @@ services:
   app:
     environment:
       APP_ENV: development
+      # The committed dev credentials: the base file requires these to be set,
+      # and development must not need a docker/.env.
+      DB_PASSWORD: ${DB_PASSWORD:-crm}
     # !override replaces the base compose's 0.0.0.0:9000 publish with a loopback
     # bind (compose merge would otherwise keep both mappings and conflict).
     ports: !override
@@ -19,5 +22,7 @@ services:
       - ../config.dev.toml:/crm/config.toml:ro
 
   db:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm}
     ports:
       - "127.0.0.1:5432:5432"

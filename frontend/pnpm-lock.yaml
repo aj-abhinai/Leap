@@ -19,9 +19,6 @@ importers:
       '@tanstack/vue-table':
         specifier: ^9.0.0
         version: 9.1.2(vue@3.5.41(typescript@6.0.3))
-      '@vee-validate/zod':
-        specifier: ^4.15.1
-        version: 4.15.1(vue@3.5.41(typescript@6.0.3))(zod@4.4.3)
       '@vueuse/core':
         specifier: ^14.4.0
         version: 14.4.0(vue@3.5.41(typescript@6.0.3))
@@ -37,9 +34,6 @@ importers:
       reka-ui:
         specifier: ^2.10.1
         version: 2.10.1(vue@3.5.41(typescript@6.0.3))
-      sortablejs:
-        specifier: ^1.15.7
-        version: 1.15.7
       tailwind-merge:
         specifier: ^3.6.0
         version: 3.6.0
@@ -71,9 +65,6 @@ importers:
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
-      '@types/sortablejs':
-        specifier: ^1.15.9
-        version: 1.15.9
       '@vitejs/plugin-vue':
         specifier: ^6.0.8
         version: 6.0.8(vite@8.2.1(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.41(typescript@6.0.3))
@@ -792,16 +783,8 @@ packages:
   '@types/node@26.1.2':
     resolution: {integrity: sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg==}
 
-  '@types/sortablejs@1.15.9':
-    resolution: {integrity: sha512-7HP+rZGE2p886PKV9c9OJzLBI6BBJu1O7lJGYnPyG3fS4/duUCcngkNCjsLwIMV+WMqANe3tt4irrXHSIe68OQ==}
-
   '@types/web-bluetooth@0.0.21':
     resolution: {integrity: sha512-oIQLCGWtcFZy2JW77j9k8nHzAOpqMHLQejDA48XXMWH6tjCQHz5RCFz1bzsmROyL6PUm+LLnUiI4BCn221inxA==}
-
-  '@vee-validate/zod@4.15.1':
-    resolution: {integrity: sha512-329Z4TDBE5Vx0FdbA8S4eR9iGCFFUNGbxjpQ20ff5b5wGueScjocUIx9JHPa79LTG06RnlUR4XogQsjN4tecKA==}
-    peerDependencies:
-      zod: ^3.24.0
 
   '@vitejs/plugin-vue@6.0.8':
     resolution: {integrity: sha512-0ZjgOg7oO6farnNGup7yvoM/YXZV84OZxHAwtflItNa/6zzQyVb5LNxyea3FEKEX2XlagIKzrlH7wwxkKgtiew==}
@@ -1560,9 +1543,6 @@ packages:
 
   sortablejs@1.14.0:
     resolution: {integrity: sha512-pBXvQCs5/33fdN1/39pPL0NZF20LeRbLQ5jtnheIPN9JQAaufGjKdWduZn4U7wCtVuzKhmRkI0DFYHYRbB2H1w==}
-
-  sortablejs@1.15.7:
-    resolution: {integrity: sha512-Kk8wLQPlS+yi1ZEf48a4+fzHa4yxjC30M/Sr2AnQu+f/MPwvvX9XjZ6OWejiz8crBsLwSq8GHqaxaET7u6ux0A==}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -2383,17 +2363,7 @@ snapshots:
     dependencies:
       undici-types: 8.3.0
 
-  '@types/sortablejs@1.15.9': {}
-
   '@types/web-bluetooth@0.0.21': {}
-
-  '@vee-validate/zod@4.15.1(vue@3.5.41(typescript@6.0.3))(zod@4.4.3)':
-    dependencies:
-      type-fest: 4.41.0
-      vee-validate: 4.15.1(vue@3.5.41(typescript@6.0.3))
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - vue
 
   '@vitejs/plugin-vue@6.0.8(vite@8.2.1(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.41(typescript@6.0.3))':
     dependencies:
@@ -3198,8 +3168,6 @@ snapshots:
   signal-exit@4.1.0: {}
 
   sortablejs@1.14.0: {}
-
-  sortablejs@1.15.7: {}
 
   source-map-js@1.2.1: {}
 

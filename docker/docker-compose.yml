@@ -25,7 +25,9 @@ services:
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
       DB_USER: ${DB_USER:-crm}
-      DB_PASSWORD: ${DB_PASSWORD:-crm}
+      # No default: bare production compose must supply docker/.env. The dev
+      # override fills the committed development value.
+      DB_PASSWORD: ${DB_PASSWORD:-}
       DB_NAME: ${DB_NAME:-crm}
       APP_ENV: ${APP_ENV:-production}
       # Comma-separated CIDRs of trusted reverse proxies. Leave empty when the
@@ -53,7 +55,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-crm}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm}
+      # Empty means unset: the Postgres image refuses to initialize without a
+      # superuser password, so production fails fast instead of using a known
+      # credential. The dev override fills the committed development value.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-crm}
     # No host port publish in production — Postgres is reachable only inside
     # the compose network. The dev override publishes it on 127.0.0.1.

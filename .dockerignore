@@ -4,10 +4,11 @@
 bin
 coverage
 
-frontend/node_modules
+**/node_modules
 frontend/dist
 frontend/.vite
-frontend/node_modules/.vite
+frontend/test-results
+frontend/playwright-report
 
 .env
 **/.env
@@ -17,5 +18,7 @@ frontend/node_modules/.vite
 
 .commandcode
 .agents
+.opencode
+docs
 scan.md
 skills-lock.json
