@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,6 +60,7 @@ const emit = defineEmits<{
   viewActivities: [lead: Lead]
   stageAdded: []
   bulkMove: [leadIds: string[], stageId: string]
+  reload: []
 }>()
 
 // ---- per-pipeline kanban prefs (localStorage) ----
@@ -308,13 +310,56 @@ const moveTargets = computed<Record<string, Stage[]>>(() => {
   return map
 })
 
+// Closing an open deal is destructive: the row becomes terminal and every
+// open task is cancelled. A drag into a closing column asks first; the drop
+// has already moved the card in the local column array, so cancel reloads the
+// board from the server to put it back.
+const pendingClose = shallowRef<{
+  leadId: string
+  newStageId: string
+  previousStageId: string
+  stageName: string
+} | null>(null)
+
+const closeConfirmTitle = computed(() =>
+  pendingClose.value ? `Close this deal in "${pendingClose.value.stageName}"?` : '',
+)
+
 function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string) {
-  if (evt.added) {
-    const previousStageId = evt.added.element.stage_id
-    if (previousStageId !== newStageId) {
-      emit('moveStage', evt.added.element.id!, newStageId, previousStageId)
+  if (!evt.added) return
+  const previousStageId = evt.added.element.stage_id
+  if (previousStageId === newStageId) return
+  const target = props.stages.find((s) => s.id === newStageId)
+  if (target && target.outcome !== 'open' && !isClosedLead(evt.added.element)) {
+    pendingClose.value = {
+      leadId: evt.added.element.id!,
+      newStageId,
+      previousStageId,
+      stageName: target.name,
     }
+    return
   }
+  emit('moveStage', evt.added.element.id!, newStageId, previousStageId)
+}
+
+function confirmCloseMove() {
+  const p = pendingClose.value
+  if (p) emit('moveStage', p.leadId, p.newStageId, p.previousStageId)
+  pendingClose.value = null
+}
+
+function cancelCloseMove() {
+  // A dialog dismissal can report closed twice (Cancel click and the dialog's
+  // own update); only the first dismissal should reload the board.
+  if (!pendingClose.value) return
+  pendingClose.value = null
+  emit('reload')
+}
+
+function handleCloseDialogUpdate(open: boolean) {
+  // A confirm clears pendingClose before the dialog reports closed, so this
+  // only fires for Esc/overlay dismissal.
+  if (!open && pendingClose.value) cancelCloseMove()
 }
 // Overdue boundary: the task's end when it has a window, else its single
 // start time — the same rule as every other task surface.
@@ -616,6 +661,17 @@ function showField(key: string): boolean {
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
+
+    <ConfirmDialog
+      :open="pendingClose !== null"
+      :title="closeConfirmTitle"
+      description="Open tasks on this deal will be cancelled and the record becomes terminal."
+      confirm-text="Close deal"
+      destructive
+      @update:open="handleCloseDialogUpdate"
+      @confirm="confirmCloseMove"
+      @cancel="cancelCloseMove"
+    />
   </div>
 </template>
 

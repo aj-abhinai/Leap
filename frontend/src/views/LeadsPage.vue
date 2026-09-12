@@ -326,6 +326,7 @@ watch(
         @view-activities="(lead) => openLeadDrawer(lead.id!, lead)"
         @move-stage="moveStage"
         @bulk-move="bulkMoveStage"
+        @reload="loadLeads"
         @stage-added="async () => { await pipelineStore.fetchPipelines(); loadLeads() }"
       />
     </div>
