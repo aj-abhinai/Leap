@@ -1289,6 +1289,83 @@ func TestPatchLeadStageMoveSucceedsIntegration(t *testing.T) {
 	}
 }
 
+// TestSpawnCycleRejectsSiblingFieldsIntegration asserts a reopen PATCH that
+// carries fields other than stage_id is refused and spawns nothing.
+func TestSpawnCycleRejectsSiblingFieldsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	closingStage := seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &closingStage}, ""); err != nil {
+		t.Fatalf("close lead: %v", err)
+	}
+
+	note := "dropped?"
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &stageID, Notes: &note}, ""); !errors.Is(err, ErrSpawnOnlyStage) {
+		t.Fatalf("reopen with sibling fields = %v, want ErrSpawnOnlyStage", err)
+	}
+
+	// The closed row stays terminal and no new cycle was spawned.
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.StageID != closingStage {
+		t.Errorf("stage after refused reopen = %q, want the closed stage %q", got.StageID, closingStage)
+	}
+	var leads int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM leads WHERE contact_id = $1`, got.ContactID).Scan(&leads); err != nil {
+		t.Fatalf("count leads: %v", err)
+	}
+	if leads != 1 {
+		t.Errorf("lead rows for contact = %d, want 1 (no spawn)", leads)
+	}
+}
+
+// TestPatchLeadReopenWithSiblingReturns400Integration asserts the handler maps
+// ErrSpawnOnlyStage to 400 instead of dropping the sibling fields silently.
+func TestPatchLeadReopenWithSiblingReturns400Integration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	h := NewHandler(svc)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	closingStage := seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Bob", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &closingStage}, ""); err != nil {
+		t.Fatalf("close lead: %v", err)
+	}
+
+	note := "x"
+	body, _ := json.Marshal(UpdateRequest{StageID: &stageID, Notes: &note})
+	req := httptest.NewRequest(http.MethodPatch, "/api/leads/"+created.ID, strings.NewReader(string(body)))
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", created.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+
+	h.Update(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
 // TestPatchLeadClosedToClosedReturns422Integration seeds an open, a lost and
 // a won stage, moves a lead to lost, then PATCHes it to won and asserts the
 // handler responds 422 (not 500) — ErrClosedToClosedMove must map cleanly.

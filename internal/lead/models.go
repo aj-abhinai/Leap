@@ -81,6 +81,16 @@ type UpdateRequest struct {
 	AssignedTo *string  `json:"assigned_to,omitempty"`
 }
 
+// spawnCarriesOnlyStage reports whether a reopen request carries nothing but
+// the target stage. A new cycle takes the closed row's contact, program, and
+// nickname by design; sibling edits in the same request are refused rather
+// than silently dropped.
+func (r UpdateRequest) spawnCarriesOnlyStage() bool {
+	return r.Nickname == nil && r.ContactID == nil && r.PipelineID == nil &&
+		r.ProgramID == nil && r.Value == nil && r.Notes == nil &&
+		r.LostReason == nil && r.AssignedTo == nil
+}
+
 // ListFilters drives the lead list (GET /api/leads). Search matches the lead
 // nickname, contact name, primary phone, primary email, or program name;
 // Outcome filters on the linked stage's outcome ('open' | 'won' | 'lost');

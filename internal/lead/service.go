@@ -56,6 +56,11 @@ var (
 	// task back into working state. Record-only edits to existing tasks stay
 	// allowed on a terminal deal.
 	ErrLeadClosed = errors.New("a closed lead does not accept new or reactivated tasks")
+	// ErrSpawnOnlyStage marks a reopen of a closed lead that carries fields
+	// besides stage_id. The new cycle copies the contact, program, and
+	// nickname from the closed row by design; sibling edits are refused
+	// instead of silently dropped.
+	ErrSpawnOnlyStage = errors.New("reopening a closed lead accepts only stage_id")
 )
 
 // OpenLeadConflictError refuses a write that would open a second lead in an
@@ -806,6 +811,9 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		}
 		if targetOutcome != "open" {
 			return nil, ErrClosedToClosedMove
+		}
+		if !req.spawnCarriesOnlyStage() {
+			return nil, ErrSpawnOnlyStage
 		}
 		return s.spawnCycle(old, *req.StageID, userID)
 	}

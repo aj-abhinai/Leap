@@ -172,7 +172,7 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrCustomValueRejected), errors.Is(err, ErrProgramNotActive),
 		errors.Is(err, ErrContactRequired), errors.Is(err, ErrNoContactDetail),
 		errors.Is(err, ErrInvalidQuickReply), errors.Is(err, ErrEmptyType),
-		errors.Is(err, ErrInvalidRange),
+		errors.Is(err, ErrInvalidRange), errors.Is(err, ErrSpawnOnlyStage),
 		errors.Is(err, ErrContactNotActive), errors.Is(err, ErrInvalidAssignee),
 		errors.Is(err, ErrInvalidContactID), errors.Is(err, ErrNothingToUpdate):
 		respond.JSON(
