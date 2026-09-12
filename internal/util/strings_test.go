@@ -1,6 +1,28 @@
 package util
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// TestPhoneMatchCond pins the generated predicate: callers embed it inside
+// larger AND/OR expressions, so the outer parentheses and both match arms must
+// survive.
+func TestPhoneMatchCond(t *testing.T) {
+	got := PhoneMatchCond("cp.value", "$1", "$2")
+	if !strings.HasPrefix(got, "(") || !strings.HasSuffix(got, ")") {
+		t.Errorf("PhoneMatchCond = %q, want an outer-parenthesized condition", got)
+	}
+	for _, want := range []string{
+		`regexp_replace(cp.value, '\D', '', 'g')`,
+		`IN ($1, $2)`,
+		`ltrim(regexp_replace(cp.value, '\D', '', 'g'), '0') = $1`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("PhoneMatchCond = %q, want it to contain %q", got, want)
+		}
+	}
+}
 
 func TestCanonicalPhone(t *testing.T) {
 	tests := []struct {

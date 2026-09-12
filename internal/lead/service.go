@@ -634,8 +634,7 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 		err := tx.QueryRow(
 			`SELECT cp.contact_id FROM contact_phones cp
 			JOIN contacts c ON c.id = cp.contact_id AND c.deleted_at IS NULL
-			WHERE regexp_replace(cp.value, '\D', '', 'g') IN ($1, $2)
-			   OR ltrim(regexp_replace(cp.value, '\D', '', 'g'), '0') = $1
+			WHERE `+util.PhoneMatchCond("cp.value", "$1", "$2")+`
 			LIMIT 1`,
 			phoneKey, codedKey,
 		).Scan(&found)
@@ -1008,22 +1007,14 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 
 	// Record the stage move in history (same transaction, before commit).
 	if targetStage != nil {
-		if _, err := tx.Exec(
-			`INSERT INTO lead_stage_history (lead_id, from_stage_id, to_stage_id, from_stage_name, to_stage_name, user_id)
-			VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid)`,
-			id, old.StageID, l.StageID, old.StageName, targetStage.Name, userID,
-		); err != nil {
-			return nil, fmt.Errorf("record stage history: %w", err)
+		if err := s.insertStageHistoryTx(tx, id, old.StageID, l.StageID, old.StageName, targetStage.Name, userID); err != nil {
+			return nil, err
 		}
 		// Reaching a closing stage resolves the deal: cancel every open task so
 		// reminders stop nagging on won/lost leads.
 		if targetStage.IsClosing {
-			if _, err := tx.Exec(
-				`UPDATE lead_activities SET is_cancelled = true
-				WHERE lead_id = $1 AND NOT is_done AND NOT is_cancelled`,
-				id,
-			); err != nil {
-				return nil, fmt.Errorf("cancel open tasks: %w", err)
+			if err := s.cancelOpenTasksTx(tx, id); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -1157,12 +1148,8 @@ func (s *Service) delete(id string, userID string) error {
 	}
 	// Cancel open tasks in the same transaction, mirroring the close path, so
 	// a soft-deleted lead stops generating reminders.
-	if _, err := tx.Exec(
-		`UPDATE lead_activities SET is_cancelled = true
-		WHERE lead_id = $1 AND NOT is_done AND NOT is_cancelled`,
-		id,
-	); err != nil {
-		return fmt.Errorf("delete lead: cancel open tasks: %w", err)
+	if err := s.cancelOpenTasksTx(tx, id); err != nil {
+		return fmt.Errorf("delete lead: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit lead delete: %w", err)
@@ -1328,6 +1315,33 @@ func (s *Service) stageInfoTx(tx *sql.Tx, stageID string) (*stageInfo, error) {
 	return &info, nil
 }
 
+// insertStageHistoryTx records one stage move with the stage names captured at
+// move time, so later renames or deletions never rewrite history. Every lead
+// transition that changes stages uses this one writer.
+func (s *Service) insertStageHistoryTx(tx *sql.Tx, leadID, fromStageID, toStageID, fromName, toName, userID string) error {
+	if _, err := tx.Exec(
+		`INSERT INTO lead_stage_history (lead_id, from_stage_id, to_stage_id, from_stage_name, to_stage_name, user_id)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid)`,
+		leadID, fromStageID, toStageID, fromName, toName, userID,
+	); err != nil {
+		return fmt.Errorf("record stage history: %w", err)
+	}
+	return nil
+}
+
+// cancelOpenTasksTx cancels every open task on a lead: reaching a closing
+// stage or deleting the lead ends its working state, so reminders stop.
+func (s *Service) cancelOpenTasksTx(tx *sql.Tx, leadID string) error {
+	if _, err := tx.Exec(
+		`UPDATE lead_activities SET is_cancelled = true
+		WHERE lead_id = $1 AND NOT is_done AND NOT is_cancelled`,
+		leadID,
+	); err != nil {
+		return fmt.Errorf("cancel open tasks: %w", err)
+	}
+	return nil
+}
+
 // closeLostTx executes a close_lost quick reply inside a transaction: the
 // lead moves to its pipeline's lost closing stage, outcome resolves to
 // 'lost', open tasks are cancelled, and the move is recorded in stage
@@ -1385,22 +1399,14 @@ func (s *Service) closeLostTx(tx *sql.Tx, leadID, userID string) (bool, error) {
 	if err := tx.QueryRow(`SELECT name FROM lead_stages WHERE id = $1`, currentStageID).Scan(&fromStageName); err != nil {
 		return false, fmt.Errorf("close lost: load current stage name: %w", err)
 	}
-	if _, err := tx.Exec(
-		`INSERT INTO lead_stage_history (lead_id, from_stage_id, to_stage_id, from_stage_name, to_stage_name, user_id)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid)`,
-		leadID, currentStageID, target.ID, fromStageName, target.Name, userID,
-	); err != nil {
-		return false, fmt.Errorf("close lost: record stage history: %w", err)
+	if err := s.insertStageHistoryTx(tx, leadID, currentStageID, target.ID, fromStageName, target.Name, userID); err != nil {
+		return false, fmt.Errorf("close lost: %w", err)
 	}
 
 	// Reaching a closing stage resolves the deal: cancel every open task so
 	// reminders stop nagging on lost leads.
-	if _, err := tx.Exec(
-		`UPDATE lead_activities SET is_cancelled = true
-		WHERE lead_id = $1 AND NOT is_done AND NOT is_cancelled`,
-		leadID,
-	); err != nil {
-		return false, fmt.Errorf("close lost: cancel open tasks: %w", err)
+	if err := s.cancelOpenTasksTx(tx, leadID); err != nil {
+		return false, fmt.Errorf("close lost: %w", err)
 	}
 	return true, nil
 }

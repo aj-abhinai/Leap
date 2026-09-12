@@ -354,10 +354,7 @@ func (s *Service) resolveByPhone(phone string) ([]ResolveMatch, error) {
 			SELECT value FROM contact_emails WHERE contact_id = c.id AND is_primary LIMIT 1
 		) ece ON true
 		WHERE c.deleted_at IS NULL
-		  AND (
-			regexp_replace(cp.value, '\D', '', 'g') IN ($1, $2)
-			OR ltrim(regexp_replace(cp.value, '\D', '', 'g'), '0') = $1
-		  )
+		  AND `+util.PhoneMatchCond("cp.value", "$1", "$2")+`
 		ORDER BY c.id, c.updated_at DESC`,
 		key, codedKey,
 	)
@@ -581,10 +578,7 @@ func (s *Service) duplicateMatches(q interface {
 			($1 <> '' AND EXISTS (
 				SELECT 1 FROM contact_phones cp
 				WHERE cp.contact_id = c.id
-				  AND (
-					regexp_replace(cp.value, '\D', '', 'g') IN ($1, $2)
-					OR ltrim(regexp_replace(cp.value, '\D', '', 'g'), '0') = $1
-				  )
+				  AND `+util.PhoneMatchCond("cp.value", "$1", "$2")+`
 			))
 			OR
 			($3 <> '' AND EXISTS (

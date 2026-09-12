@@ -100,6 +100,18 @@ func PhoneLookupKeys(value, defaultCC string) (national, coded string) {
 	return national, cc + national
 }
 
+// PhoneMatchCond returns the SQL condition that matches a stored phone value
+// against the keys from PhoneLookupKeys: the digits form against both keys,
+// and the leading-zero-stripped form against the national key. It exists so
+// resolve, duplicate checks, and lead entry share one predicate. Only internal
+// column expressions and $n placeholders may be passed — the arguments are
+// interpolated without quoting.
+func PhoneMatchCond(column, nationalArg, codedArg string) string {
+	digits := `regexp_replace(` + column + `, '\D', '', 'g')`
+	return `(` + digits + ` IN (` + nationalArg + `, ` + codedArg + `)
+		OR ltrim(` + digits + `, '0') = ` + nationalArg + `)`
+}
+
 // NormalizeEmail trims and lowercases so case/whitespace differences collapse
 // to one lookup key.
 func NormalizeEmail(email string) string {

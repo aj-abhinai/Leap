@@ -100,8 +100,10 @@ func (k *contactKeys) recordMatch(phone, email string) {
 }
 
 func (k contactKeys) duplicateReason(phone, email string) string {
-	phoneMatch := util.NormalizePhoneKey(phone, k.cc) != "" && k.phones[util.NormalizePhoneKey(phone, k.cc)]
-	emailMatch := util.NormalizeEmail(email) != "" && k.emails[util.NormalizeEmail(email)]
+	p := util.NormalizePhoneKey(phone, k.cc)
+	e := util.NormalizeEmail(email)
+	phoneMatch := p != "" && k.phones[p]
+	emailMatch := e != "" && k.emails[e]
 	switch {
 	case phoneMatch && emailMatch:
 		return "phone and email match an existing contact"
