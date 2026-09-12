@@ -51,6 +51,11 @@ var (
 	// another (e.g. lost → won). A closed lead is terminal; a mislabel is fixed
 	// by starting a new cycle, not by re-closing the old row.
 	ErrClosedToClosedMove = errors.New("a closed lead cannot move to another closing stage")
+	// ErrLeadClosed marks writes that would create or reactivate working state
+	// on a lead sitting in a closing stage: a new task, or an edit that puts a
+	// task back into working state. Record-only edits to existing tasks stay
+	// allowed on a terminal deal.
+	ErrLeadClosed = errors.New("a closed lead does not accept new or reactivated tasks")
 )
 
 // OpenLeadConflictError refuses a write that would open a second lead in an
@@ -1235,6 +1240,31 @@ type stageInfo struct {
 	Outcome string
 }
 
+// leadStageOutcomeTx loads a live lead's current stage outcome inside a
+// transaction, deriving open versus closing from stage metadata. It takes the
+// same row lock a plain UPDATE takes (FOR NO KEY UPDATE), so a concurrent
+// close serializes behind the check instead of deadlocking on a lock upgrade
+// shared-lock holders would hit when they update the lead. It returns
+// ErrNotFound when the lead is missing or soft-deleted.
+func (s *Service) leadStageOutcomeTx(tx *sql.Tx, leadID string) (string, error) {
+	var outcome string
+	err := tx.QueryRow(`
+		SELECT ls.outcome
+		FROM leads l
+		JOIN lead_stages ls ON ls.id = l.stage_id
+		WHERE l.id = $1 AND l.deleted_at IS NULL
+		FOR NO KEY UPDATE OF l`,
+		leadID,
+	).Scan(&outcome)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("load lead stage outcome: %w", err)
+	}
+	return outcome, nil
+}
+
 // stageInfoTx loads a stage's name and outcome inside a transaction so the
 // outcome resolution and history insert see a consistent view. Closing is
 // derived from the outcome — the single stored source of truth.
@@ -1255,19 +1285,26 @@ func (s *Service) stageInfoTx(tx *sql.Tx, stageID string) (*stageInfo, error) {
 // lead moves to its pipeline's lost closing stage, outcome resolves to
 // 'lost', open tasks are cancelled, and the move is recorded in stage
 // history. It returns false (no move) when the lead already sits in the
-// target stage, and ErrNoLostStage when the pipeline has no lost closing
-// stage. The outcome rule mirrors update()'s: closing stages that carry the
-// column default 'open' count as lost.
+// target stage or when the lead is terminal (a closed row never re-closes),
+// and ErrNoLostStage when the pipeline has no lost closing stage. The outcome
+// rule mirrors update()'s: closing stages that carry the column default
+// 'open' count as lost.
 func (s *Service) closeLostTx(tx *sql.Tx, leadID, userID string) (bool, error) {
-	var pipelineID, currentStageID string
+	var pipelineID, currentStageID, currentOutcome string
 	if err := tx.QueryRow(
-		`SELECT pipeline_id, stage_id FROM leads WHERE id = $1 AND deleted_at IS NULL`,
+		`SELECT l.pipeline_id, l.stage_id, ls.outcome
+		FROM leads l
+		JOIN lead_stages ls ON ls.id = l.stage_id
+		WHERE l.id = $1 AND l.deleted_at IS NULL`,
 		leadID,
-	).Scan(&pipelineID, &currentStageID); err != nil {
+	).Scan(&pipelineID, &currentStageID, &currentOutcome); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, ErrNotFound
 		}
 		return false, fmt.Errorf("close lost: load lead: %w", err)
+	}
+	if currentOutcome != "open" {
+		return false, nil
 	}
 
 	var target stageInfo

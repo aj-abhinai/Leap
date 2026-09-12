@@ -1287,6 +1287,207 @@ func TestEditDoneCloseLostActivityDoesNotRecloseLeadIntegration(t *testing.T) {
 	}
 }
 
+func TestCreateActivityOnClosedLeadRejectedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	closingStage := seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &closingStage}, ""); err != nil {
+		t.Fatalf("close lead: %v", err)
+	}
+
+	if _, err := svc.createActivity(created.ID, closingStage, "", CreateActivityRequest{Type: "Call"}); !errors.Is(err, ErrLeadClosed) {
+		t.Errorf("create activity on a closed lead = %v, want ErrLeadClosed", err)
+	}
+}
+
+func TestUpdateActivityOnClosedLeadAllowsRecordFixesIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	closingStage := seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	sched := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	remind := sched.Add(-15 * time.Minute)
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:        "Call",
+		Description: "original",
+		ScheduledAt: &sched,
+		RemindAt:    &remind,
+	})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	// Closing cancels the open task; the row stays as permanent history.
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &closingStage}, ""); err != nil {
+		t.Fatalf("close lead: %v", err)
+	}
+
+	// Record fixes stay allowed: description edits, resubmitting the stored
+	// schedule/reminder at the minute precision the edit form round-trips,
+	// clearing the schedule, and completing a historical row.
+	desc := "corrected"
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{Description: &desc}); err != nil {
+		t.Fatalf("description edit on a closed lead: %v", err)
+	}
+	minuteSched := sched.Truncate(time.Minute)
+	minuteRemind := remind.Truncate(time.Minute)
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{ScheduledAt: optTime(&minuteSched)}); err != nil {
+		t.Fatalf("resubmitting the stored schedule on a closed lead: %v", err)
+	}
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{RemindAt: optTime(&minuteRemind)}); err != nil {
+		t.Fatalf("resubmitting the stored reminder on a closed lead: %v", err)
+	}
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{ScheduledAt: optTime(nil)}); err != nil {
+		t.Fatalf("clearing the schedule on a closed lead: %v", err)
+	}
+	done := true
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsDone: &done}); err != nil {
+		t.Fatalf("completing a historical row on a closed lead: %v", err)
+	}
+
+	// Reactivation attempts are refused.
+	uncancel := false
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsCancelled: &uncancel}); !errors.Is(err, ErrLeadClosed) {
+		t.Errorf("un-cancel on a closed lead = %v, want ErrLeadClosed", err)
+	}
+	undone := false
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsDone: &undone}); !errors.Is(err, ErrLeadClosed) {
+		t.Errorf("un-complete on a closed lead = %v, want ErrLeadClosed", err)
+	}
+	future := time.Now().Add(3 * time.Hour).UTC().Truncate(time.Second)
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{ScheduledAt: optTime(&future)}); !errors.Is(err, ErrLeadClosed) {
+		t.Errorf("new schedule on a closed lead = %v, want ErrLeadClosed", err)
+	}
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{ScheduledEndAt: optTime(&future)}); !errors.Is(err, ErrLeadClosed) {
+		t.Errorf("new end on a closed lead = %v, want ErrLeadClosed", err)
+	}
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{RemindAt: optTime(&future)}); !errors.Is(err, ErrLeadClosed) {
+		t.Errorf("new reminder on a closed lead = %v, want ErrLeadClosed", err)
+	}
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{RescheduleAt: &future}); !errors.Is(err, ErrLeadClosed) {
+		t.Errorf("reschedule on a closed lead = %v, want ErrLeadClosed", err)
+	}
+}
+
+func TestCloseLostTxIgnoresTerminalLeadIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	// Seed both a won and a lost closing stage: without the terminal guard,
+	// close_lost would move the won lead into the lost stage.
+	var wonStage string
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Won', 1, 'won') RETURNING id`,
+		pipelineID,
+	).Scan(&wonStage); err != nil {
+		t.Fatalf("seed won stage: %v", err)
+	}
+	_ = seedClosingStage(t, db, pipelineID)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	if _, err := svc.update(created.ID, UpdateRequest{StageID: &wonStage}, ""); err != nil {
+		t.Fatalf("win lead: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	moved, err := svc.closeLostTx(tx, created.ID, "")
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("closeLostTx on a terminal lead: %v", err)
+	}
+	// Read through the transaction so a move that happened inside it would be
+	// visible; reading after the rollback would make this assertion vacuous.
+	var stageAfter string
+	if err := tx.QueryRow(`SELECT stage_id FROM leads WHERE id = $1`, created.ID).Scan(&stageAfter); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("load stage after closeLostTx: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if moved {
+		t.Error("closeLostTx moved a terminal lead; want a no-op")
+	}
+	if stageAfter != wonStage {
+		t.Errorf("stage after closeLostTx = %q, want the won stage %q unchanged", stageAfter, wonStage)
+	}
+}
+
+func TestPendingRemindersExcludeClosedLeadsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	closingStage := seedClosingStage(t, db, pipelineID)
+	openLead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create open lead: %v", err)
+	}
+	closedLead, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Bob", Phone: "0987654321"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create to-be-closed lead: %v", err)
+	}
+	if _, err := svc.update(closedLead.ID, UpdateRequest{StageID: &closingStage}, ""); err != nil {
+		t.Fatalf("close lead: %v", err)
+	}
+
+	// Seed the reminders directly: the write guard refuses creating them
+	// through the service on a closed lead, so this pins the read-side filter.
+	for _, leadID := range []string{openLead.ID, closedLead.ID} {
+		if _, err := db.Exec(
+			`INSERT INTO lead_activities (lead_id, stage_id, type, remind_at)
+			VALUES ($1, $2, 'call', $3)`,
+			leadID, stageID, time.Now().Add(time.Hour),
+		); err != nil {
+			t.Fatalf("seed reminder: %v", err)
+		}
+	}
+
+	reminders, err := svc.getPendingReminders("00000000-0000-0000-0000-000000000000")
+	if err != nil {
+		t.Fatalf("get pending reminders: %v", err)
+	}
+	if len(reminders) != 1 || reminders[0].LeadID != openLead.ID {
+		t.Errorf("pending reminders = %+v, want only the open lead's reminder", reminders)
+	}
+}
+
 func TestCloseLostWithoutLostStageIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

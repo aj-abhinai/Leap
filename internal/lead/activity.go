@@ -209,6 +209,14 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	}
 	defer tx.Rollback()
 
+	outcome, err := s.leadStageOutcomeTx(tx, leadID)
+	if err != nil {
+		return nil, err
+	}
+	if outcome != "open" {
+		return nil, ErrLeadClosed
+	}
+
 	if err := s.validateQuickReplyTx(tx, req.QuickReplyID); err != nil {
 		return nil, err
 	}
@@ -316,10 +324,10 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	var cur Activity
 	var curQuickReplyID sql.NullString
 	err = tx.QueryRow(`
-		SELECT id, quick_reply_id, responded_at, is_done, type, description, scheduled_at, scheduled_end_at
+		SELECT id, quick_reply_id, responded_at, is_done, type, description, scheduled_at, scheduled_end_at, remind_at
 		FROM lead_activities WHERE id = $1 AND lead_id = $2`,
 		activityID, leadID,
-	).Scan(&cur.ID, &curQuickReplyID, &cur.RespondedAt, &cur.IsDone, &cur.Type, &cur.Description, &cur.ScheduledAt, &cur.ScheduledEndAt)
+	).Scan(&cur.ID, &curQuickReplyID, &cur.RespondedAt, &cur.IsDone, &cur.Type, &cur.Description, &cur.ScheduledAt, &cur.ScheduledEndAt, &cur.RemindAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -327,6 +335,17 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		return nil, fmt.Errorf("load activity: %w", err)
 	}
 	cur.QuickReplyID = curQuickReplyID.String
+
+	// A terminal lead accepts record-only edits; the current row is loaded so
+	// the check compares values, not key presence (the edit form resubmits
+	// unchanged timestamps and explicit nulls).
+	outcome, err := s.leadStageOutcomeTx(tx, leadID)
+	if err != nil {
+		return nil, err
+	}
+	if outcome != "open" && activityReactivationRequested(req, cur) {
+		return nil, ErrLeadClosed
+	}
 
 	// Validate the merged row so a partial update can't leave the type blank.
 	mergedType := cur.Type
@@ -445,6 +464,42 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		return nil, fmt.Errorf("commit update activity: %w", err)
 	}
 	return &a, nil
+}
+
+// activityReactivationRequested reports whether an update would put a task
+// back into working state on a terminal lead: un-cancelling, un-completing,
+// moving a schedule or reminder to a new non-nil value, or the
+// log-attempt-plus-next reschedule. Record-only edits (type, description,
+// quick reply, occurred time), completing a historical row, clearing a
+// timestamp, and resubmitting the stored value are not reactivation.
+func activityReactivationRequested(req UpdateActivityRequest, cur Activity) bool {
+	if req.IsCancelled != nil && !*req.IsCancelled {
+		return true
+	}
+	if req.IsDone != nil && !*req.IsDone {
+		return true
+	}
+	if req.RescheduleAt != nil {
+		return true
+	}
+	return newTimestamp(req.ScheduledAt, cur.ScheduledAt) ||
+		newTimestamp(req.ScheduledEndAt, cur.ScheduledEndAt) ||
+		newTimestamp(req.RemindAt, cur.RemindAt)
+}
+
+// newTimestamp reports whether an update sets a timestamp to a new non-nil
+// value. Clearing (null) or resubmitting the stored value is not a change;
+// comparison is at minute granularity because the edit form round-trips
+// timestamps as date + HH:MM, so seconds-level differences it re-sends are
+// not a user edit.
+func newTimestamp(update optionalTime, current *time.Time) bool {
+	if !update.Set || update.Value == nil {
+		return false
+	}
+	if current == nil {
+		return true
+	}
+	return !update.Value.Truncate(time.Minute).Equal(current.Truncate(time.Minute))
 }
 
 // deleteActivity hard-deletes a task. The audit row is the only surviving
@@ -575,10 +630,11 @@ func (s *Service) snoozeReminder(leadID, activityID, userID string, remindAt tim
 // where I created the task, or genuinely unowned work (both null — visible
 // to everyone so someone picks it up). A team that never assigns leads
 // degrades gracefully back to a shared bell. Done and cancelled tasks never
-// appear; dismissed (is_reminded) rows are included so the Dismissed section
-// can list them. Each row carries the lead display name and contact id so
-// reminder surfaces can show whose lead the task belongs to and open the
-// lead drawer.
+// appear; tasks on terminal (won/lost) leads never appear, even when a
+// historical row is still open; dismissed (is_reminded) rows are included so
+// the Dismissed section can list them. Each row carries the lead display name
+// and contact id so reminder surfaces can show whose lead the task belongs to
+// and open the lead drawer.
 func (s *Service) getPendingReminders(userID string) ([]ActivityListItem, error) {
 	rows, err := s.db.Query(`
 		SELECT la.id, la.lead_id, la.stage_id, COALESCE(ls.name, ''), la.user_id, COALESCE(u.name, ''),
@@ -588,11 +644,13 @@ func (s *Service) getPendingReminders(userID string) ([]ActivityListItem, error)
 			COALESCE(NULLIF(l.nickname, ''), c.name, ''), l.contact_id
 		FROM lead_activities la
 		JOIN leads l ON l.id = la.lead_id AND l.deleted_at IS NULL
+		JOIN lead_stages lstage ON lstage.id = l.stage_id
 		LEFT JOIN contacts c ON c.id = l.contact_id
 		LEFT JOIN lead_stages ls ON ls.id = la.stage_id
 		LEFT JOIN users u ON u.id = la.user_id
 		LEFT JOIN tags t ON t.id = la.quick_reply_id
 		WHERE NOT la.is_done AND NOT la.is_cancelled
+			AND lstage.outcome = 'open'
 			AND (la.remind_at IS NOT NULL OR la.scheduled_at IS NOT NULL)
 			AND (
 				l.assigned_to = $1
