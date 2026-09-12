@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, shallowRef } from 'vue'
+import { shallowRef, watch } from 'vue'
 import { listLeadHistory, type StageHistoryEntry } from '@/api/leads'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Route } from '@lucide/vue'
@@ -12,18 +12,25 @@ const history = shallowRef<StageHistoryEntry[]>([])
 const loading = shallowRef(false)
 const loadError = shallowRef('')
 
-onMounted(fetchHistory)
+// The drawer reuses this instance when it switches leads, so history must
+// refetch whenever the lead changes (not only on mount).
+watch(() => props.leadId, fetchHistory, { immediate: true })
 
 async function fetchHistory() {
+  const requested = props.leadId
   loading.value = true
   loadError.value = ''
   try {
-    const res = await listLeadHistory(props.leadId)
+    const res = await listLeadHistory(requested)
+    // A fast lead switch can land this response after a newer request; only
+    // the current lead's history may render.
+    if (requested !== props.leadId) return
     history.value = res.data ?? []
   } catch (e) {
+    if (requested !== props.leadId) return
     loadError.value = errorMessage(e, 'Failed to load stage history')
   } finally {
-    loading.value = false
+    if (requested === props.leadId) loading.value = false
   }
 }
 </script>

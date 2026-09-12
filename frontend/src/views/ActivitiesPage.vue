@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
 import { useActivitiesStore, type ActivityListFilters } from '@/stores/activities'
 import { useSettingsStore } from '@/stores/settings'
 import { useRemindersStore } from '@/stores/reminders'
@@ -32,6 +32,7 @@ import { isOverdue, statusLabel, statusVariant, dueLabel, typeLabel } from '@/ut
 import { toast } from 'vue-sonner'
 import { CheckCircle2, Trash2, MoreHorizontal, AlarmClockPlus, ClipboardList } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
+import { debounce } from '@/utils/debounce'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
 const store = useActivitiesStore()
@@ -46,6 +47,7 @@ const sortOrder = shallowRef('desc')
 const selected = shallowRef<Set<string>>(new Set())
 const deleting = shallowRef(false)
 const deletingIds = shallowRef<string[]>([])
+const loadError = shallowRef('')
 
 interface ViewDef {
   id: string
@@ -102,16 +104,36 @@ const viewFilter = computed<ActivityListFilters>(() => {
 
 const totalPages = computed(() => Math.max(1, Math.ceil(store.total / store.perPage)))
 
-function load() {
-  store.fetchItems(viewFilter.value)
+let loadSeq = 0
+async function load() {
+  const seq = ++loadSeq
+  loadError.value = ''
+  try {
+    await store.fetchItems(viewFilter.value)
+  } catch (e) {
+    // A superseded request's failure must not hide a newer successful load.
+    if (seq === loadSeq) loadError.value = errorMessage(e, 'Failed to load tasks')
+  }
 }
+
+// Typing in search refetches once the keystrokes settle; the other filters
+// apply immediately.
+const loadSearchDebounced = debounce(() => {
+  store.page = 1
+  load()
+}, 300)
 
 onMounted(() => {
   if (settings.activityTypes.length === 0) settings.fetchTags()
   load()
 })
 
-watch([search, typeFilter, sortBy, sortOrder, activeView], () => {
+onBeforeUnmount(() => {
+  loadSearchDebounced.cancel()
+})
+
+watch(search, loadSearchDebounced)
+watch([typeFilter, sortBy, sortOrder, activeView], () => {
   // Any filter or view change restarts from page one.
   store.page = 1
   load()
@@ -292,11 +314,13 @@ function prevPage() {
         <!-- Table -->
         <PageState
           :loading="store.loading"
+          :error="loadError"
           :empty="store.items.length === 0"
           empty-title="No tasks here"
           empty-hint="Try a different view or clear the filters"
           :skeleton-count="6"
           skeleton-class="h-12 w-full"
+          @retry="load"
         >
           <template #empty-icon>
             <ClipboardList class="mb-3 size-10 text-muted-foreground/40" />
@@ -310,6 +334,7 @@ function prevPage() {
                     <input
                       type="checkbox"
                       class="size-4"
+                      aria-label="Select all tasks"
                       :checked="allSelected()"
                       @change="toggleAll()"
                     />
@@ -329,6 +354,7 @@ function prevPage() {
                     <input
                       type="checkbox"
                       class="size-4"
+                      :aria-label="`Select task for ${item.lead_display_name}`"
                       :checked="isSelected(item.id)"
                       @change="toggle(item.id)"
                     />
