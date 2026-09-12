@@ -31,7 +31,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
@@ -143,15 +142,10 @@ func main() {
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.BodyLimit)
-	// Empty allowlist: the SPA and API are same-origin in dev (Vite proxy)
-	// and production (single binary), so browsers block all cross-site
-	// calls. A future cross-origin consumer gets its origin added here.
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{},
-		AllowedMethods: []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		MaxAge:         300,
-	}))
+	// The SPA and API are same-origin in development (Vite proxy) and
+	// production (single binary). No CORS middleware is registered: an empty
+	// origin allowlist means "allow every origin" to the library, so a future
+	// cross-origin consumer must add CORS back with an explicit allowlist.
 
 	r.Get("/healthz", health.Live)
 	r.Get("/readyz", health.Ready(database))
