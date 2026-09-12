@@ -367,6 +367,23 @@ func (s *Service) get(id string) (*Lead, error) {
 	return &l, nil
 }
 
+// getForUpdateTx loads a lead inside a transaction with the row locked, so
+// concurrent lead writes serialize and every decision reads the state the
+// write will replace. It returns ErrNotFound when the lead is missing or
+// soft-deleted.
+func (s *Service) getForUpdateTx(tx *sql.Tx, id string) (*Lead, error) {
+	l, err := scanLead(tx.QueryRow(leadSelect+`
+		WHERE l.id = $1 AND l.deleted_at IS NULL
+		FOR UPDATE OF l`, id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get lead for update: %w", err)
+	}
+	return &l, nil
+}
+
 // displayName returns the lead's nickname when set, else the contact name.
 func (l *Lead) displayName() string {
 	if l.Nickname != "" {
@@ -398,18 +415,12 @@ func (s *Service) validateAssignedToTx(tx *sql.Tx, assignedTo *string) error {
 	return nil
 }
 
-// spawnCycle starts a new lead row for a closed lead's contact when the user
-// drags the closed card back to an open stage. The new row carries the
-// contact (always), a fresh program price snapshot, and the nickname; the
-// assignee starts unassigned and notes/tasks do not
-// carry. The old row stays terminal and untouched.
-func (s *Service) spawnCycle(old *Lead, targetStageID, userID string) (*Lead, error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("spawn cycle: %w", err)
-	}
-	defer tx.Rollback()
-
+// spawnCycleTx starts a new lead row for a closed lead's contact when the user
+// reopens the deal. The new row carries the contact (always), a fresh program
+// price snapshot, and the nickname; the assignee starts unassigned and
+// notes/tasks do not carry. The old row stays terminal and untouched. The
+// caller commits and then calls afterSpawn for the display names and audit row.
+func (s *Service) spawnCycleTx(tx *sql.Tx, old *Lead, targetStageID string) (*Lead, error) {
 	// Validate the target stage belongs to the old lead's pipeline.
 	if err := s.validateStageForPipelineTx(tx, old.PipelineID, targetStageID); err != nil {
 		return nil, err
@@ -434,7 +445,7 @@ func (s *Service) spawnCycle(old *Lead, targetStageID, userID string) (*Lead, er
 	}
 
 	var l Lead
-	err = tx.QueryRow(
+	err := tx.QueryRow(
 		`INSERT INTO leads (nickname, contact_id, pipeline_id, stage_id, program_id, value)
 		VALUES (NULLIF($1, ''), $2, $3, $4, NULLIF($5, '')::uuid, $6)
 		RETURNING id, COALESCE(nickname, ''), contact_id, pipeline_id, stage_id,
@@ -449,22 +460,23 @@ func (s *Service) spawnCycle(old *Lead, targetStageID, userID string) (*Lead, er
 	if err != nil {
 		return nil, fmt.Errorf("spawn cycle: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("spawn cycle: commit: %w", err)
-	}
+	return &l, nil
+}
 
-	if err := s.populateNames(&l); err != nil {
-		return nil, err
+// afterSpawn resolves the new cycle's display names and writes the spawn audit
+// row naming the closed lead it replaces. The cycle is already committed, so a
+// failure here surfaces without undoing it.
+func (s *Service) afterSpawn(l, old *Lead, userID string) error {
+	if err := s.populateNames(l); err != nil {
+		return err
 	}
 	l.DisplayName = l.displayName()
-	// Audit with the closed lead's display name, not its UUID, so the log
-	// reads like every other audit description.
 	name := old.DisplayName
 	if name == "" {
 		name = old.ID
 	}
 	s.logActivity(l.ID, "lead", "create", fmt.Sprintf("Started new cycle from closed lead %q", name), userID)
-	return &l, nil
+	return nil
 }
 
 func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
@@ -783,7 +795,15 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	if req.Value != nil {
 		return nil, ErrCustomValueRejected
 	}
-	old, err := s.get(id)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("update lead: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Load under a row lock: concurrent moves serialize, so every decision
+	// below reads the state the UPDATE will replace, not a stale snapshot.
+	old, err := s.getForUpdateTx(tx, id)
 	if err != nil {
 		return nil, fmt.Errorf("update lead: load current: %w", err)
 	}
@@ -800,7 +820,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		// The target stage's outcome decides: closed → open spawns a new
 		// cycle; closed → closed is rejected.
 		var targetOutcome string
-		if err := s.db.QueryRow(
+		if err := tx.QueryRow(
 			`SELECT outcome FROM lead_stages WHERE id = $1`,
 			*req.StageID,
 		).Scan(&targetOutcome); err != nil {
@@ -815,14 +835,18 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		if !req.spawnCarriesOnlyStage() {
 			return nil, ErrSpawnOnlyStage
 		}
-		return s.spawnCycle(old, *req.StageID, userID)
+		l, err := s.spawnCycleTx(tx, old, *req.StageID)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("update lead: commit spawn: %w", err)
+		}
+		if err := s.afterSpawn(l, old, userID); err != nil {
+			return nil, err
+		}
+		return l, nil
 	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("update lead: %w", err)
-	}
-	defer tx.Rollback()
 
 	if req.StageID != nil {
 		pipelineID := old.PipelineID

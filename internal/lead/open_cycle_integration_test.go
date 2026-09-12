@@ -558,3 +558,123 @@ func TestCreateLeadConflictReturns409Integration(t *testing.T) {
 		t.Errorf("existing_lead.id = %q, want the first lead's id", id)
 	}
 }
+
+// TestConcurrentStageMovesSerializeIntegration fires 8 concurrent moves at one
+// lead across two open stages and asserts the stage history is a single chain
+// (every row starts where the previous one ended, ending at the final stage).
+// A stale read records phantom rows that all start from the original stage.
+func TestConcurrentStageMovesSerializeIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, startStage := seedPipelineAndStage(t, db)
+	var stageA, stageB string
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'A', 1) RETURNING id`,
+		pipelineID,
+	).Scan(&stageA); err != nil {
+		t.Fatalf("seed stage A: %v", err)
+	}
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, 'B', 2) RETURNING id`,
+		pipelineID,
+	).Scan(&stageB); err != nil {
+		t.Fatalf("seed stage B: %v", err)
+	}
+
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    startStage,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	targets := []string{stageA, stageB}
+	const n = 8
+	start := make(chan struct{})
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			stage := targets[i%2]
+			_, errs[i] = svc.update(created.ID, UpdateRequest{StageID: &stage}, "")
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("move %d: %v", i, err)
+		}
+	}
+
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get lead: %v", err)
+	}
+	if got.StageID != stageA && got.StageID != stageB {
+		t.Errorf("final stage = %q, want one of the moved-to stages", got.StageID)
+	}
+
+	rows, err := db.Query(
+		`SELECT from_stage_id, to_stage_id FROM lead_stage_history WHERE lead_id = $1`,
+		created.ID,
+	)
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	defer rows.Close()
+	type edge struct{ from, to string }
+	var edges []edge
+	for rows.Next() {
+		var e edge
+		if err := rows.Scan(&e.from, &e.to); err != nil {
+			t.Fatalf("scan history: %v", err)
+		}
+		edges = append(edges, e)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate history: %v", err)
+	}
+
+	// Rebuild the chain from the unordered rows: every move must continue from
+	// the stage the previous move reached. moved_at is the transaction start
+	// time, so commit order cannot be read from it. A stale read leaves a
+	// phantom row whose from-stage no other row reaches, so it stays unconsumed.
+	// Goroutines acquire the row lock in arbitrary order, so a target equal to
+	// the current stage is a no-op and the edge count varies; the first move
+	// always changes stage, so at least one edge must exist.
+	if len(edges) == 0 {
+		t.Errorf("no stage moves recorded")
+	}
+	used := make([]bool, len(edges))
+	current := startStage
+	for range edges {
+		next := -1
+		for i, e := range edges {
+			if !used[i] && e.from == current {
+				next = i
+				break
+			}
+		}
+		if next == -1 {
+			break
+		}
+		used[next] = true
+		current = edges[next].to
+	}
+	for i, e := range edges {
+		if !used[i] {
+			t.Errorf("history move %q → %q is not part of the chain", e.from, e.to)
+		}
+	}
+	if current != got.StageID {
+		t.Errorf("history ends at %q, want the final stage %q", current, got.StageID)
+	}
+}
