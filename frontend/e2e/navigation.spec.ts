@@ -4,7 +4,7 @@ const views = [
   { title: 'Dashboard', heading: 'Dashboard' },
   { title: 'Contacts', heading: 'Contacts' },
   { title: 'Leads', heading: 'Leads' },
-  { title: 'Activities', heading: 'Activities' },
+  { title: 'Tasks', heading: 'Tasks' },
 ]
 
 test('sidebar navigation renders every view', async ({ page }) => {

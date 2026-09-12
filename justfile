@@ -148,7 +148,7 @@ test-race:
 
 test-short:
     @echo "Running tests (short mode)..."
-    go test -v ./...
+    go test -v -short ./...
 
 test-frontend:
     cd frontend && pnpm test:run
