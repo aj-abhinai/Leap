@@ -1489,6 +1489,40 @@ func TestPendingRemindersExcludeClosedLeadsIntegration(t *testing.T) {
 	}
 }
 
+func TestUpdateActivityReturnsJoinedNamesIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call", QuickReplyID: &qrID})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	desc := "edited"
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{Description: &desc})
+	if err != nil {
+		t.Fatalf("update activity: %v", err)
+	}
+	// The edit response carries the joined display names the API advertises,
+	// not the empty literals the old RETURNING produced.
+	if updated.StageName != "New" {
+		t.Errorf("stage name = %q, want New", updated.StageName)
+	}
+	if updated.QuickReplyName != "Interested" {
+		t.Errorf("quick reply name = %q, want Interested", updated.QuickReplyName)
+	}
+}
+
 func TestUpdateActivityClearsQuickReplyIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

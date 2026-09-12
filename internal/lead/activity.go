@@ -395,9 +395,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		respondedAt = time.Now()
 	}
 
-	var a Activity
-	var quickReplyID sql.NullString
-	var quickReplyName sql.NullString
+	var updatedID string
 	err = tx.QueryRow(`
 		UPDATE lead_activities SET
 			quick_reply_id = CASE WHEN $3::text IS NOT NULL THEN NULLIF($3::text, '')::uuid ELSE quick_reply_id END,
@@ -413,23 +411,22 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 			is_cancelled = COALESCE($15, is_cancelled),
 			updated_at = now()
 		WHERE id = $1 AND lead_id = $2
-		RETURNING id, lead_id, COALESCE(stage_id::text, ''), '', user_id, '', type, description, quick_reply_id, '',
-			scheduled_at, scheduled_end_at, remind_at, responded_at, occurred_at, is_done, is_cancelled, is_reminded, created_at, updated_at`,
+		RETURNING id`,
 		activityID, leadID, req.QuickReplyID, req.IsDone, respondedAt, req.Type, desc,
 		req.ScheduledAt.Set, req.ScheduledAt.Value, req.ScheduledEndAt.Set, req.ScheduledEndAt.Value,
 		req.RemindAt.Set, req.RemindAt.Value,
 		req.OccurredAt, req.IsCancelled,
-	).Scan(
-		&a.ID, &a.LeadID, &a.StageID, &a.StageName, &a.UserID, &a.UserName,
-		&a.Type, &a.Description, &quickReplyID, &quickReplyName,
-		&a.ScheduledAt, &a.ScheduledEndAt, &a.RemindAt, &a.RespondedAt, &a.OccurredAt,
-		&a.IsDone, &a.IsCancelled, &a.IsReminded, &a.CreatedAt, &a.UpdatedAt,
-	)
+	).Scan(&updatedID)
 	if err != nil {
 		return nil, fmt.Errorf("update activity: %w", err)
 	}
-	a.QuickReplyID = quickReplyID.String
-	a.QuickReplyName = quickReplyName.String
+	// Re-read through the shared projection so the response carries the joined
+	// stage, user, and quick-reply names (and the stage-name snapshot).
+	a, err := scanActivity(tx.QueryRow(activitySelect+`
+		WHERE la.id = $1 AND la.lead_id = $2`, updatedID, leadID))
+	if err != nil {
+		return nil, fmt.Errorf("update activity: reload: %w", err)
+	}
 
 	// The final quick reply decides the follow-up. A close_lost behavior moves
 	// the lead to the lost closing stage in the same transaction — but only
