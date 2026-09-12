@@ -222,14 +222,25 @@ const selectedBannerLead = computed(() =>
 
 // logEnquiry writes exactly one done Enquiry activity on the existing open
 // lead — the repeat enquiry is a touchpoint, not a new opportunity. The
-// server stamps occurred_at for done activities.
+// server stamps occurred_at for done activities. The type is resolved from
+// the task-type catalog (a seeded preset) so a rename keeps working, with the
+// literal name as the fallback.
 async function logEnquiry() {
   const lead = selectedBannerLead.value
   if (!lead) return
   loggingEnquiry.value = true
   try {
+    let enquiryType = 'Enquiry'
+    try {
+      if (settings.activityTypes.length === 0) await settings.fetchTags()
+      // Prefer the catalog's entry when the workspace customizes task types;
+      // an absent entry falls back to the seeded literal.
+      enquiryType = settings.activityTypes.find((t) => t.name === 'Enquiry')?.name ?? 'Enquiry'
+    } catch {
+      // The catalog is a convenience; the literal preset still logs the enquiry.
+    }
     await createLeadActivity(lead.id, {
-      type: 'Enquiry',
+      type: enquiryType,
       is_done: true,
     })
     toast.success('Enquiry logged')
@@ -455,6 +466,7 @@ function createNewPersonInstead() {
             <Search class="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               v-model="contactSearch"
+              aria-label="Contact"
               placeholder="Search by name, phone or email"
               class="pl-8"
               :disabled="!rbac.can('contact:read')"
@@ -562,7 +574,7 @@ function createNewPersonInstead() {
     <div class="space-y-2">
       <Label>Assignee</Label>
       <Select v-model="formAssignedTo">
-        <SelectTrigger>
+        <SelectTrigger aria-label="Assignee">
           <SelectValue placeholder="Unassigned" />
         </SelectTrigger>
         <SelectContent>
@@ -576,7 +588,7 @@ function createNewPersonInstead() {
     <div class="space-y-2">
       <Label>Stage</Label>
       <Select v-model="formStageId">
-        <SelectTrigger>
+        <SelectTrigger aria-label="Stage">
           <SelectValue placeholder="Select stage" />
         </SelectTrigger>
         <SelectContent>
@@ -603,7 +615,7 @@ function createNewPersonInstead() {
           {{ r }}
         </Button>
       </div>
-      <Input v-model="formLostReason" placeholder="Or type a reason…" />
+      <Input v-model="formLostReason" aria-label="Loss reason" placeholder="Or type a reason…" />
     </div>
     <div v-if="formError" class="text-sm text-destructive">{{ formError }}</div>
     </div>

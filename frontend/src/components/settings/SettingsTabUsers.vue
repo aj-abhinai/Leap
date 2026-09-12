@@ -299,6 +299,7 @@ const deactivatingName = computed(() => deactivatingUser.value?.name ?? '')
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead class="w-40"><span class="sr-only">Assign role</span></TableHead>
               <TableHead class="w-40">Actions</TableHead>
             </TableRow>
           </TableHeader>

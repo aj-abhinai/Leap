@@ -205,7 +205,7 @@ async function handleSave() {
       <Label>Phones</Label>
       <div class="space-y-1.5">
         <div v-for="(p, idx) in phones" :key="p.key" class="flex items-center gap-2">
-          <Input v-model="p.value" type="tel" :placeholder="`Phone ${idx + 1} — 98765 43210 or +971 50 123 4567`" />
+          <Input v-model="p.value" type="tel" :aria-label="`Phone ${idx + 1}`" :placeholder="`Phone ${idx + 1} — 98765 43210 or +971 50 123 4567`" />
           <Button
             variant="ghost"
             size="icon-sm"
@@ -229,7 +229,7 @@ async function handleSave() {
       <Label>Emails</Label>
       <div class="space-y-1.5">
         <div v-for="(e, idx) in emails" :key="e.key" class="flex items-center gap-2">
-          <Input v-model="e.value" type="email" :placeholder="`Email ${idx + 1}`" />
+          <Input v-model="e.value" type="email" :aria-label="`Email ${idx + 1}`" :placeholder="`Email ${idx + 1}`" />
           <Button
             variant="ghost"
             size="icon-sm"
@@ -265,7 +265,7 @@ async function handleSave() {
     <div class="space-y-2">
       <Label>Status</Label>
       <Select v-model="formStatusId">
-        <SelectTrigger>
+        <SelectTrigger aria-label="Status">
           <SelectValue placeholder="Select status" />
         </SelectTrigger>
         <SelectContent>

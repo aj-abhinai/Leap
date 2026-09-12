@@ -185,6 +185,8 @@ async function deleteRole() {
     toast.error(errorMessage(e, 'Failed to delete role'))
   } finally {
     deletingRole.value = null
+    // The role must leave the table immediately, not on the next tab mount.
+    loadRoles()
   }
 }
 
