@@ -7,7 +7,30 @@ import (
 	"fmt"
 )
 
+// requireLiveContact returns ErrNotFound unless the id is a live (non-deleted)
+// contact, so notes cannot leak from or attach to hidden rows. Malformed ids
+// report not-found rather than a database cast error.
+func (s *Service) requireLiveContact(contactID string) error {
+	if !util.IsUUID(contactID) {
+		return ErrNotFound
+	}
+	var live bool
+	if err := s.db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM contacts WHERE id = $1 AND deleted_at IS NULL)`,
+		contactID,
+	).Scan(&live); err != nil {
+		return fmt.Errorf("check contact: %w", err)
+	}
+	if !live {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Service) listNotes(contactID string, page, perPage int) ([]Note, int, error) {
+	if err := s.requireLiveContact(contactID); err != nil {
+		return nil, 0, err
+	}
 	var total int
 	if err := s.db.QueryRow(
 		`SELECT COUNT(*) FROM contact_notes WHERE contact_id = $1`,
@@ -39,15 +62,23 @@ func (s *Service) listNotes(contactID string, page, perPage int) ([]Note, int, e
 }
 
 func (s *Service) createNote(contactID, userID, note string) (*Note, error) {
+	if err := s.requireLiveContact(contactID); err != nil {
+		return nil, err
+	}
 	var n Note
 	err := s.db.QueryRow(`
 		INSERT INTO contact_notes (contact_id, user_id, note)
-		VALUES ($1, $2, $3)
+		SELECT $1, $2, $3
+		WHERE EXISTS (SELECT 1 FROM contacts WHERE id = $1 AND deleted_at IS NULL)
 		RETURNING id, contact_id, user_id,
 			(SELECT COALESCE(name, '') FROM users WHERE id = $2),
 			note, created_at, updated_at`,
 		contactID, userID, note,
 	).Scan(&n.ID, &n.ContactID, &n.UserID, &n.UserName, &n.Note, &n.CreatedAt, &n.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The contact was deleted between the check and the insert.
+		return nil, ErrNotFound
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create note: %w", err)
 	}
@@ -59,6 +90,9 @@ func (s *Service) createNote(contactID, userID, note string) (*Note, error) {
 // deleteNote hard-deletes a note; the audit row is the only surviving trace,
 // so it quotes the note's opening words instead of logging raw ids.
 func (s *Service) deleteNote(contactID, noteID, userID string, canDeleteAny bool) error {
+	if err := s.requireLiveContact(contactID); err != nil {
+		return err
+	}
 	var preview string
 	err := s.db.QueryRow(`SELECT note FROM contact_notes WHERE id = $1 AND contact_id = $2`, noteID, contactID).Scan(&preview)
 	if errors.Is(err, sql.ErrNoRows) {

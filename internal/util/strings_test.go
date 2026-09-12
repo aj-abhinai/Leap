@@ -84,6 +84,21 @@ func TestNormalizePhone(t *testing.T) {
 	}
 }
 
+func TestIsEmail(t *testing.T) {
+	valid := []string{"a@example.com", "a.b+tag@sub.example.co", " A@Example.com "}
+	for _, s := range valid {
+		if !IsEmail(s) {
+			t.Errorf("IsEmail(%q) = false, want true", s)
+		}
+	}
+	invalid := []string{"", "not-an-email", "Name <a@b.com>", "two@add@resses", "a b@c.com"}
+	for _, s := range invalid {
+		if IsEmail(s) {
+			t.Errorf("IsEmail(%q) = true, want false", s)
+		}
+	}
+}
+
 func TestNormalizeEmail(t *testing.T) {
 	tests := []struct {
 		name  string

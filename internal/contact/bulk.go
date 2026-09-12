@@ -149,6 +149,19 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "phone or email value is too long"})
 			continue
 		}
+		// A contact must carry at least one phone or one email; a value that
+		// canonicalizes to empty (e.g. free text in the phone column) does not
+		// count.
+		if c.Phone == "" && strings.TrimSpace(c.Email) == "" {
+			resp.Failed++
+			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "phone or email is required"})
+			continue
+		}
+		if c.Email != "" && !util.IsEmail(c.Email) {
+			resp.Failed++
+			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "invalid email address"})
+			continue
+		}
 		if reason := keys.duplicateReason(c.Phone, c.Email); reason != "" {
 			resp.Failed++
 			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: reason})

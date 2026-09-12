@@ -545,6 +545,145 @@ func TestBulkCreateImportsFreshRowsIntegration(t *testing.T) {
 	}
 }
 
+func TestUpdateContactRejectsDuplicateUnlessConfirmedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	first, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210"})
+	if err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+	second, err := svc.create(CreateRequest{Name: "Bob", Phone: "1112223333"})
+	if err != nil {
+		t.Fatalf("create second: %v", err)
+	}
+
+	dup := "9876543210"
+	_, err = svc.update(second.ID, UpdateRequest{Phone: &dup}, "")
+	var dupErr *DuplicateError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("update to duplicate phone = %v, want *DuplicateError", err)
+	}
+	if len(dupErr.Matches) != 1 || dupErr.Matches[0].ID != first.ID {
+		t.Errorf("matches = %+v, want the first contact", dupErr.Matches)
+	}
+
+	updated, err := svc.update(second.ID, UpdateRequest{Phone: &dup, ConfirmDuplicates: true}, "")
+	if err != nil {
+		t.Fatalf("confirmed duplicate update: %v", err)
+	}
+	if updated.Phone != "+919876543210" {
+		t.Errorf("phone after confirmed update = %q, want the canonical duplicate", updated.Phone)
+	}
+}
+
+func TestUpdateContactUnchangedDetailDoesNotRenagDuplicateIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	_, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210"})
+	if err != nil {
+		t.Fatalf("create alice: %v", err)
+	}
+	bob, err := svc.create(CreateRequest{Name: "Bob", Phone: "9876543210", ConfirmDuplicates: true})
+	if err != nil {
+		t.Fatalf("create bob: %v", err)
+	}
+
+	// The edit form resubmits the unchanged phone list with a name change; the
+	// existing duplicate must not nag again.
+	name := "Bobby"
+	same := []PhoneValue{{Value: bob.Phone, IsPrimary: true}}
+	updated, err := svc.update(bob.ID, UpdateRequest{Name: &name, Phones: &same}, "")
+	if err != nil {
+		t.Fatalf("unchanged-detail edit = %v, want success", err)
+	}
+	if updated.Name != "Bobby" {
+		t.Errorf("name = %q, want Bobby", updated.Name)
+	}
+}
+
+func TestNotesRejectHiddenAndMalformedContactsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{Name: "Alice", Phone: "9876543210"})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+	if err := svc.delete(created.ID, ""); err != nil {
+		t.Fatalf("delete contact: %v", err)
+	}
+
+	if _, _, err := svc.listNotes(created.ID, 1, 20); !errors.Is(err, ErrNotFound) {
+		t.Errorf("listNotes on deleted contact = %v, want ErrNotFound", err)
+	}
+	if _, err := svc.createNote(created.ID, "", "note"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("createNote on deleted contact = %v, want ErrNotFound", err)
+	}
+	if _, _, err := svc.listNotes("not-a-uuid", 1, 20); !errors.Is(err, ErrNotFound) {
+		t.Errorf("listNotes malformed id = %v, want ErrNotFound", err)
+	}
+}
+
+func TestEmailValidationIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "Alice", Email: "not-an-email"}); !errors.Is(err, ErrInvalidEmail) {
+		t.Errorf("create with invalid email = %v, want ErrInvalidEmail", err)
+	}
+	created, err := svc.create(CreateRequest{Name: "Bob", Phone: "9876543210"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	bad := "hello world"
+	if _, err := svc.update(created.ID, UpdateRequest{Email: &bad}, ""); !errors.Is(err, ErrInvalidEmail) {
+		t.Errorf("update with invalid email = %v, want ErrInvalidEmail", err)
+	}
+}
+
+func TestBulkCreateRejectsInvalidEmailIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Email: "not-an-email"},
+		{Name: "Bob", Phone: "1112223333"},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 1 || resp.Failed != 1 {
+		t.Fatalf("imported/failed = %d/%d, want 1/1", resp.Imported, resp.Failed)
+	}
+	if resp.Errors[0].Message != "invalid email address" {
+		t.Errorf("row error = %q, want the invalid-email message", resp.Errors[0].Message)
+	}
+}
+
+func TestBulkCreateRejectsRowsWithoutPhoneOrEmailIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "No Contact Info"},
+		{Name: "Call Me", Phone: "call me"},
+		{Name: "Has Email", Email: "has@example.com"},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 1 || resp.Failed != 2 {
+		t.Fatalf("imported/failed = %d/%d, want 1/2", resp.Imported, resp.Failed)
+	}
+	for _, rowErr := range resp.Errors {
+		if rowErr.Message != "phone or email is required" {
+			t.Errorf("row error = %q, want the identity message", rowErr.Message)
+		}
+	}
+}
+
 func TestBulkCreateRejectsOverlongValuesIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -573,8 +712,8 @@ func TestBulkCreateReportsUnknownTagsIntegration(t *testing.T) {
 	}
 
 	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
-		{Name: "Alice", Tags: []string{"Hot", "NotATag"}},
-		{Name: "Bob", Tags: []string{"Hot"}},
+		{Name: "Alice", Phone: "1112223333", Tags: []string{"Hot", "NotATag"}},
+		{Name: "Bob", Phone: "4445556666", Tags: []string{"Hot"}},
 	}})
 	if err != nil {
 		t.Fatalf("bulk create: %v", err)
@@ -808,8 +947,8 @@ func TestBulkCreateSharedTagsResolvedOnceIntegration(t *testing.T) {
 	}
 
 	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
-		{Name: "Alice", Tags: []string{"Hot", "VIP"}},
-		{Name: "Bob", Tags: []string{"Hot"}},
+		{Name: "Alice", Phone: "1112223333", Tags: []string{"Hot", "VIP"}},
+		{Name: "Bob", Phone: "4445556666", Tags: []string{"Hot"}},
 	}})
 	if err != nil {
 		t.Fatalf("bulk create: %v", err)

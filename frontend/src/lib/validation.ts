@@ -21,6 +21,10 @@ export const profileSchema = z.object({
   phone: z.string().optional(),
 })
 
+// One address value, reused to validate every row of the multi-valued email
+// repeater (the contact schema only sees the primary).
+export const emailSchema = z.email('Invalid email')
+
 // Date of birth is date-only (YYYY-MM-DD): a real calendar date, never in the
 // future. An empty string clears it on update; the approximate integer age
 // stays as the fallback.

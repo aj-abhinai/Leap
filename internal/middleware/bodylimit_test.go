@@ -47,3 +47,34 @@ func TestBodyLimit(t *testing.T) {
 		t.Errorf("over-limit body length = %d, want truncated below %d", rec.Body.Len(), len(big))
 	}
 }
+
+// TestBodyLimitBulkRouteAllowsLargerPayload pins the import route's larger cap:
+// 1.5 MiB is accepted there while every other path still rejects it.
+func TestBodyLimitBulkRouteAllowsLargerPayload(t *testing.T) {
+	readAll := func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+	r := http.NewServeMux()
+	r.Handle("/api/contacts/bulk", BodyLimit(http.HandlerFunc(readAll)))
+	r.Handle("/", BodyLimit(http.HandlerFunc(readAll)))
+
+	medium := strings.Repeat("a", MaxBodyBytes+MaxBodyBytes/2)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/contacts/bulk", strings.NewReader(medium))
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("bulk 1.5 MiB status = %d, want 200", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/contacts", strings.NewReader(medium))
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("regular 1.5 MiB status = %d, want 413", rec.Code)
+	}
+}

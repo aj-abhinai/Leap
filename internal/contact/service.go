@@ -28,6 +28,9 @@ var (
 	// ErrCollectionLimit marks requests whose phones, emails, or tag lists
 	// exceed the per-contact caps or whose value lengths exceed the maximum.
 	ErrCollectionLimit = errors.New("contact collection limit exceeded")
+	// ErrInvalidEmail marks an email value that is not a plain address, so free
+	// text cannot land in the email columns.
+	ErrInvalidEmail = errors.New("invalid email address")
 	// ErrDuplicate marks a create whose primary phone or email collides with
 	// a live contact and the request did not confirm the duplicate. It wraps
 	// the matched contact(s) so the handler can return them in a 409.
@@ -498,7 +501,7 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 	if email == "" && len(req.Emails) > 0 {
 		email = primaryValue(req.Emails)
 	}
-	matches, err := s.duplicateMatches(phone, email)
+	matches, err := s.duplicateMatches(s.db, phone, email, "")
 	if err != nil {
 		return nil, err
 	}
@@ -541,8 +544,11 @@ func primaryValue[T valueEntry](entries []T) string {
 
 // duplicateMatches returns the live contacts whose primary phone or email
 // collides with the given phone/email after normalization, using targeted
-// indexed lookups rather than scanning the whole contact table.
-func (s *Service) duplicateMatches(phone, email string) ([]DuplicateMatch, error) {
+// indexed lookups rather than scanning the whole contact table. excludeID
+// skips one contact (the row being edited); an empty id excludes nothing.
+func (s *Service) duplicateMatches(q interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}, phone, email, excludeID string) ([]DuplicateMatch, error) {
 	e := util.NormalizeEmail(email)
 	// The phone is matched in both storage generations: canonical rows store
 	// country-coded digits, legacy rows store the national form.
@@ -559,7 +565,7 @@ func (s *Service) duplicateMatches(phone, email string) ([]DuplicateMatch, error
 	}
 	// Match on the primary phone/email of existing live contacts, plus any
 	// phone/email value so a secondary value also surfaces as a duplicate.
-	rows, err := s.db.Query(
+	rows, err := q.Query(
 		`SELECT DISTINCT c.id, c.name,
 			COALESCE(pcp.value, ''), COALESCE(ece.value, '')
 		FROM contacts c
@@ -570,6 +576,7 @@ func (s *Service) duplicateMatches(phone, email string) ([]DuplicateMatch, error
 			SELECT value FROM contact_emails WHERE contact_id = c.id AND is_primary LIMIT 1
 		) ece ON true
 		WHERE c.deleted_at IS NULL
+		  AND ($4 = '' OR c.id <> NULLIF($4, '')::uuid)
 		  AND (
 			($1 <> '' AND EXISTS (
 				SELECT 1 FROM contact_phones cp
@@ -587,6 +594,7 @@ func (s *Service) duplicateMatches(phone, email string) ([]DuplicateMatch, error
 			))
 		  )`,
 		phoneKey, codedKey, e,
+		excludeID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("find duplicate contacts: %w", err)
@@ -627,6 +635,9 @@ func validateCollectionLimits(phones []PhoneValue, emails []EmailValue, tagIDs [
 	for _, e := range emails {
 		if len(e.Value) > maxValueLength {
 			return fmt.Errorf("%w: email value is too long", ErrCollectionLimit)
+		}
+		if !util.IsEmail(e.Value) {
+			return fmt.Errorf("%w: %q", ErrInvalidEmail, e.Value)
 		}
 	}
 	return nil
@@ -837,6 +848,9 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		if req.Email != nil && len(*req.Email) > maxValueLength {
 			return nil, fmt.Errorf("%w: email value is too long", ErrCollectionLimit)
 		}
+		if req.Email != nil && *req.Email != "" && !util.IsEmail(*req.Email) {
+			return nil, fmt.Errorf("%w: %q", ErrInvalidEmail, *req.Email)
+		}
 	}
 
 	old, err := s.get(id)
@@ -935,6 +949,33 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		}
 		if err := syncPhonesEmailsTx(tx, id, phones, emails); err != nil {
 			return nil, fmt.Errorf("update contact: sync scalar phone and email: %w", err)
+		}
+	}
+
+	// Warn + confirm on edits: an update that sets a primary phone/email
+	// already on another live contact is refused with the matches unless the
+	// client confirms, the same posture as manual create.
+	if req.Phones != nil || req.Emails != nil || req.Phone != nil || req.Email != nil {
+		var primaryPhone, primaryEmail string
+		if err := tx.QueryRow(`
+			SELECT
+				COALESCE((SELECT value FROM contact_phones WHERE contact_id = $1 ORDER BY is_primary DESC, created_at ASC LIMIT 1), ''),
+				COALESCE((SELECT value FROM contact_emails WHERE contact_id = $1 ORDER BY is_primary DESC, created_at ASC LIMIT 1), '')`,
+			id,
+		).Scan(&primaryPhone, &primaryEmail); err != nil {
+			return nil, fmt.Errorf("update contact: load primary detail: %w", err)
+		}
+		matches := []DuplicateMatch{}
+		// Only a change to the effective primary is a duplicate risk; the edit
+		// form resubmits unchanged details, which must not nag.
+		if primaryPhone != old.Phone || primaryEmail != old.Email {
+			matches, err = s.duplicateMatches(tx, primaryPhone, primaryEmail, id)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if len(matches) > 0 && !req.ConfirmDuplicates {
+			return nil, &DuplicateError{Matches: matches}
 		}
 	}
 

@@ -77,16 +77,18 @@ type DuplicateMatch struct {
 
 // UpdateRequest is the partial-update payload. Scalar phone/email fields
 // mirror into the child tables; the list fields replace their whole type and
-// are only applied when sent.
+// are only applied when sent. ConfirmDuplicates acknowledges that an edit's
+// primary phone/email may collide with another live contact.
 type UpdateRequest struct {
-	Name     *string       `json:"name,omitempty"`
-	Nickname *string       `json:"nickname,omitempty"`
-	Email    *string       `json:"email,omitempty"`
-	Phone    *string       `json:"phone,omitempty"`
-	Phones   *[]PhoneValue `json:"phones,omitempty"`
-	Emails   *[]EmailValue `json:"emails,omitempty"`
-	Location *string       `json:"location,omitempty"`
-	Age      *int          `json:"age,omitempty"`
+	Name              *string       `json:"name,omitempty"`
+	Nickname          *string       `json:"nickname,omitempty"`
+	Email             *string       `json:"email,omitempty"`
+	Phone             *string       `json:"phone,omitempty"`
+	Phones            *[]PhoneValue `json:"phones,omitempty"`
+	Emails            *[]EmailValue `json:"emails,omitempty"`
+	Location          *string       `json:"location,omitempty"`
+	Age               *int          `json:"age,omitempty"`
+	ConfirmDuplicates bool          `json:"confirm_duplicates,omitempty"`
 	// DateOfBirth is date-only (YYYY-MM-DD). An empty string clears it; absent
 	// or null keeps the stored value.
 	DateOfBirth *string  `json:"date_of_birth,omitempty"`

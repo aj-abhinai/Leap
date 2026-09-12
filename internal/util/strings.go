@@ -1,9 +1,22 @@
 package util
 
 import (
+	"net/mail"
 	"regexp"
 	"strings"
 )
+
+// IsEmail reports whether s is a plain RFC 5322 addr-spec with no display
+// name, used to keep free text out of the contact email columns. Surrounding
+// whitespace is ignored.
+func IsEmail(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	addr, err := mail.ParseAddress(s)
+	return err == nil && addr.Address == s
+}
 
 // NullStr maps an empty string to NULL so create payloads store a clear
 // empty value rather than an empty string.

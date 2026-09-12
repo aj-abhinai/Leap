@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { type Contact, type PhoneValue, type EmailValue } from '@/stores/contacts'
 import { useSettingsStore } from '@/stores/settings'
-import { contactSchema } from '@/lib/validation'
+import { contactSchema, emailSchema } from '@/lib/validation'
 import { computeAge } from '@/utils/age'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -164,6 +164,15 @@ async function handleSave() {
   const emailList = emails.value.map(e => ({ value: e.value.trim(), is_primary: e.is_primary })).filter(e => e.value)
   if (phoneList.length && !phoneList.some(p => p.is_primary)) phoneList[0].is_primary = true
   if (emailList.length && !emailList.some(e => e.is_primary)) emailList[0].is_primary = true
+
+  // The contact schema validates only the first email; every repeater row and
+  // every CSV row is a value the server will store, so check each one.
+  for (const e of emailList) {
+    if (!emailSchema.safeParse(e.value).success) {
+      formError.value = `"${e.value}" is not a valid email`
+      return
+    }
+  }
 
   await emit('save', {
     name: result.data.name,
