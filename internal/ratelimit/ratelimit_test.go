@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"crm/internal/ctxutil"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -127,6 +128,29 @@ func TestUserMiddlewareKeysPerUser(t *testing.T) {
 	}
 	if rr.Header().Get("Retry-After") != "60" {
 		t.Errorf("Retry-After = %q, want 60", rr.Header().Get("Retry-After"))
+	}
+}
+
+func TestKeyOfBucketsIPv6ByAllocation(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req = req.WithContext(ctxutil.WithClientIP(req.Context(), "2001:db8:1:2:3:4:5:6"))
+	req.RemoteAddr = "[2001:db8:1:2:3:4:5:6]:1234"
+
+	if got := keyOf(req); got != "2001:db8:1:2::/64" {
+		t.Errorf("keyOf = %q, want the /64 allocation bucket", got)
+	}
+}
+
+func TestUniqueKeysAreBounded(t *testing.T) {
+	l := New(1, time.Minute)
+	for i := 0; i < maxEntries+500; i++ {
+		l.Allow(fmt.Sprintf("10.%d.%d.%d", i/(256*256)%256, (i/256)%256, i%256))
+	}
+	l.mu.Lock()
+	size := len(l.requests)
+	l.mu.Unlock()
+	if size > maxEntries {
+		t.Errorf("limiter entries = %d, want <= %d", size, maxEntries)
 	}
 }
 
