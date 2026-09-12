@@ -20,6 +20,13 @@ export const useAuthStore = defineStore('auth', () => {
     mustChangePassword.value = false
   }
 
+  // clearSession resets every session-scoped store, so a new login can never
+  // inherit the previous user's capability display.
+  function clearSession() {
+    clear()
+    useRBACStore().clear()
+  }
+
   async function fetchUser() {
     if (!accessToken.value) return
     try {
@@ -55,7 +62,7 @@ export const useAuthStore = defineStore('auth', () => {
       const res = await authApi.refresh()
       tokens = res.data
     } catch {
-      clear()
+      clearSession()
       throw new Error('Session expired')
     }
     if (epochAtStart !== sessionEpoch) {
@@ -83,11 +90,15 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout() {
     sessionEpoch++
+    // Clear synchronously so a late logout response cannot wipe a session a
+    // fresh login created while the request was in flight; the server revokes
+    // the refresh token carried by this request, not the new one.
+    const wasAuthenticated = isAuthenticated.value
+    clearSession()
+    if (!wasAuthenticated) return
     try {
       await authApi.logout()
     } catch {}
-    clear()
-    useRBACStore().clear()
   }
 
   async function bootstrap() {
@@ -101,7 +112,7 @@ export const useAuthStore = defineStore('auth', () => {
       await refresh()
       await fetchUser()
     } catch {
-      clear()
+      clearSession()
     }
   }
 
