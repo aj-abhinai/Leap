@@ -222,25 +222,16 @@ const selectedBannerLead = computed(() =>
 
 // logEnquiry writes exactly one done Enquiry activity on the existing open
 // lead — the repeat enquiry is a touchpoint, not a new opportunity. The
-// server stamps occurred_at for done activities. The type is resolved from
-// the task-type catalog (a seeded preset) so a rename keeps working, with the
-// literal name as the fallback.
+// server stamps occurred_at for done activities. The type is the seeded
+// free-text preset: activity types are a picker, not a catalog the value is
+// bound to, so the literal is the contract.
 async function logEnquiry() {
   const lead = selectedBannerLead.value
   if (!lead) return
   loggingEnquiry.value = true
   try {
-    let enquiryType = 'Enquiry'
-    try {
-      if (settings.activityTypes.length === 0) await settings.fetchTags()
-      // Prefer the catalog's entry when the workspace customizes task types;
-      // an absent entry falls back to the seeded literal.
-      enquiryType = settings.activityTypes.find((t) => t.name === 'Enquiry')?.name ?? 'Enquiry'
-    } catch {
-      // The catalog is a convenience; the literal preset still logs the enquiry.
-    }
     await createLeadActivity(lead.id, {
-      type: enquiryType,
+      type: 'Enquiry',
       is_done: true,
     })
     toast.success('Enquiry logged')

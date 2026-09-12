@@ -158,9 +158,11 @@ async function saveReschedule() {
   savingReschedule.value = true
   try {
     if (behavior === 'next') {
+      // An empty value clears a quick reply recorded earlier on the task;
+      // null would keep it.
       const body: Record<string, unknown> = {
         is_done: true,
-        quick_reply_id: rescheduleQuickReply.value || null,
+        quick_reply_id: rescheduleQuickReply.value || '',
       }
       const next = mergeDateTime(rescheduleDate.value, rescheduleTime.value)
       if (next) body.reschedule_at = next
@@ -171,10 +173,11 @@ async function saveReschedule() {
       return
     }
 
-    // log / close_lost: complete without a next task.
+    // log / close_lost: complete without a next task. The empty value clears
+    // any quick reply recorded earlier on the task.
     await updateLeadActivity(props.leadId, props.activity.id, {
       is_done: true,
-      quick_reply_id: rescheduleQuickReply.value || null,
+      quick_reply_id: rescheduleQuickReply.value || '',
     })
     toast.success('Attempt logged')
     cancelReschedule()

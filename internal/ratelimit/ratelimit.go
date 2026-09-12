@@ -12,8 +12,10 @@ import (
 )
 
 // maxEntries bounds the tracked keys: address rotation cannot grow the map
-// without limit. Overflow evicts the oldest windows first, so an attacker who
-// floods with unique keys mostly evicts their own buckets.
+// without limit. At capacity, elapsed windows are pruned first, then entries
+// are evicted in map order until the map is ~90% full, so a unique-key flood
+// cannot turn every request into a full-map scan. The bound is the security
+// property; eviction order is deliberately not LRU.
 const maxEntries = 50_000
 
 type entry struct {

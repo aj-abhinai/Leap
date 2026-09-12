@@ -18,7 +18,6 @@ vi.mock('@/composables/useApi', () => ({
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: () => ({
     lossReasons: [],
-    activityTypes: [],
     fetchTags: vi.fn(),
   }),
 }))
