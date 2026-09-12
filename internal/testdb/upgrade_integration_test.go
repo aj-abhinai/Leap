@@ -79,6 +79,48 @@ func migrateScratch(t *testing.T, dsn string, version uint) {
 	}
 }
 
+// The seed-once marker is backfilled for databases that already have users,
+// so the first boot after the upgrade does not re-seed starter data the
+// operator deleted or renamed before the upgrade.
+func TestMigration010BackfillsSeedMarkerForExistingInstall(t *testing.T) {
+	db, dsn := scratchDB(t)
+	migrateScratch(t, dsn, 9)
+
+	if _, err := db.Exec(
+		`INSERT INTO users (name, email, password_hash) VALUES ('Admin', 'admin@example.com', 'x')`,
+	); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	migrateScratch(t, dsn, 10)
+
+	var seeded bool
+	if err := db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM settings WHERE key = 'seed_completed')`,
+	).Scan(&seeded); err != nil {
+		t.Fatalf("check marker: %v", err)
+	}
+	if !seeded {
+		t.Error("seed_completed marker missing for an existing install")
+	}
+}
+
+// A fresh database has no users when migrations run, so it must stay unmarked
+// and still seed on first boot.
+func TestMigration010DoesNotMarkFreshDatabase(t *testing.T) {
+	db, dsn := scratchDB(t)
+	migrateScratch(t, dsn, 10)
+
+	var seeded bool
+	if err := db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM settings WHERE key = 'seed_completed')`,
+	).Scan(&seeded); err != nil {
+		t.Fatalf("check marker: %v", err)
+	}
+	if seeded {
+		t.Error("fresh database marked as seeded; first boot would skip the starter data")
+	}
+}
+
 // A rollback must remove every table its up migration created: 000004 creates
 // the settings table, so a down-then-up round trip has to drop it and recreate
 // it cleanly.

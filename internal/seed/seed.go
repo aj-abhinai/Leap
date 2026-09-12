@@ -17,10 +17,15 @@ type querier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
-// Seed bootstraps a fresh database with the superadmin user, the permission
-// set, the default pipeline, and the tag/status/quick-reply catalog. It runs
-// on every boot and is idempotent: the superadmin is created only on an empty
-// users table, and every other seed is upsert-style.
+// seedOnceKey marks that the starter vocabularies and the default pipeline
+// have been seeded on this database; later boots leave them alone.
+const seedOnceKey = "seed_completed"
+
+// Seed bootstraps a fresh database. The superadmin, the permission catalog,
+// and the system roles reconcile on every boot (idempotent upserts); the
+// starter vocabularies and the default pipeline are seeded exactly once, so an
+// operator's deletions and renames persist. Starter entries added in future
+// versions ship as migrations instead of being re-asserted at boot.
 func Seed(db *sql.DB, authCfg config.Auth, superadmin config.Superadmin) error {
 	if _, err := seedSuperadmin(db, authCfg, superadmin); err != nil {
 		return fmt.Errorf("seed superadmin: %w", err)
@@ -34,11 +39,48 @@ func Seed(db *sql.DB, authCfg config.Auth, superadmin config.Superadmin) error {
 	if err := seedSystemRoles(db); err != nil {
 		return fmt.Errorf("seed system roles: %w", err)
 	}
+
+	seeded, err := starterDataSeeded(db)
+	if err != nil {
+		return fmt.Errorf("check starter seed state: %w", err)
+	}
+	if seeded {
+		return nil
+	}
 	if err := seedDefaultPipeline(db); err != nil {
 		return fmt.Errorf("seed default pipeline: %w", err)
 	}
 	if err := seedTagsAndStatuses(db); err != nil {
 		return fmt.Errorf("seed tags and statuses: %w", err)
+	}
+	if err := markStarterDataSeeded(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+// starterDataSeeded reports whether the starter vocabularies and default
+// pipeline have already been seeded on this database.
+func starterDataSeeded(db *sql.DB) (bool, error) {
+	var seeded bool
+	if err := db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM settings WHERE key = $1)`,
+		seedOnceKey,
+	).Scan(&seeded); err != nil {
+		return false, fmt.Errorf("check starter seed marker: %w", err)
+	}
+	return seeded, nil
+}
+
+// markStarterDataSeeded records that the starter data has been planted. A
+// failed marking leaves the marker absent, and the next boot re-runs the
+// insert-only seeds harmlessly.
+func markStarterDataSeeded(db *sql.DB) error {
+	if _, err := db.Exec(
+		`INSERT INTO settings (key, value) VALUES ($1, 'true') ON CONFLICT (key) DO NOTHING`,
+		seedOnceKey,
+	); err != nil {
+		return fmt.Errorf("mark starter data seeded: %w", err)
 	}
 	return nil
 }

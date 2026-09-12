@@ -417,6 +417,65 @@ func TestSeedDefaultPipelineRollsBackOnStageFailureIntegration(t *testing.T) {
 	}
 }
 
+func TestSeedDoesNotResurrectDeletedStarterDataIntegration(t *testing.T) {
+	db := testdb.New(t)
+	superadmin := config.Superadmin{Email: "admin@admin.com", Password: "admin"}
+
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("initial Seed: %v", err)
+	}
+
+	// Remove a seeded tag and the default pipeline the way an operator would.
+	if _, err := db.Exec(`DELETE FROM tags WHERE name = 'Student' AND type = 'tag'`); err != nil {
+		t.Fatalf("delete seeded tag: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM pipelines WHERE name = 'Default Pipeline'`); err != nil {
+		t.Fatalf("delete default pipeline: %v", err)
+	}
+
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("second Seed: %v", err)
+	}
+
+	var tags int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tags WHERE name = 'Student' AND type = 'tag'`).Scan(&tags); err != nil {
+		t.Fatalf("count tags: %v", err)
+	}
+	if tags != 0 {
+		t.Errorf("deleted tag count = %d, want 0 after a restart", tags)
+	}
+	var pipelines int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pipelines WHERE name = 'Default Pipeline'`).Scan(&pipelines); err != nil {
+		t.Fatalf("count pipelines: %v", err)
+	}
+	if pipelines != 0 {
+		t.Errorf("deleted default pipeline count = %d, want 0 after a restart", pipelines)
+	}
+}
+
+func TestSeedDoesNotDuplicateRenamedPipelineIntegration(t *testing.T) {
+	db := testdb.New(t)
+	superadmin := config.Superadmin{Email: "admin@admin.com", Password: "admin"}
+
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("initial Seed: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE pipelines SET name = 'Sales Pipeline' WHERE name = 'Default Pipeline'`); err != nil {
+		t.Fatalf("rename default pipeline: %v", err)
+	}
+	if err := Seed(db, testAuthCfg, superadmin); err != nil {
+		t.Fatalf("second Seed: %v", err)
+	}
+
+	var pipelines int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pipelines`).Scan(&pipelines); err != nil {
+		t.Fatalf("count pipelines: %v", err)
+	}
+	if pipelines != 1 {
+		t.Errorf("pipelines after rename + reseed = %d, want 1 (no duplicate)", pipelines)
+	}
+}
+
 func assertBootstrapAdmin(t *testing.T, db *sql.DB, email string, wantChangePassword bool) {
 	t.Helper()
 
