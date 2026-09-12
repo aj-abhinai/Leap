@@ -114,13 +114,16 @@ Secrets can be supplied via environment variables, which override the config fil
 | `APP_PORT` / `APP_ENV` | `[app] port` / `environment` |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_SSLMODE` | `[db] *` |
 | `JWT_SECRET` / `JWT_ISSUER` | `[auth] jwt_secret` / `jwt_issuer` |
-| `COOKIE_SECURE` | `[auth] secure_cookies` — set `true` when serving over HTTPS |
 | `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` | `[superadmin] *` |
 
 Required secrets: `JWT_SECRET` (at least 32 characters) and a superadmin email with a
 password of at least 12 characters. The application refuses to start with placeholder,
 empty, or known development secrets in production. Point `DB_*` at any existing PostgreSQL
 instance to run the app without the bundled `db` service.
+
+In production the refresh and CSRF cookies are always `Secure`, so the app must be
+served over HTTPS — terminate TLS at a reverse proxy. `COOKIE_SECURE` is development-only
+and has no effect outside development.
 
 ## Development
 
