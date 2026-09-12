@@ -1366,6 +1366,44 @@ func TestPatchLeadReopenWithSiblingReturns400Integration(t *testing.T) {
 	}
 }
 
+// TestUpdateActivityRejectsMalformedQuickReplyIntegration asserts a malformed
+// quick_reply_id surfaces as 400, not a 404/500 from the uuid cast.
+func TestUpdateActivityRejectsMalformedQuickReplyIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	h := NewHandler(svc)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/leads/"+created.ID+"/activities/"+act.ID,
+		strings.NewReader(`{"quick_reply_id":"not-a-uuid"}`),
+	)
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", created.ID)
+	ctx.URLParams.Add("activity_id", act.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+
+	h.UpdateActivity(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
 // TestPatchLeadClosedToClosedReturns422Integration seeds an open, a lost and
 // a won stage, moves a lead to lost, then PATCHes it to won and asserts the
 // handler responds 422 (not 500) — ErrClosedToClosedMove must map cleanly.

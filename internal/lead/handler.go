@@ -46,29 +46,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Outcome:    r.URL.Query().Get("outcome"),
 		AssignedTo: r.URL.Query().Get("assigned_to"),
 	}
-	for name, value := range map[string]string{
-		"pipeline_id": f.PipelineID, "stage_id": f.StageID,
-		"contact_id": f.ContactID, "assigned_to": f.AssignedTo,
-	} {
-		if value != "" && value != "none" && !util.IsUUID(value) {
-			respond.JSON(
-				w,
-				http.StatusBadRequest,
-				nil,
-				&respond.Error{Code: "BAD_REQUEST", Message: name + " must be a valid id"},
-				nil,
-			)
-			return
-		}
-	}
-	switch f.Outcome {
-	case "", "open", "won", "lost":
-	default:
+	if msg := leadFilterError(f.PipelineID, f.StageID, f.ContactID, f.AssignedTo, f.Outcome); msg != "" {
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
 			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: "outcome must be open, won, or lost"},
+			&respond.Error{Code: "BAD_REQUEST", Message: msg},
 			nil,
 		)
 		return
@@ -119,6 +102,16 @@ func (h *Handler) Board(w http.ResponseWriter, r *http.Request) {
 		Outcome:    r.URL.Query().Get("outcome"),
 		AssignedTo: r.URL.Query().Get("assigned_to"),
 	}
+	if msg := leadFilterError("", "", "", f.AssignedTo, f.Outcome); msg != "" {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: msg},
+			nil,
+		)
+		return
+	}
 	if v := r.URL.Query().Get("from"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
@@ -153,6 +146,30 @@ func (h *Handler) Board(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond.JSON(w, http.StatusOK, board, nil, nil)
+}
+
+// leadFilterError validates the shared list/board query filters and returns a
+// client-facing message, or "" when every value is valid. "none" is valid only
+// for assigned_to (the unassigned sentinel); id filters must be UUIDs.
+func leadFilterError(pipelineID, stageID, contactID, assignedTo, outcome string) string {
+	for _, f := range []struct{ name, value string }{
+		{"pipeline_id", pipelineID},
+		{"stage_id", stageID},
+		{"contact_id", contactID},
+	} {
+		if f.value != "" && !util.IsUUID(f.value) {
+			return f.name + " must be a valid id"
+		}
+	}
+	if assignedTo != "" && assignedTo != "none" && !util.IsUUID(assignedTo) {
+		return "assigned_to must be a valid id or none"
+	}
+	switch outcome {
+	case "", "open", "won", "lost":
+	default:
+		return "outcome must be open, won, or lost"
+	}
+	return ""
 }
 
 func respondLeadMutationError(w http.ResponseWriter, err error) {
@@ -378,6 +395,16 @@ func (h *Handler) CreateActivity(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	if req.QuickReplyID != nil && *req.QuickReplyID != "" && !util.IsUUID(*req.QuickReplyID) {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "quick_reply_id must be a valid id"},
+			nil,
+		)
+		return
+	}
 	activity, err := h.svc.createActivity(leadID, lead.StageID, userID, req)
 	if err != nil {
 		respondLeadMutationError(w, err)
@@ -420,6 +447,16 @@ func (h *Handler) UpdateActivity(w http.ResponseWriter, r *http.Request) {
 			http.StatusBadRequest,
 			nil,
 			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	if req.QuickReplyID != nil && *req.QuickReplyID != "" && !util.IsUUID(*req.QuickReplyID) {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "quick_reply_id must be a valid id"},
 			nil,
 		)
 		return

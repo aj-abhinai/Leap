@@ -4,6 +4,7 @@ import (
 	"crm/internal/testdb"
 	"database/sql"
 	"errors"
+	"math"
 	"testing"
 	"time"
 )
@@ -1485,6 +1486,58 @@ func TestPendingRemindersExcludeClosedLeadsIntegration(t *testing.T) {
 	}
 	if len(reminders) != 1 || reminders[0].LeadID != openLead.ID {
 		t.Errorf("pending reminders = %+v, want only the open lead's reminder", reminders)
+	}
+}
+
+func TestUpdateActivityClearsQuickReplyIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call", QuickReplyID: &qrID})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	if act.QuickReplyID != qrID {
+		t.Fatalf("quick_reply_id = %q, want %q", act.QuickReplyID, qrID)
+	}
+
+	empty := ""
+	cleared, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &empty})
+	if err != nil {
+		t.Fatalf("clear quick reply: %v", err)
+	}
+	if cleared.QuickReplyID != "" {
+		t.Errorf("quick_reply_id after clear = %q, want empty", cleared.QuickReplyID)
+	}
+	var stored sql.NullString
+	if err := db.QueryRow(`SELECT quick_reply_id FROM lead_activities WHERE id = $1`, act.ID).Scan(&stored); err != nil {
+		t.Fatalf("load stored quick reply: %v", err)
+	}
+	if stored.Valid {
+		t.Errorf("stored quick_reply_id = %q, want NULL", stored.String)
+	}
+}
+
+func TestListAllActivitiesClampsHugePageIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	items, total, err := svc.listAllActivities(ActivityListFilters{Page: math.MaxInt, PerPage: 100})
+	if err != nil {
+		t.Fatalf("list with huge page: %v", err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Errorf("items/total = %d/%d, want 0/0 on an empty database", len(items), total)
 	}
 }
 

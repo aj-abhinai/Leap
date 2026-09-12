@@ -397,7 +397,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	var quickReplyName sql.NullString
 	err = tx.QueryRow(`
 		UPDATE lead_activities SET
-			quick_reply_id = COALESCE($3, quick_reply_id),
+			quick_reply_id = CASE WHEN $3::text IS NOT NULL THEN NULLIF($3::text, '')::uuid ELSE quick_reply_id END,
 			is_done = COALESCE($4, is_done),
 			responded_at = COALESCE($5, responded_at),
 			type = COALESCE($6, type),
@@ -771,7 +771,7 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 	default:
 		orderBy = "COALESCE(la.remind_at, la.scheduled_at, la.created_at)"
 	}
-	offset := (f.Page - 1) * f.PerPage
+	offset := util.Offset(f.Page, f.PerPage)
 
 	// The WHERE placeholders were renumbered 1..N; LIMIT/OFFSET follow after.
 	limitArg := w.NextArg()

@@ -27,3 +27,50 @@ func TestListAllActivitiesRejectsInvalidFromTo(t *testing.T) {
 		t.Errorf("valid from/to: status = %d, want 200", rr.Code)
 	}
 }
+
+func TestListRejectsInvalidFilters(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	for _, q := range []string{
+		"stage_id=none",
+		"stage_id=not-a-uuid",
+		"contact_id=abc",
+		"pipeline_id=nope",
+		"assigned_to=someone",
+		"outcome=maybe",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/leads?"+q, nil)
+		rr := httptest.NewRecorder()
+		h.List(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", q, rr.Code)
+		}
+	}
+
+	// "none" is the unassigned sentinel and is valid only for assigned_to.
+	req := httptest.NewRequest(http.MethodGet, "/api/leads?assigned_to=none", nil)
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("assigned_to=none: status = %d, want 200", rr.Code)
+	}
+}
+
+func TestBoardRejectsInvalidFilters(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	pipeline := "00000000-0000-0000-0000-000000000001"
+	for _, q := range []string{
+		"assigned_to=someone",
+		"outcome=maybe",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/leads/board?pipeline_id="+pipeline+"&"+q, nil)
+		rr := httptest.NewRecorder()
+		h.Board(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", q, rr.Code)
+		}
+	}
+}
