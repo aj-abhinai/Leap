@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+func TestTagNameAndColorValidationIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "   ", Type: "tag"}); !errors.Is(err, ErrNameRequired) {
+		t.Errorf("blank name create = %v, want ErrNameRequired", err)
+	}
+	if _, err := svc.create(CreateRequest{Name: "Bad color", Type: "tag", Color: "red"}); !errors.Is(err, ErrInvalidColor) {
+		t.Errorf("bad color create = %v, want ErrInvalidColor", err)
+	}
+
+	created, err := svc.create(CreateRequest{Name: "Good", Type: "tag", Color: "#A1b2C3"})
+	if err != nil {
+		t.Fatalf("create with valid color: %v", err)
+	}
+
+	blank := "  "
+	if _, err := svc.update(created.ID, UpdateRequest{Name: &blank}); !errors.Is(err, ErrNameRequired) {
+		t.Errorf("blank name update = %v, want ErrNameRequired", err)
+	}
+	bad := "not-a-color"
+	if _, err := svc.update(created.ID, UpdateRequest{Color: &bad}); !errors.Is(err, ErrInvalidColor) {
+		t.Errorf("bad color update = %v, want ErrInvalidColor", err)
+	}
+}
+
 func TestCreateBehaviorValidation(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

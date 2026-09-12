@@ -95,7 +95,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	t, err := h.svc.create(req)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrInvalidType):
+		case errors.Is(err, ErrInvalidType), errors.Is(err, ErrNameRequired), errors.Is(err, ErrInvalidColor):
 			respond.JSON(
 				w,
 				http.StatusBadRequest,
@@ -172,7 +172,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	t, err := h.svc.update(id, req)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrInvalidBehavior):
+		case errors.Is(err, ErrInvalidBehavior), errors.Is(err, ErrNameRequired), errors.Is(err, ErrInvalidColor):
 			respond.JSON(
 				w,
 				http.StatusBadRequest,

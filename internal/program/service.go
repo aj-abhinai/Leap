@@ -40,7 +40,7 @@ func (s *Service) listActive() ([]Program, error) {
 		return nil, fmt.Errorf("list programs: %w", err)
 	}
 	defer rows.Close()
-	return collect(rows)
+	return s.collect(rows)
 }
 
 // listAll returns every program including archived ones for settings.
@@ -52,17 +52,18 @@ func (s *Service) listAll() ([]Program, error) {
 		return nil, fmt.Errorf("list all programs: %w", err)
 	}
 	defer rows.Close()
-	return collect(rows)
+	return s.collect(rows)
 }
 
-func collect(rows *sql.Rows) ([]Program, error) {
+// collect scans a program result set through the shared scanner.
+func (s *Service) collect(rows *sql.Rows) ([]Program, error) {
 	programs := []Program{}
 	for rows.Next() {
-		var p Program
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Archived, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan program: %w", err)
+		p, err := s.scanProgram(rows)
+		if err != nil {
+			return nil, err
 		}
-		programs = append(programs, p)
+		programs = append(programs, *p)
 	}
 	return programs, rows.Err()
 }

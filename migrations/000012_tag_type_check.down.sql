@@ -1,0 +1,1 @@
+ALTER TABLE tags DROP CONSTRAINT IF EXISTS tags_type_check;

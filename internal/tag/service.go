@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -14,7 +15,37 @@ var (
 	ErrInvalidType = errors.New("type must be 'tag', 'status', 'quick_reply', 'activity_type' or 'loss_reason'")
 	// ErrInvalidBehavior marks behavior values outside the outcome actions.
 	ErrInvalidBehavior = errors.New("behavior must be 'log', 'next' or 'close_lost'")
+	// ErrNameRequired marks blank or whitespace-only tag names.
+	ErrNameRequired = errors.New("name is required")
+	// ErrInvalidColor marks colors outside the #rrggbb form.
+	ErrInvalidColor = errors.New("color must be a #rrggbb hex value")
 )
+
+// validateName trims and rejects blank names so a vocabulary entry always
+// renders as text, never as an empty chip.
+func validateName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", ErrNameRequired
+	}
+	return name, nil
+}
+
+// validateColor accepts empty (no color) or a #rrggbb hex value.
+func validateColor(color string) error {
+	if color == "" {
+		return nil
+	}
+	if len(color) != 7 || color[0] != '#' {
+		return ErrInvalidColor
+	}
+	for _, r := range color[1:] {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return ErrInvalidColor
+		}
+	}
+	return nil
+}
 
 // InUseError is returned when deleting a status or quick reply that history
 // rows still reference. It carries the reference count so the UI can show it;
@@ -109,6 +140,13 @@ func (s *Service) create(req CreateRequest) (*Tag, error) {
 	if !validType(req.Type) {
 		return nil, ErrInvalidType
 	}
+	name, err := validateName(req.Name)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateColor(strings.TrimSpace(req.Color)); err != nil {
+		return nil, err
+	}
 	behavior, err := normalizeBehavior(req.Behavior)
 	if err != nil {
 		return nil, err
@@ -125,7 +163,7 @@ func (s *Service) create(req CreateRequest) (*Tag, error) {
 		`INSERT INTO tags (name, type, color, group_name, sort_order, behavior)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, name, type, COALESCE(color, ''), COALESCE(group_name, ''), sort_order, behavior, created_at`,
-		req.Name, req.Type, req.Color, groupName, req.SortOrder, behavior,
+		name, req.Type, strings.TrimSpace(req.Color), groupName, req.SortOrder, behavior,
 	).Scan(&t.ID, &t.Name, &t.Type, &t.Color, &t.GroupName, &t.SortOrder, &t.Behavior, &t.CreatedAt)
 	if err != nil {
 		if respond.IsDuplicate(err) {
@@ -141,6 +179,20 @@ func (s *Service) create(req CreateRequest) (*Tag, error) {
 // group_name/behavior are quick-reply-only concepts: for every other type the
 // row is canonicalized back to the neutral defaults.
 func (s *Service) update(id string, req UpdateRequest) (*Tag, error) {
+	if req.Name != nil {
+		name, err := validateName(*req.Name)
+		if err != nil {
+			return nil, err
+		}
+		req.Name = &name
+	}
+	if req.Color != nil {
+		color := strings.TrimSpace(*req.Color)
+		if err := validateColor(color); err != nil {
+			return nil, err
+		}
+		req.Color = &color
+	}
 	if req.Behavior != nil {
 		b, err := normalizeBehavior(*req.Behavior)
 		if err != nil {

@@ -111,16 +111,6 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := h.svc.update(id, req)
-	if errors.Is(err, ErrNotFound) {
-		respond.JSON(
-			w,
-			http.StatusNotFound,
-			nil,
-			&respond.Error{Code: "NOT_FOUND", Message: "Program not found"},
-			nil,
-		)
-		return
-	}
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotFound):
