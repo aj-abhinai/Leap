@@ -565,8 +565,8 @@ func (s *Service) dismissReminder(leadID, activityID, userID string) (bool, erro
 			AND NOT lead_activities.is_cancelled
 			AND (lead_activities.remind_at IS NOT NULL OR lead_activities.scheduled_at IS NOT NULL)
 			AND (
-				l.assigned_to = $3
-				OR (l.assigned_to IS NULL AND lead_activities.user_id = $3)
+				l.assigned_to = NULLIF($3, '')::uuid
+				OR (l.assigned_to IS NULL AND lead_activities.user_id = NULLIF($3, '')::uuid)
 				OR (l.assigned_to IS NULL AND lead_activities.user_id IS NULL)
 			)`,
 		activityID, leadID, userID,
@@ -619,8 +619,8 @@ func (s *Service) snoozeReminder(leadID, activityID, userID string, remindAt tim
 			AND NOT lead_activities.is_done AND NOT lead_activities.is_cancelled
 			AND (lead_activities.remind_at IS NOT NULL OR lead_activities.scheduled_at IS NOT NULL)
 			AND (
-				l.assigned_to = $4
-				OR (l.assigned_to IS NULL AND lead_activities.user_id = $4)
+				l.assigned_to = NULLIF($4, '')::uuid
+				OR (l.assigned_to IS NULL AND lead_activities.user_id = NULLIF($4, '')::uuid)
 				OR (l.assigned_to IS NULL AND lead_activities.user_id IS NULL)
 			)`,
 		activityID, remindAt, leadID, userID,

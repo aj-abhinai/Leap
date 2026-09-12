@@ -365,14 +365,19 @@ func TestReminderActionsScopedToResponsibleUserIntegration(t *testing.T) {
 		t.Fatalf("clear unowned task creator: %v", err)
 	}
 
-	// An unrelated user cannot dismiss or snooze anyone's task.
-	for _, leadID := range []string{assignedLead.ID, unassignedLead.ID, unownedLead.ID} {
+	// An unrelated user cannot dismiss or snooze a task assigned to someone
+	// else or owned by its creator; the genuinely unowned task is visible to
+	// everyone, so any viewer may clear it.
+	for _, leadID := range []string{assignedLead.ID, unassignedLead.ID} {
 		if dismissed, err := svc.dismissReminder(leadID, reminderIDs[leadID], otherID); err != nil || dismissed {
 			t.Errorf("dismiss by other on %s = %v, %v; want false, nil", leadID, dismissed, err)
 		}
 		if snoozed, err := svc.snoozeReminder(leadID, reminderIDs[leadID], otherID, time.Now().Add(time.Hour)); err != nil || snoozed {
 			t.Errorf("snooze by other on %s = %v, %v; want false, nil", leadID, snoozed, err)
 		}
+	}
+	if snoozed, err := svc.snoozeReminder(unownedLead.ID, reminderIDs[unownedLead.ID], otherID, time.Now().Add(time.Hour)); err != nil || !snoozed {
+		t.Errorf("snooze unowned by other = %v, %v; want true, nil", snoozed, err)
 	}
 
 	// The assignee can act on the assigned lead's task and the unowned one,
