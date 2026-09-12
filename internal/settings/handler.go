@@ -5,6 +5,7 @@ import (
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -64,13 +65,17 @@ func (h *Handler) SetNudgeLeadMinutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.SetNudgeLeadMinutes(*req.Minutes); err != nil {
-		respond.JSON(
-			w,
-			http.StatusBadRequest,
-			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
-			nil,
-		)
+		if errors.Is(err, ErrInvalidNudgeMinutes) {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+				nil,
+			)
+			return
+		}
+		respond.ServerError(w, err)
 		return
 	}
 	audit.LogCustom(
@@ -112,20 +117,25 @@ func (h *Handler) SetDefaultCountryCode(w http.ResponseWriter, r *http.Request) 
 		respond.ServerError(w, err)
 		return
 	}
-	if err := h.svc.SetDefaultCountryCode(req.CountryCode); err != nil {
-		respond.JSON(
-			w,
-			http.StatusBadRequest,
-			nil,
-			&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
-			nil,
-		)
+	normalized, err := h.svc.SetDefaultCountryCode(req.CountryCode)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCountryCode) {
+			respond.JSON(
+				w,
+				http.StatusBadRequest,
+				nil,
+				&respond.Error{Code: "BAD_REQUEST", Message: err.Error()},
+				nil,
+			)
+			return
+		}
+		respond.ServerError(w, err)
 		return
 	}
 	audit.LogCustom(
 		h.svc.db,
-		fmt.Sprintf("Changed %q from %s to %s", "Default country code", old, req.CountryCode),
+		fmt.Sprintf("Changed %q from %s to %s", "Default country code", old, normalized),
 		"settings", "", "update", "", ctxutil.GetUserID(r),
 	)
-	respond.JSON(w, http.StatusOK, map[string]string{"country_code": req.CountryCode}, nil, nil)
+	respond.JSON(w, http.StatusOK, map[string]string{"country_code": normalized}, nil, nil)
 }

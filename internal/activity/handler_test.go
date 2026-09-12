@@ -30,3 +30,17 @@ func TestListCapsPerPageHandlerIntegration(t *testing.T) {
 		t.Errorf("per_page = %d, want capped at 100", body.Meta.PerPage)
 	}
 }
+
+// A malformed user_id filter is client input and surfaces as 400, not a 500
+// from the uuid cast.
+func TestListRejectsMalformedUserIDHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/activity?user_id=not-a-uuid", nil)
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}

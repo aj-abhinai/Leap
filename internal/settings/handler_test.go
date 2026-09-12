@@ -74,13 +74,12 @@ func TestDefaultCountryCodeRejectsMalformed(t *testing.T) {
 	svc := NewService(db)
 
 	for _, raw := range []string{"", "91", "+", "+9a1", "++91", "+91 234", "+1234"} {
-		err := svc.SetDefaultCountryCode(raw)
-		if err == nil {
+		if _, err := svc.SetDefaultCountryCode(raw); err == nil {
 			t.Errorf("SetDefaultCountryCode(%q) accepted, want rejection", raw)
 		}
 	}
 
-	if err := svc.SetDefaultCountryCode("+971"); err != nil {
+	if _, err := svc.SetDefaultCountryCode("+971"); err != nil {
 		t.Fatalf("SetDefaultCountryCode(+971): %v", err)
 	}
 	cc, err := DefaultCountryCode(db)

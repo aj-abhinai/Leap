@@ -5,6 +5,7 @@ package audit
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 )
 
@@ -20,7 +21,9 @@ func Log(db *sql.DB, resourceID, resourceType, action, changes, userID string) {
 // LogCustom writes a best-effort audit entry with an explicit description.
 // Logging must never fail the mutation it describes, so failures are logged
 // and swallowed; the actor's name is resolved from the users table, and
-// resourceID/changes follow the same well-formedness rules as Log.
+// resourceID/changes follow the same well-formedness rules as Log. A changes
+// value that is not valid JSON is dropped (description-only row) so a caller
+// bug cannot lose the audit row itself.
 func LogCustom(db *sql.DB, description, resourceType, resourceID, action, changes, userID string) {
 	userName := ""
 	if userID != "" {
@@ -35,7 +38,12 @@ func LogCustom(db *sql.DB, description, resourceType, resourceID, action, change
 		resourceIDArg = resourceID
 	}
 	if changes != "" {
-		changesArg = changes
+		if json.Valid([]byte(changes)) {
+			changesArg = changes
+		} else {
+			slog.Error("audit changes is not valid JSON; storing the description only",
+				"resource_type", resourceType, "resource_id", resourceID, "action", action)
+		}
 	}
 	var userIDArg, userNameArg any
 	if userID != "" {

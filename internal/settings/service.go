@@ -22,6 +22,14 @@ const NudgeLeadMinutesKey = "nudge_lead_minutes"
 // country code.
 const DefaultCountryCodeKey = "default_country_code"
 
+// ErrInvalidNudgeMinutes marks a nudge lead time the service refuses; it is
+// client input, surfaced as a 400.
+var ErrInvalidNudgeMinutes = errors.New("nudge lead minutes must be non-negative")
+
+// ErrInvalidCountryCode marks a country code outside the '+' followed by one
+// to three digits rule; it is client input, surfaced as a 400.
+var ErrInvalidCountryCode = errors.New("country code must be '+' followed by 1 to 3 digits")
+
 // DefaultDefaultCountryCode is the country code assumed when no setting is
 // stored.
 const DefaultDefaultCountryCode = "+91"
@@ -110,7 +118,7 @@ func DefaultCountryCode(q Queryer) (string, error) {
 // after the start time.
 func (s *Service) SetNudgeLeadMinutes(minutes int) error {
 	if minutes < 0 {
-		return errors.New("nudge lead minutes must be non-negative")
+		return ErrInvalidNudgeMinutes
 	}
 	if _, err := s.db.Exec(
 		`INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, now())
@@ -128,20 +136,21 @@ func (s *Service) GetDefaultCountryCode() (string, error) {
 	return DefaultCountryCode(s.db)
 }
 
-// SetDefaultCountryCode stores the org's default country code. The value must
-// pass the same validity rule as reads — a '+' followed by one to three
-// digits — so a malformed code can never be stamped onto stored numbers.
-func (s *Service) SetDefaultCountryCode(code string) error {
+// SetDefaultCountryCode stores the org's default country code and returns the
+// value as stored (trimmed). The value must pass the same validity rule as
+// reads — a '+' followed by one to three digits — so a malformed code can
+// never be stamped onto stored numbers.
+func (s *Service) SetDefaultCountryCode(code string) (string, error) {
 	code = strings.TrimSpace(code)
 	if !validCountryCode(code) {
-		return errors.New("country code must be '+' followed by 1 to 3 digits")
+		return "", ErrInvalidCountryCode
 	}
 	if _, err := s.db.Exec(
 		`INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, now())
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
 		DefaultCountryCodeKey, code,
 	); err != nil {
-		return fmt.Errorf("set default country code: %w", err)
+		return "", fmt.Errorf("set default country code: %w", err)
 	}
-	return nil
+	return code, nil
 }

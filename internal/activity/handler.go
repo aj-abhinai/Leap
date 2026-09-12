@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"crm/internal/respond"
+	"crm/internal/util"
 )
 
 type Handler struct {
@@ -32,6 +33,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		UserID:       r.URL.Query().Get("user_id"),
 		Action:       r.URL.Query().Get("action"),
 		ResourceType: r.URL.Query().Get("resource_type"),
+	}
+	if filters.UserID != "" && !util.IsUUID(filters.UserID) {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "user_id must be a valid id"},
+			nil,
+		)
+		return
 	}
 
 	entries, total, err := h.svc.list(page, perPage, filters)
