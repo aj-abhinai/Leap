@@ -132,14 +132,14 @@ and has no effect outside development.
 ## Development
 
 ```shell
-# Start Postgres in Docker (one-time, stays running)
+# Start Postgres + pgweb in Docker (one-time, stays running)
 just dev-db
 
-# Everything in one command (Postgres + backend + frontend; Ctrl+C stops all)
+# Everything in one command (Postgres + pgweb + backend + frontend; Ctrl+C stops all)
 just dev
 
 # Or individually:
-just backend        # Postgres + backend (in one terminal)
+just backend        # Postgres + pgweb + backend (in one terminal)
 just frontend       # Vite dev server (in a separate terminal — proxies /api to localhost:9000)
 
 # Run tests
@@ -155,7 +155,7 @@ just check           # fmt + vet + lint + test
 just build
 
 # Docker helpers
-just docker-up       # dev stack: start app + Postgres (loopback binds)
+just docker-up       # dev stack: start app + Postgres + pgweb (loopback binds)
 just docker-up-prod  # production stack: fails fast until docker/.env secrets are set
 just docker-rebuild  # rebuild image and start
 just docker-down     # stop the stack
@@ -163,6 +163,8 @@ just docker-reset    # stop and remove volumes (destructive)
 ```
 
 The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `localhost:9000`.
+
+The database browser (pgweb) is at `localhost:8081`; it starts and stops with the dev database.
 
 Health endpoints: `GET /healthz` (process alive) and `GET /readyz` (database ping).
 

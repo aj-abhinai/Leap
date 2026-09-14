@@ -26,3 +26,17 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm}
     ports:
       - "127.0.0.1:5432:5432"
+
+  # Database browser (pgweb) at http://127.0.0.1:8081, dev only: the
+  # published Postgres port is loopback-scoped the same way.
+  pgweb:
+    image: sosedoff/pgweb:0.17.0
+    container_name: crm_pgweb
+    restart: unless-stopped
+    environment:
+      PGWEB_DATABASE_URL: postgres://crm:${POSTGRES_PASSWORD:-crm}@db:5432/crm?sslmode=disable
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      db:
+        condition: service_healthy

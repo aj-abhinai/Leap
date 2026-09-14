@@ -18,7 +18,7 @@ default:
 
 # === Dev ===
 
-# Start Postgres in Docker, wait until ready, and free port :9000 (used by `backend` and `dev`).
+# Start Postgres and pgweb in Docker, wait until ready, and free port :9000 (used by `backend` and `dev`).
 [private]
 _pg-up:
     #!/usr/bin/env sh
@@ -34,9 +34,13 @@ _pg-up:
     done
     if ! docker exec crm_db pg_isready -U crm -d crm >/dev/null 2>&1; then
       echo "ERROR: Postgres did not become ready in 30s"
-      {{ compose }} rm -sf db
+      {{ compose }} rm -sf db pgweb
       exit 1
     fi
+    # Started only after the health wait above: pgweb's depends_on condition
+    # would otherwise block `up` until Postgres is healthy, skipping this script's
+    # fail-fast path and leaving a bad db container behind on failure.
+    {{ compose }} up -d pgweb
     # Free port :9000 if the docker app container is running (avoids bind collision with `just docker-up`).
     {{ compose }} stop app >/dev/null 2>&1 || true
 
@@ -45,7 +49,7 @@ backend: _pg-up
     #!/usr/bin/env sh
     set -e
     CLEANED_UP=""
-    cleanup() { [ -n "$CLEANED_UP" ] && return; CLEANED_UP=1; echo " Stopping Postgres..."; {{ compose }} rm -sf db; }
+    cleanup() { [ -n "$CLEANED_UP" ] && return; CLEANED_UP=1; echo " Stopping Postgres and pgweb..."; {{ compose }} rm -sf db pgweb; }
     trap cleanup EXIT INT TERM
     go run ./cmd/server/ -config {{ config }}
 
@@ -61,8 +65,8 @@ dev: _pg-up
       CLEANED_UP=1
       if [ -n "$FRONTEND_PID" ]; then kill "$FRONTEND_PID" 2>/dev/null || true; fi
       if [ -n "$BACKEND_PID" ]; then kill "$BACKEND_PID" 2>/dev/null || true; fi
-      echo " Stopping Postgres..."
-      {{ compose }} rm -sf db
+      echo " Stopping Postgres and pgweb..."
+      {{ compose }} rm -sf db pgweb
     }
     trap cleanup EXIT INT TERM
     echo "Starting backend on :9000..."
@@ -79,9 +83,9 @@ frontend:
     [ -d "node_modules" ] || pnpm install --frozen-lockfile && \
     pnpm dev
 
-# Start only Postgres in Docker, detached (with the dev override for loopback publish)
+# Start Postgres and pgweb in Docker, detached (with the dev override for loopback publish)
 dev-db:
-    {{ compose }} up -d db
+    {{ compose }} up -d db pgweb
 
 # === Build ===
 
