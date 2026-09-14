@@ -64,13 +64,16 @@ The `meta` object carries pagination information.
 | `DELETE` | `/api/contacts/:id` | Delete a contact |
 | `GET` | `/api/contacts/:id/notes` | List notes |
 | `POST` | `/api/contacts/:id/notes` | Add a note |
+| `DELETE` | `/api/contacts/:id/notes/:note_id` | Delete a note |
 
 ### Leads
 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/leads` | List leads |
+| `GET` | `/api/leads/board` | Get the kanban board |
 | `POST` | `/api/leads` | Create a lead |
+| `GET` | `/api/leads/:id` | Get a lead |
 | `PATCH` | `/api/leads/:id` | Update a lead |
 | `DELETE` | `/api/leads/:id` | Delete a lead |
 | `GET` | `/api/leads/:id/activities` | List activities |
@@ -79,13 +82,14 @@ The `meta` object carries pagination information.
 | `DELETE` | `/api/leads/:id/activities/:id` | Delete an activity |
 | `GET` | `/api/leads/:id/history` | Get stage-move history |
 
-### Reminders
+### Tasks and reminders
 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/reminders` | List pending reminders |
-| `PATCH` | `/api/reminders/:id` | Dismiss a reminder |
-| `POST` | `/api/reminders/:id/snooze` | Snooze a reminder |
+| `GET` | `/api/activities` | List all tasks |
+| `PATCH` | `/api/leads/:lead_id/reminders/:id` | Dismiss a reminder |
+| `POST` | `/api/leads/:lead_id/reminders/:id/snooze` | Snooze a reminder |
 
 ### Settings
 
@@ -96,9 +100,11 @@ The `meta` object carries pagination information.
 | `PATCH` | `/api/pipelines/:id` | Update a pipeline |
 | `DELETE` | `/api/pipelines/:id` | Delete a pipeline |
 | `POST` | `/api/pipelines/:id/stages` | Add a stage |
+| `PUT` | `/api/pipelines/:id/stages/order` | Reorder the stages |
 | `PATCH` | `/api/stages/:stage_id` | Update a stage |
 | `DELETE` | `/api/stages/:stage_id` | Delete a stage |
 | `GET` | `/api/programs` | List active programs |
+| `GET` | `/api/programs/manage` | List all programs, including archived |
 | `POST` | `/api/programs` | Create a program |
 | `PATCH` | `/api/programs/:id` | Update a program |
 | `DELETE` | `/api/programs/:id` | Archive a program |
@@ -113,11 +119,26 @@ The `meta` object carries pagination information.
 | `DELETE` | `/api/roles/:id` | Delete a role |
 | `GET` | `/api/roles/:id/permissions` | List role permissions |
 | `POST` | `/api/roles/:id/permissions` | Add a role permission |
+| `PUT` | `/api/roles/:id/permissions` | Set the role permissions |
 | `DELETE` | `/api/roles/:id/permissions/:id` | Remove a role permission |
 | `GET` | `/api/permissions` | List all permissions |
 | `GET` | `/api/users` | List users |
+| `GET` | `/api/users/options` | List assignee options |
 | `POST` | `/api/users` | Create a user |
+| `PATCH` | `/api/users/:id` | Update a user |
 | `DELETE` | `/api/users/:id` | Delete a user |
+| `POST` | `/api/users/:id/reset-password` | Reset a password |
+| `POST` | `/api/users/:id/reactivate` | Reactivate a user |
+| `PUT` | `/api/users/:id/role` | Set the user role |
+
+### Organization settings
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/settings/nudge-lead-minutes` | Get the reminder lead time |
+| `PUT` | `/api/settings/nudge-lead-minutes` | Set the reminder lead time |
+| `GET` | `/api/settings/default-country-code` | Get the default country code |
+| `PUT` | `/api/settings/default-country-code` | Set the default country code |
 
 ### Audit and export
 
@@ -135,4 +156,4 @@ The `meta` object carries pagination information.
 
 ## Permissions
 
-Every route has a required permission. The middleware checks the permission before the handler runs. A request without the permission returns `FORBIDDEN`.
+Most routes require a permission. The middleware checks the permission before the handler runs, and a request without it returns `FORBIDDEN`. The org-setting reads and the self-service auth routes are open to every signed-in user. The [Features](/features/) page lists every permission.

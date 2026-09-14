@@ -1,0 +1,47 @@
+/* Leap docs theme — matches the product: Geist type and the red accent. */
+
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
+
+:root {
+  --sl-font: 'Geist', ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Light theme accent, from the app's --primary (oklch(0.514 0.222 16.935)). */
+:root[data-theme='light'] {
+  --sl-color-accent-low: oklch(0.94 0.035 17);
+  --sl-color-accent: oklch(0.514 0.222 16.935);
+  --sl-color-accent-high: oklch(0.4 0.17 17);
+}
+
+/* Dark theme keeps the same red; no pink shift. */
+:root[data-theme='dark'] {
+  --sl-color-accent-low: oklch(0.27 0.1 17);
+  --sl-color-accent: oklch(0.514 0.222 16.935);
+  --sl-color-accent-high: oklch(0.66 0.22 17);
+}
+
+/* Screenshots: a hairline and a quiet shadow keep them grounded. Every shot
+   links to the full-size file, so the inline view stays compact. */
+.sl-markdown-content img {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+  box-shadow: 0 12px 32px -20px oklch(0 0 0 / 0.4);
+}
+
+.sl-markdown-content a:has(> img) {
+  cursor: zoom-in;
+}
+
+/* Wide screens have room: let a screenshot use the main pane, not just the
+   text column. */
+@media (min-width: 110rem) {
+  .sl-markdown-content a:has(> img) {
+    display: block;
+    width: calc(100% + 12rem);
+    margin-inline: -6rem;
+  }
+
+  .sl-markdown-content a:has(> img) img {
+    width: 100%;
+  }
+}

@@ -11,6 +11,8 @@ export default defineConfig({
 				src: './src/assets/logo.png',
 			},
 			favicon: '/favicon.png',
+			customCss: ['./src/styles/custom.css'],
+			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/aj-abhinai/leap' }],
 			sidebar: [
 				{
 					label: 'Guides',
@@ -18,6 +20,8 @@ export default defineConfig({
 						// Each item here is one entry in the navigation menu.
 						{ label: 'Introduction', slug: '' },
 						{ label: 'Quickstart', slug: 'getting-started/quickstart' },
+						{ label: 'Features', slug: 'features' },
+						{ label: 'Development', slug: 'development' },
 					],
 				},
 				{

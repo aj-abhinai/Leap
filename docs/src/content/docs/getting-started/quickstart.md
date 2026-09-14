@@ -3,7 +3,7 @@ title: Quickstart
 description: Install and run Leap in minutes
 ---
 
-This guide is a procedure. It shows how to install Leap and start it.
+Leap ships as a single binary and needs PostgreSQL. This guide is a procedure. It shows how to install Leap and start it.
 
 You can run Leap in three ways:
 
@@ -13,7 +13,8 @@ You can run Leap in three ways:
 
 ## Prerequisites
 
-- Docker and Docker Compose (for the Docker options).
+- Docker and Docker Compose (for the Docker methods).
+- `just` (for the development and build-from-source methods).
 - Go 1.25+ and Node 22+ (for a build from source).
 - pnpm (for a build from source).
 
@@ -28,6 +29,10 @@ You can run Leap in three ways:
 2. Open `http://localhost:9000` in a browser.
 3. Log in with `admin@admin.com` and the password `admin`.
 
+[![The Leap sign-in screen](/screenshots/login.png)](/screenshots/login.png)
+
+The development stack also starts a database browser (pgweb) at `http://localhost:8081`.
+
 > The credentials above work only in the development stack. Production refuses them.
 
 ## Run with Docker Compose (production)
@@ -38,7 +43,7 @@ You can run Leap in three ways:
    cp docker/.env.example docker/.env
    ```
 
-2. Edit `docker/.env`. Set `JWT_SECRET`, `SUPERADMIN_EMAIL`, and `SUPERADMIN_PASSWORD`.
+2. Edit `docker/.env`. Set `JWT_SECRET`, `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD`, `POSTGRES_PASSWORD`, and `DB_PASSWORD`. Use the same value for the two database passwords.
 3. Start the stack:
 
    ```shell
@@ -78,6 +83,8 @@ The migrations run automatically at startup. They are idempotent, so a restart i
    just dev-db
    ```
 
+   The command also starts the database browser (pgweb) at `http://localhost:8081`.
+
 2. Build the binary:
 
    ```shell
@@ -86,7 +93,10 @@ The migrations run automatically at startup. They are idempotent, so a restart i
 
 The binary is at `bin/crm`. It contains the frontend and the migrations, so it runs anywhere without extra asset directories.
 
+For a full local environment, read the [Development](/development/) guide.
+
 ## What is next?
 
+- Read the [Features](/features/) page for a tour of the product.
 - Read the [API Reference](/api-reference/overview/) to explore the REST API.
 - Run the tests with `just check`. The command runs format, vet, lint, and tests.

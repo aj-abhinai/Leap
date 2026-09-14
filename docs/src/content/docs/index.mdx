@@ -9,23 +9,28 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 Leap is a self-hosted pipeline CRM for internal teams. It tracks contacts and leads, and it records every change in an audit log. The whole system runs as a single binary, with no separate asset directories.
 
+[![The Leap dashboard with pipeline health and recent tasks](/screenshots/dashboard.png)](/screenshots/dashboard.png)
+
 ## Key Features
 
 <CardGrid>
+  <Card title="Dashboard" icon="laptop">
+    The landing page shows contact and lead counts, pipeline health, upcoming reminders, and recent tasks.
+  </Card>
   <Card title="Contacts" icon="building">
-    One record per client, with multiple phones, emails, tags, statuses, and notes. CSV import and export are included.
+    One record per client, with multiple phones, emails, tags, statuses, and notes. Phones are stored in the international format. CSV import and export are included.
   </Card>
   <Card title="Pipeline Kanban" icon="list-format">
-    Pipelines have custom stages. Leads move between stages on a kanban board. Each card shows the next task and the last touch.
+    Pipelines have custom stages with open, won, or lost outcomes. Leads move between stages on a kanban board. One open lead per contact, pipeline, and program prevents duplicates.
   </Card>
   <Card title="Activities and Reminders" icon="comment">
-    Each lead has a timeline of tasks: calls, follow-ups, and notes. Quick replies log outcomes and can auto-create the next task. Reminders surface overdue work.
+    Each lead has a timeline of tasks. Quick replies log an outcome and can auto-create the next task. Reminders prefill from the nudge lead time and surface overdue work.
   </Card>
   <Card title="Program Catalog" icon="document">
     Fixed-price programs are managed in Settings. Lead values are price snapshots at creation time, so later price changes do not affect existing leads.
   </Card>
   <Card title="Role-Based Access Control" icon="setting">
-    Custom roles carry per-action permissions on contacts, leads, pipelines, users, and settings. A superadmin account is created on first run.
+    Roles carry per-action permissions on contacts, leads, pipelines, users, and settings. Three protected roles ship with the app: superadmin, Sales, and Viewer. A superadmin account is created on first run.
   </Card>
   <Card title="Audit Log" icon="open-book">
     Every change is recorded with the user, the time, and a JSON diff. The activity feed shows the whole team what happened.
@@ -64,7 +69,19 @@ Leap is a self-hosted pipeline CRM for internal teams. It tracks contacts and le
   <Card title="Quickstart" icon="rocket">
     Install and run Leap in minutes. [Get started →](/getting-started/quickstart/)
   </Card>
+  <Card title="Features" icon="star">
+    Take a tour of the product. [View features →](/features/)
+  </Card>
   <Card title="API Reference" icon="open-book">
     Explore the REST API. [View API →](/api-reference/overview/)
+  </Card>
+  <Card title="Development" icon="pen">
+    Set up a local environment. [Start developing →](/development/)
+  </Card>
+  <Card title="GitHub" icon="github">
+    Read the source code. [Open GitHub →](https://github.com/aj-abhinai/leap)
+  </Card>
+  <Card title="Website" icon="globe">
+    Visit the project site. [Open website →](https://leapcrm.pages.dev/)
   </Card>
 </CardGrid>
