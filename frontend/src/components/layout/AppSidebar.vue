@@ -47,11 +47,6 @@ const navItems: { title: string; url: string; icon: Component }[] = [
     icon: LayoutDashboard,
   },
   {
-    title: 'Contacts',
-    url: '/contacts',
-    icon: Users,
-  },
-  {
     title: 'Leads',
     url: '/leads',
     icon: Folder,
@@ -60,6 +55,11 @@ const navItems: { title: string; url: string; icon: Component }[] = [
     title: 'Tasks',
     url: '/activities',
     icon: CalendarCheck,
+  },
+  {
+    title: 'Contacts',
+    url: '/contacts',
+    icon: Users,
   },
 ]
 </script>
