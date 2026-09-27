@@ -31,10 +31,20 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+// TokenResponse is the session payload every endpoint that issues or rotates a
+// session returns. The refresh token travels as an HttpOnly cookie instead of a
+// body field, so it never appears in a response body.
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	RefreshToken string `json:"-"`
 	ExpiresAt    int64  `json:"expires_at"`
+}
+
+// loginResponse is the login payload: the session plus the flag that tells the
+// client to route the user to the forced password change.
+type loginResponse struct {
+	TokenResponse
+	MustChangePassword bool `json:"must_change_password"`
 }
 
 var (

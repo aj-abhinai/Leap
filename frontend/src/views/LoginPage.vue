@@ -2,11 +2,10 @@
 import { shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2, LogIn } from '@lucide/vue'
+import AuthCard from '@/components/auth/AuthCard.vue'
+import { LogIn } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
 import { useSplash } from '@/composables/useSplash'
 
@@ -49,36 +48,39 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="relative flex min-h-screen items-center justify-center p-4">
-    <Card class="relative w-full max-w-sm shadow-lg">
-      <CardHeader class="text-center pb-2">
-        <div
-          class="mx-auto mb-3 size-12 rounded-xl bg-cover bg-center shadow-sm"
-          style="background-image: url('/logo.png')"
-          role="img"
-          aria-label="Leap logo"
-        ></div>
-        <CardTitle class="text-2xl">Leap</CardTitle>
-        <CardDescription>Sign in to your account</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form @submit.prevent="handleSubmit" class="space-y-4">
-          <div class="space-y-2">
-            <Label for="email">Email</Label>
-            <Input id="email" v-model="email" type="email" placeholder="admin@admin.com" autocomplete="email" />
-          </div>
-          <div class="space-y-2">
-            <Label for="password">Password</Label>
-            <Input id="password" v-model="password" type="password" placeholder="Enter your password" autocomplete="current-password" />
-          </div>
-          <div v-if="error" class="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{{ error }}</div>
-          <Button type="submit" class="w-full" :disabled="loading">
-            <Loader2 v-if="loading" class="mr-2 size-4 animate-spin" />
-            <LogIn v-else class="mr-2 size-4" />
-            Sign In
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
-  </div>
+  <AuthCard
+    title="Leap"
+    description="Sign in to your account"
+    submit-label="Sign In"
+    :error="error"
+    :loading="loading"
+    @submit="handleSubmit"
+  >
+    <template #emblem>
+      <div
+        class="mx-auto mb-3 size-12 rounded-xl bg-cover bg-center shadow-sm"
+        style="background-image: url('/logo.png')"
+        role="img"
+        aria-label="Leap logo"
+      ></div>
+    </template>
+    <template #submit-icon>
+      <LogIn class="mr-2 size-4" />
+    </template>
+
+    <div class="space-y-2">
+      <Label for="email">Email</Label>
+      <Input id="email" v-model="email" type="email" placeholder="admin@admin.com" autocomplete="email" />
+    </div>
+    <div class="space-y-2">
+      <Label for="password">Password</Label>
+      <Input
+        id="password"
+        v-model="password"
+        type="password"
+        placeholder="Enter your password"
+        autocomplete="current-password"
+      />
+    </div>
+  </AuthCard>
 </template>

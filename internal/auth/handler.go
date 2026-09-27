@@ -83,7 +83,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	u, resp, mustChange, err := h.svc.login(req.Email, req.Password)
+	u, resp, err := h.svc.login(req.Email, req.Password)
 	if err != nil {
 		writeAuthError(w, http.StatusUnauthorized, err)
 		return
@@ -97,11 +97,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(
 		w,
 		http.StatusOK,
-		map[string]any{
-			"access_token":         resp.AccessToken,
-			"expires_at":           resp.ExpiresAt,
-			"must_change_password": mustChange,
-		},
+		loginResponse{TokenResponse: *resp, MustChangePassword: u.MustChangePassword},
 		nil,
 		nil,
 	)
@@ -132,10 +128,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(
 		w,
 		http.StatusOK,
-		map[string]any{
-			"access_token": resp.AccessToken,
-			"expires_at":   resp.ExpiresAt,
-		},
+		resp,
 		nil,
 		nil,
 	)
@@ -245,10 +238,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(
 		w,
 		http.StatusOK,
-		map[string]any{
-			"access_token": resp.AccessToken,
-			"expires_at":   resp.ExpiresAt,
-		},
+		resp,
 		nil,
 		nil,
 	)

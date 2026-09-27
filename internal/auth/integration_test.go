@@ -17,11 +17,11 @@ func TestLoginIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	_, resp, mustChange, err := svc.login("alice@example.com", "correct-horse")
+	u, resp, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	if mustChange {
+	if u.MustChangePassword {
 		t.Error("expected must_change_password=false for a normal login")
 	}
 	if resp.AccessToken == "" {
@@ -40,7 +40,7 @@ func TestLoginWrongPasswordIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	_, _, _, err := svc.login("alice@example.com", "wrong-password")
+	_, _, err := svc.login("alice@example.com", "wrong-password")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("expected ErrInvalidCredentials, got %v", err)
 	}
@@ -50,7 +50,7 @@ func TestLoginUnknownUserIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db, authTestConfig())
 
-	_, _, _, err := svc.login("nobody@example.com", "whatever-password")
+	_, _, err := svc.login("nobody@example.com", "whatever-password")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Errorf("expected ErrInvalidCredentials, got %v", err)
 	}
@@ -71,7 +71,7 @@ func TestReactivatedUserCanLoginAgainIntegration(t *testing.T) {
 		t.Fatalf("deactivate user: %v", err)
 	}
 
-	_, _, _, err := svc.login("alice@example.com", "correct-horse")
+	_, _, err := svc.login("alice@example.com", "correct-horse")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("login while deactivated = %v, want ErrInvalidCredentials", err)
 	}
@@ -80,7 +80,7 @@ func TestReactivatedUserCanLoginAgainIntegration(t *testing.T) {
 		t.Fatalf("reactivate user: %v", err)
 	}
 
-	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
+	_, resp, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login after reactivation: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestRefreshRotationIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	_, first, _, err := svc.login("alice@example.com", "correct-horse")
+	_, first, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestRefreshReuseOldTokenRejectedIntegration(t *testing.T) {
 	seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	_, first, _, err := svc.login("alice@example.com", "correct-horse")
+	_, first, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestRefreshRejectedAfterUserDeactivationIntegration(t *testing.T) {
 	userID := seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
+	_, resp, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestRefreshRevokesExpiredTokenIntegration(t *testing.T) {
 	userID := seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
+	_, resp, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestAccessTokenValidationIntegration(t *testing.T) {
 	userID := seedUser(t, db, "alice@example.com", "correct-horse")
 	svc := NewService(db, authTestConfig())
 
-	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
+	_, resp, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -222,11 +222,11 @@ func TestLoginMustChangePasswordFlagIntegration(t *testing.T) {
 	id := seedUserWithFlag(t, db, "bob@example.com", "correct-horse", true)
 	svc := NewService(db, authTestConfig())
 
-	_, resp, mustChange, err := svc.login("bob@example.com", "correct-horse")
+	u, resp, err := svc.login("bob@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	if !mustChange {
+	if !u.MustChangePassword {
 		t.Error("expected must_change_password=true for a flagged user")
 	}
 	if resp.AccessToken == "" {
@@ -234,11 +234,11 @@ func TestLoginMustChangePasswordFlagIntegration(t *testing.T) {
 	}
 
 	// Verify the /me endpoint returns the flag.
-	u, err := svc.getUser(id)
+	me, err := svc.getUser(id)
 	if err != nil {
 		t.Fatalf("getUser: %v", err)
 	}
-	if !u.MustChangePassword {
+	if !me.MustChangePassword {
 		t.Error("expected MustChangePassword=true from getUser")
 	}
 }
@@ -258,11 +258,11 @@ func TestChangePasswordSuccessIntegration(t *testing.T) {
 	}
 
 	// Log in with the new password, flag should now be false.
-	_, _, mustChange, err := svc.login("carol@example.com", "New-Passw0rd!")
+	u, _, err := svc.login("carol@example.com", "New-Passw0rd!")
 	if err != nil {
 		t.Fatalf("login with new password: %v", err)
 	}
-	if mustChange {
+	if u.MustChangePassword {
 		t.Error("expected must_change_password=false after successful password change")
 	}
 }
@@ -295,11 +295,11 @@ func TestChangePasswordRevokesSessionsIntegration(t *testing.T) {
 	svc := NewService(db, authTestConfig())
 
 	// Create two refresh-token sessions.
-	_, resp1, _, err := svc.login("frank@example.com", "frank-pw")
+	_, resp1, err := svc.login("frank@example.com", "frank-pw")
 	if err != nil {
 		t.Fatalf("login 1: %v", err)
 	}
-	_, resp2, _, err := svc.login("frank@example.com", "frank-pw")
+	_, resp2, err := svc.login("frank@example.com", "frank-pw")
 	if err != nil {
 		t.Fatalf("login 2: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestLoginUnknownUserRunsPasswordComparison(t *testing.T) {
 	}
 	t.Cleanup(func() { comparePassword = orig })
 
-	_, _, _, err := svc.login("nobody@example.com", "whatever-password")
+	_, _, err := svc.login("nobody@example.com", "whatever-password")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
 	}
@@ -360,7 +360,7 @@ func TestLoginKnownUserRunsPasswordComparison(t *testing.T) {
 	}
 	t.Cleanup(func() { comparePassword = orig })
 
-	_, _, _, err := svc.login("alice@example.com", "wrong-password")
+	_, _, err := svc.login("alice@example.com", "wrong-password")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
 	}
@@ -429,7 +429,7 @@ func TestLoginRecordsLastLoginIntegration(t *testing.T) {
 		t.Fatalf("expected last_login_at to be NULL before login, got %v", u.LastLoginAt)
 	}
 
-	_, _, _, err = svc.login("alice@example.com", "correct-horse")
+	_, _, err = svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -450,7 +450,7 @@ func TestLoginLogoutAuditIntegration(t *testing.T) {
 	svc := NewService(db, authTestConfig())
 	act := activity.NewService(db)
 
-	_, resp, _, err := svc.login("alice@example.com", "correct-horse")
+	_, resp, err := svc.login("alice@example.com", "correct-horse")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
