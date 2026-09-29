@@ -19,6 +19,6 @@ minimumReleaseAgeExclude:
 # Only these packages run install/postinstall scripts during a build; every
 # other dependency is blocked from executing lifecycle scripts. This replaces
 # the old allow-all build-scripts flag.
-onlyBuiltDependencies:
-  - esbuild
-  - vue-demi
+allowBuilds:
+  esbuild: true
+  vue-demi: true
