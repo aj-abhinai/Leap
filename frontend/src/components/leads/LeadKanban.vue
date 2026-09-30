@@ -485,9 +485,12 @@ function showField(key: string): boolean {
             :disabled="!rbac.can('lead:write')"
             @change="(evt: { added?: { element: Lead } }) => handleDragChange(evt, col.id)"
           >
+            <!-- tabindex + Enter keep the card keyboard-openable; no
+                 role="button", which would flatten the nested controls.
+                 Keep this comment OUTSIDE #item: vuedraggable requires the
+                 slot to render exactly one child, and dev builds keep
+                 HTML comments as vnodes. -->
             <template #item="{ element: lead }">
-              <!-- tabindex + Enter keep the card keyboard-openable; no
-                   role="button", which would flatten the nested controls. -->
               <div
                 :key="lead.id"
                 tabindex="0"
