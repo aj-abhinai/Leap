@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { useRBACStore } from '@/stores/rbac'
 import { toast } from 'vue-sonner'
 import { listNotes, addNote, deleteNote, type ContactNote } from '@/api/contacts'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ interface Note extends ContactNote {}
 const props = defineProps<{ contactId: string }>()
 
 const auth = useAuthStore()
+const rbac = useRBACStore()
 const notes = shallowRef<Note[]>([])
 const loading = shallowRef(false)
 const isAdding = shallowRef(false)
@@ -71,6 +73,7 @@ async function loadMore() {
     total.value = res.meta?.total ?? total.value
     page.value++
   } catch (e) {
+    if (seq !== fetchSeq) return
     toast.error(errorMessage(e, 'Failed to load more notes'))
   } finally {
     loadingMore.value = false
@@ -111,8 +114,10 @@ async function handleDelete() {
   }
 }
 
+// Wildcard-permission users may delete any note — the server enforces the
+// same rule, so the menu must offer what the API accepts.
 function canDelete(note: Note): boolean {
-  return note.user_id === auth.user?.id
+  return note.user_id === auth.user?.id || rbac.can('*')
 }
 </script>
 

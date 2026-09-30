@@ -58,6 +58,9 @@ func (s *Service) listNotes(contactID string, page, perPage int) ([]Note, int, e
 		}
 		notes = append(notes, n)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("list notes: iterate: %w", err)
+	}
 	return notes, total, nil
 }
 

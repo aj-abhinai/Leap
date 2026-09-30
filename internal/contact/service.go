@@ -1134,10 +1134,6 @@ func statusTagExists(q queryer, statusID string) (bool, error) {
 	return exists, err
 }
 
-func (s *Service) logActivity(resourceID, resourceType, action, changes, userID string) {
-	audit.Log(s.db, resourceID, resourceType, action, changes, userID)
-}
-
 // auditLogDesc writes a best-effort audit entry whose description is a human
 // sentence naming the entity — the description is the record an admin reads.
 func (s *Service) auditLogDesc(desc, resourceType, resourceID, action, userID string) {

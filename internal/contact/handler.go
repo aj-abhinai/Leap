@@ -212,7 +212,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	c, err := h.svc.get(id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || respond.IsNotFound(err) {
 			respond.JSON(
 				w,
 				http.StatusNotFound,
@@ -331,7 +331,7 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 	note, err := h.svc.createNote(contactID, userID, req.Note)
 	if err != nil {
-		respond.ServerError(w, err)
+		respondError(w, err)
 		return
 	}
 	respond.JSON(

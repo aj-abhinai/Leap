@@ -2,6 +2,8 @@ package contact
 
 import (
 	"bytes"
+	"context"
+	"crm/internal/respond"
 	"crm/internal/testdb"
 	"database/sql"
 	"encoding/json"
@@ -12,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func TestCreateContactIntegration(t *testing.T) {
@@ -1105,6 +1109,65 @@ func TestBulkCreateRejectsOversizedBodyHandlerIntegration(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for >2MB body, got %d", rr.Code)
 	}
+}
+
+func TestGetContactMalformedIDHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db), stubPerms{can: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/contacts/not-a-uuid", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", "not-a-uuid")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rr := httptest.NewRecorder()
+
+	h.Get(rr, req)
+
+	// The message is a contract: ContactDetailPage string-matches it to
+	// tell "not found" apart from a load failure.
+	errResp := assertAPIError(t, rr, http.StatusNotFound, "NOT_FOUND")
+	if errResp.Message != "Contact not found" {
+		t.Errorf("message = %q, want %q", errResp.Message, "Contact not found")
+	}
+}
+
+func TestCreateNoteMissingContactHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db), stubPerms{can: true})
+	missingID := "00000000-0000-0000-0000-000000000000"
+
+	body, _ := json.Marshal(CreateNoteRequest{Note: "hello"})
+	req := httptest.NewRequest(http.MethodPost, "/api/contacts/"+missingID+"/notes", bytes.NewReader(body))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", missingID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rr := httptest.NewRecorder()
+
+	h.CreateNote(rr, req)
+
+	assertAPIError(t, rr, http.StatusNotFound, "NOT_FOUND")
+}
+
+// assertAPIError asserts a handler answered status with an error envelope
+// carrying code, and returns the error so callers can pin the message.
+func assertAPIError(t *testing.T, rr *httptest.ResponseRecorder, status int, code string) *respond.Error {
+	t.Helper()
+	if rr.Code != status {
+		t.Fatalf("status = %d, want %d; body = %s", rr.Code, status, rr.Body.String())
+	}
+	var resp struct {
+		Error *respond.Error `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error == nil {
+		t.Fatalf("response is missing the error envelope; body = %s", rr.Body.String())
+	}
+	if resp.Error.Code != code {
+		t.Errorf("error code = %q, want %q", resp.Error.Code, code)
+	}
+	return resp.Error
 }
 
 func seedTestUser(t *testing.T, db *sql.DB, email string) string {
