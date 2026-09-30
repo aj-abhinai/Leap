@@ -104,6 +104,30 @@ describe('useLeadPipeline loadLeads sequence guard', () => {
     expect(toast.error).not.toHaveBeenCalled()
     expect(pipeline.kanbanColumns.value[0].leads.map((l) => l.id)).toEqual(['lead-new'])
   })
+
+  // The page and the activities drawer each own a board: one instance's load
+  // must not cancel the other's in-flight load or strand its loading state.
+  it('lets two composable instances load independently', async () => {
+    const first = deferred<ApiResponse<Board>>()
+    const second = deferred<ApiResponse<Board>>()
+    fetchBoardMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    const page = setupPipeline()
+    const drawer = useLeadPipeline()
+    drawer.selectedPipelineId.value = 'p1'
+
+    const pageLoad = page.loadLeads()
+    const drawerLoad = drawer.loadLeads()
+
+    second.resolve(boardWith(makeLead('drawer-lead')))
+    await drawerLoad
+    first.resolve(boardWith(makeLead('page-lead')))
+    await pageLoad
+
+    expect(page.kanbanColumns.value[0].leads.map((l) => l.id)).toEqual(['page-lead'])
+    expect(page.loading.value).toBe(false)
+    expect(drawer.kanbanColumns.value[0].leads.map((l) => l.id)).toEqual(['drawer-lead'])
+  })
 })
 
 describe('useLeadPipeline moveStage toasts', () => {

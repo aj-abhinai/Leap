@@ -475,8 +475,8 @@ func (s *Service) spawnCycleTx(tx *sql.Tx, old *Lead, targetStageID string) (*Le
 
 // afterSpawn resolves the new cycle's display names and writes the spawn audit
 // row naming the closed lead it replaces. The cycle is already committed, so an
-// enrichment failure is logged without undoing it.
-func (s *Service) afterSpawn(l, old *Lead, userID string) error {
+// enrichment failure is logged without undoing it; the function never fails.
+func (s *Service) afterSpawn(l, old *Lead, userID string) {
 	if err := s.populateNames(l); err != nil {
 		// The new cycle is committed; a display-name read must not prevent the
 		// spawn audit row below from being written.
@@ -488,7 +488,6 @@ func (s *Service) afterSpawn(l, old *Lead, userID string) error {
 		name = old.ID
 	}
 	s.logActivity(l.ID, "lead", "create", fmt.Sprintf("Started new cycle from closed lead %q", name), userID)
-	return nil
 }
 
 func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
@@ -567,7 +566,13 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 		slog.Error("populate lead names", "error", err, "lead_id", l.ID)
 	}
 	l.DisplayName = l.displayName()
-	s.logActivity(l.ID, "lead", "create", fmt.Sprintf("Created lead %q", l.DisplayName), userID)
+	// A failed enrichment leaves DisplayName empty; the audit description
+	// falls back to the id rather than writing an empty name.
+	name := l.DisplayName
+	if name == "" {
+		name = l.ID
+	}
+	s.logActivity(l.ID, "lead", "create", fmt.Sprintf("Created lead %q", name), userID)
 	return &l, nil
 }
 
@@ -883,9 +888,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("update lead: commit spawn: %w", err)
 		}
-		if err := s.afterSpawn(l, old, userID); err != nil {
-			return nil, err
-		}
+		s.afterSpawn(l, old, userID)
 		return l, nil
 	}
 
@@ -1053,10 +1056,12 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit lead update: %w", err)
 	}
+	enriched := true
 	if err := s.populateNames(&l); err != nil {
 		// The update is committed; a display-name read must not fail it.
 		// The response degrades to empty names and the next read repairs it.
 		slog.Error("populate lead names", "error", err, "lead_id", l.ID)
+		enriched = false
 	}
 	l.DisplayName = l.displayName()
 
@@ -1067,7 +1072,9 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	if old.PipelineID != l.PipelineID {
 		parts = append(parts, fmt.Sprintf("pipeline %q → %q", s.pipelineIDToName(old.PipelineID), s.pipelineIDToName(l.PipelineID)))
 	}
-	if old.ProgramName != l.ProgramName {
+	// populateNames is the only source of ProgramName; a failed enrichment
+	// must not fabricate a program change in the audit text.
+	if enriched && old.ProgramName != l.ProgramName {
 		parts = append(parts, fmt.Sprintf("program %q → %q", old.ProgramName, l.ProgramName))
 	}
 	if (old.Value == nil) != (l.Value == nil) || (old.Value != nil && l.Value != nil && *old.Value != *l.Value) {

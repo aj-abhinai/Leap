@@ -486,9 +486,10 @@ function showField(key: string): boolean {
             @change="(evt: { added?: { element: Lead } }) => handleDragChange(evt, col.id)"
           >
             <template #item="{ element: lead }">
+              <!-- tabindex + Enter keep the card keyboard-openable; no
+                   role="button", which would flatten the nested controls. -->
               <div
                 :key="lead.id"
-                role="button"
                 tabindex="0"
                 class="group relative rounded-lg border bg-card p-3 text-sm shadow-sm transition-all hover:border-primary/20 hover:shadow-md cursor-pointer"
                 @click="emit('viewActivities', lead)"

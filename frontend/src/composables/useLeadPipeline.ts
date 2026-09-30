@@ -26,13 +26,15 @@ watch(selectedPipelineId, (id) => {
 // selector moved and the old board must be dropped for a fresh load.
 const boardPipelineId = shallowRef('')
 
-// Monotonic request sequence: only the newest load may write the board.
-// Guards filter changes (the pipeline guard alone cannot) — the same
-// pattern as runContactSearch, fetchActivities, and fetchHistory.
-let boardLoadSeq = 0
-
 export function useLeadPipeline() {
   const pipelineStore = usePipelineStore()
+
+  // Monotonic request sequence: only the newest load of this instance's board
+  // may write it. Guards filter changes (the pipeline guard alone cannot) —
+  // the same pattern as runContactSearch, fetchActivities, and fetchHistory.
+  // Per-instance, like boardStages: a load started by another consumer of this
+  // composable (the page vs. the activities drawer) must not cancel this one.
+  let boardLoadSeq = 0
 
   // Stage id → (capped window leads + true count) from the board endpoint.
   const boardStages = shallowRef<BoardStage[]>([])
