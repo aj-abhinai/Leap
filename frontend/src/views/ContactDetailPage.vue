@@ -20,6 +20,8 @@ import { toast } from 'vue-sonner'
 import { getAvatarColor, getInitials } from '@/utils/avatar'
 import { displayAge } from '@/utils/age'
 import { errorMessage } from '@/utils/errors'
+import { ApiError } from '@/composables/useApi'
+import type { DuplicateMatch } from '@/api/contacts'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,6 +32,10 @@ const loading = shallowRef(true)
 const loadError = shallowRef('')
 const drawerOpen = shallowRef(false)
 const saving = shallowRef(false)
+// A 409 duplicate on edit surfaces here the same way as on the list page:
+// matched contacts in a dialog, confirm resubmits with the flag set.
+const duplicateMatches = shallowRef<DuplicateMatch[] | null>(null)
+const lastSaveBody = shallowRef<ContactSaveBody | null>(null)
 const ageLabel = computed(() => displayAge(contact.value?.date_of_birth, contact.value?.age))
 
 // Watch the route param: navigating detail-to-detail reuses this instance,
@@ -47,6 +53,11 @@ async function loadContact(id: string) {
   const seq = ++loadSeq
   loading.value = true
   loadError.value = ''
+  // Detail-to-detail navigation reuses this instance: duplicate state from
+  // the previous contact must not reopen its dialog over the new one, nor
+  // resubmit its pending body against the new contact.
+  duplicateMatches.value = null
+  lastSaveBody.value = null
   try {
     const loaded = await store.fetchContact(id)
     if (seq !== loadSeq) return
@@ -69,6 +80,7 @@ async function handleSave(body: ContactSaveBody) {
   const saved = contact.value
   if (!saved) return
   saving.value = true
+  lastSaveBody.value = body
   // Capture the id and the seq before awaiting the patch: navigating to
   // another contact mid-save bumps loadSeq, and this refetch of the saved
   // contact must then be discarded instead of overwriting the new contact.
@@ -78,6 +90,10 @@ async function handleSave(body: ContactSaveBody) {
     toast.success('Contact updated')
     drawerOpen.value = false
   } catch (e) {
+    if (e instanceof ApiError && e.code === 'DUPLICATE_CONTACT') {
+      duplicateMatches.value = e.payload?.duplicates ?? []
+      return
+    }
     toast.error(errorMessage(e, 'Failed to update contact'))
     return
   } finally {
@@ -90,6 +106,18 @@ async function handleSave(body: ContactSaveBody) {
     if (seq === loadSeq) contact.value = loaded
   } catch {
     // Update succeeded; keep showing the previous data rather than blanking the page.
+  }
+}
+
+// confirmDuplicate resubmits the edit that got a 409 with the duplicate flag
+// set; a cancelled dialog just closes it.
+async function confirmDuplicate(confirmed: boolean) {
+  duplicateMatches.value = null
+  if (!confirmed) return
+  const body = lastSaveBody.value
+  lastSaveBody.value = null
+  if (body && contact.value) {
+    await handleSave({ ...body, confirm_duplicates: true })
   }
 }
 </script>
@@ -191,7 +219,9 @@ async function handleSave(body: ContactSaveBody) {
               :key="contact.id"
               :editing-contact="contact"
               :saving="saving"
+              :duplicate-matches="duplicateMatches"
               @save="handleSave"
+              @confirm-duplicate="confirmDuplicate"
             />
           </SheetContent>
         </Sheet>

@@ -306,12 +306,12 @@ async function handleSave() {
                 {{ m.name }}<template v-if="m.phone"> · {{ m.phone }}</template><template v-if="m.email"> · {{ m.email }}</template>
               </li>
             </ul>
-            Create anyway?
+            {{ props.editingContact ? 'Save anyway?' : 'Create anyway?' }}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel @click="emit('confirm-duplicate', false)">Cancel</AlertDialogCancel>
-          <AlertDialogAction @click="emit('confirm-duplicate', true)">Create anyway</AlertDialogAction>
+          <AlertDialogAction @click="emit('confirm-duplicate', true)">{{ props.editingContact ? 'Save anyway' : 'Create anyway' }}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
