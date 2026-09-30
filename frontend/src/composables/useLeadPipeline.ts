@@ -26,6 +26,11 @@ watch(selectedPipelineId, (id) => {
 // selector moved and the old board must be dropped for a fresh load.
 const boardPipelineId = shallowRef('')
 
+// Monotonic request sequence: only the newest load may write the board.
+// Guards filter changes (the pipeline guard alone cannot) — the same
+// pattern as runContactSearch, fetchActivities, and fetchHistory.
+let boardLoadSeq = 0
+
 export function useLeadPipeline() {
   const pipelineStore = usePipelineStore()
 
@@ -88,6 +93,7 @@ export function useLeadPipeline() {
   async function loadLeads() {
     const pipelineId = selectedPipelineId.value
     if (!pipelineId) return
+    const seq = ++boardLoadSeq
     // A pipeline switch means a different board: clear the old one so the
     // skeleton shows instead of stale cards from the previous pipeline, and
     // bump the revision so the fresh board animates in. Filter changes keep
@@ -110,14 +116,15 @@ export function useLeadPipeline() {
         from,
         to,
       })
-      // The user may have switched pipelines while this request was in
-      // flight; a stale response must not overwrite the current board.
-      if (pipelineId !== selectedPipelineId.value) return
+      // The user may have switched pipelines or changed a filter while this
+      // request was in flight; a stale response must not overwrite the
+      // current board.
+      if (seq !== boardLoadSeq || pipelineId !== selectedPipelineId.value) return
       boardStages.value = res.data?.stages ?? []
     } catch {
-      if (pipelineId === selectedPipelineId.value) toast.error('Failed to load leads')
+      if (seq === boardLoadSeq && pipelineId === selectedPipelineId.value) toast.error('Failed to load leads')
     } finally {
-      if (pipelineId === selectedPipelineId.value) loading.value = false
+      if (seq === boardLoadSeq && pipelineId === selectedPipelineId.value) loading.value = false
     }
   }
 

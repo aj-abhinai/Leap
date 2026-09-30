@@ -474,11 +474,13 @@ func (s *Service) spawnCycleTx(tx *sql.Tx, old *Lead, targetStageID string) (*Le
 }
 
 // afterSpawn resolves the new cycle's display names and writes the spawn audit
-// row naming the closed lead it replaces. The cycle is already committed, so a
-// failure here surfaces without undoing it.
+// row naming the closed lead it replaces. The cycle is already committed, so an
+// enrichment failure is logged without undoing it.
 func (s *Service) afterSpawn(l, old *Lead, userID string) error {
 	if err := s.populateNames(l); err != nil {
-		return err
+		// The new cycle is committed; a display-name read must not prevent the
+		// spawn audit row below from being written.
+		slog.Error("populate lead names", "error", err, "lead_id", l.ID)
 	}
 	l.DisplayName = l.displayName()
 	name := old.DisplayName
@@ -560,7 +562,9 @@ func (s *Service) create(req CreateRequest, userID string) (*Lead, error) {
 		return nil, fmt.Errorf("commit lead: %w", err)
 	}
 	if err := s.populateNames(&l); err != nil {
-		return nil, err
+		// The lead is committed; a display-name read must not fail the write.
+		// The response degrades to empty names and the next read repairs it.
+		slog.Error("populate lead names", "error", err, "lead_id", l.ID)
 	}
 	l.DisplayName = l.displayName()
 	s.logActivity(l.ID, "lead", "create", fmt.Sprintf("Created lead %q", l.DisplayName), userID)
@@ -1032,7 +1036,9 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		return nil, fmt.Errorf("commit lead update: %w", err)
 	}
 	if err := s.populateNames(&l); err != nil {
-		return nil, err
+		// The update is committed; a display-name read must not fail it.
+		// The response degrades to empty names and the next read repairs it.
+		slog.Error("populate lead names", "error", err, "lead_id", l.ID)
 	}
 	l.DisplayName = l.displayName()
 
