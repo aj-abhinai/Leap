@@ -4,8 +4,13 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import CreateLeadsDialog from '@/components/contacts/CreateLeadsDialog.vue'
 import { bulkCreateLeads } from '@/api/leads'
 import { listPipelines, type Pipeline } from '@/api/pipelines'
-import { listPrograms } from '@/api/programs'
+import { listPrograms, type Program } from '@/api/programs'
 import { listUserOptions } from '@/api/users'
+import {
+  loadRememberedCreateValues,
+  rememberCreateValues,
+  rememberedStageId,
+} from '@/composables/useLeadFormDefaults'
 
 vi.mock('@/api/leads', () => ({ bulkCreateLeads: vi.fn() }))
 vi.mock('@/api/pipelines', () => ({ listPipelines: vi.fn() }))
@@ -32,7 +37,8 @@ const pipelines: Pipeline[] = [
     name: 'Sales',
     stages: [
       { id: 's-open', pipeline_id: 'p1', name: 'New', order: 0, is_closing: false, outcome: 'open' },
-      { id: 's-lost', pipeline_id: 'p1', name: 'Closed Lost', order: 1, is_closing: true, outcome: 'lost' },
+      { id: 's-contacted', pipeline_id: 'p1', name: 'Contacted', order: 1, is_closing: false, outcome: 'open' },
+      { id: 's-lost', pipeline_id: 'p1', name: 'Closed Lost', order: 2, is_closing: true, outcome: 'lost' },
     ],
   },
   {
@@ -72,6 +78,7 @@ describe('CreateLeadsDialog', () => {
     vi.mocked(listUserOptions).mockReset().mockResolvedValue({ data: [{ id: 'u1', name: 'Alice User' }] })
     toast.success.mockClear()
     toast.error.mockClear()
+    localStorage.clear()
   })
 
   it('defaults to the first pipeline, its first open stage, no program, and unassigned', async () => {
@@ -215,5 +222,80 @@ describe('CreateLeadsDialog', () => {
     expect(done).toBeTruthy()
     await done!.trigger('click')
     expect(wrapper.emitted('done')).toBeTruthy()
+  })
+
+  it('seeds the shared fields from the remembered create values', async () => {
+    rememberCreateValues(undefined, 'p1', {
+      programId: 'prog1',
+      assignedTo: 'u1',
+      stageId: 's-contacted',
+    })
+
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    expect(vm.formProgramId).toBe('prog1')
+    expect(vm.formAssignedTo).toBe('u1')
+    expect(vm.formStageId).toBe('s-contacted')
+  })
+
+  it('drops a remembered program that is no longer in the catalog', async () => {
+    rememberCreateValues(undefined, 'p1', { programId: 'gone', assignedTo: '', stageId: '' })
+
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    expect((wrapper.vm as any).formProgramId).toBe('__none__')
+  })
+
+  it('resets a remembered assignee that is no longer listed', async () => {
+    rememberCreateValues(undefined, 'p1', { programId: '', assignedTo: 'u-gone', stageId: '' })
+
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    expect((wrapper.vm as any).formAssignedTo).toBe('__unassigned__')
+  })
+
+  it('keeps the operator’s pick while the catalog refetch is open', async () => {
+    rememberCreateValues(undefined, 'p1', { programId: 'prog2', assignedTo: '', stageId: '' })
+    let resolvePrograms!: (value: { data: Program[] }) => void
+    const programsPending = new Promise<{ data: Program[] }>((resolve) => {
+      resolvePrograms = resolve
+    })
+    vi.mocked(listPrograms).mockReturnValue(programsPending)
+
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    // The operator replaces the remembered program before the refetch lands.
+    const vm = wrapper.vm as any
+    vm.formProgramId = 'prog1'
+    await wrapper.vm.$nextTick()
+
+    resolvePrograms({ data: [{ id: 'prog1', name: 'Coaching', price: 25000, archived: false }] })
+    await flushPromises()
+
+    expect(vm.formProgramId).toBe('prog1')
+  })
+
+  it('remembers what a run submits for the next entry', async () => {
+    vi.mocked(bulkCreateLeads).mockResolvedValue({ data: { created: 2, skipped: 0, failed: 0 } })
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    vm.formProgramId = 'prog1'
+    vm.formAssignedTo = 'u1'
+    vm.formStageId = 's-contacted'
+    await wrapper.vm.$nextTick()
+    await vm.submit()
+    await flushPromises()
+
+    expect(loadRememberedCreateValues(undefined)).toEqual({ programId: 'prog1', assignedTo: 'u1' })
+    expect(rememberedStageId(undefined, 'p1', [{ id: 's-contacted', is_closing: false }])).toBe(
+      's-contacted',
+    )
   })
 })

@@ -107,6 +107,7 @@ describe('LeadForm resolve-or-log banner', () => {
     postMock.mockReset()
     getMock.mockResolvedValue({ data: [] })
     postMock.mockResolvedValue({ data: { id: 'a1' } })
+    localStorage.clear()
     document.body.innerHTML = ''
   })
 

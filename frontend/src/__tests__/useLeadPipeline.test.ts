@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { usePipelineStore } from '@/stores/pipeline'
 import type { ApiResponse } from '@/composables/useApi'
@@ -57,6 +57,10 @@ function setupPipeline() {
   ]
   const pipeline = useLeadPipeline()
   pipeline.selectedPipelineId.value = 'p1'
+  // The composable keeps module-level filter state; each test starts clean.
+  pipeline.datePreset.value = 'all'
+  pipeline.fromDate.value = ''
+  pipeline.toDate.value = ''
   return pipeline
 }
 
@@ -158,5 +162,63 @@ describe('useLeadPipeline moveStage toasts', () => {
 
     expect(toast.success).toHaveBeenCalledWith('Lead closed')
     expect(toast.success).not.toHaveBeenCalledWith('Lead moved', expect.anything())
+  })
+})
+
+describe('useLeadPipeline date window', () => {
+  beforeEach(() => {
+    fetchBoardMock.mockReset().mockResolvedValue(boardWith(makeLead('lead-1')))
+    // Wednesday 30 September 2026, noon; window expectations use the same
+    // local-date primitives so they hold in any time zone.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 8, 30, 12, 0, 0))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("sends the viewer's local day for the today preset", async () => {
+    const pipeline = setupPipeline()
+    pipeline.setDatePreset('today')
+    await pipeline.loadLeads()
+
+    const params = fetchBoardMock.mock.calls[0][0]
+    expect(params.from).toBe(new Date(2026, 8, 30).toISOString())
+    expect(params.to).toBe(new Date(new Date(2026, 9, 1).getTime() - 1).toISOString())
+  })
+
+  it('sends a custom range from the start day to the end day', async () => {
+    const pipeline = setupPipeline()
+    pipeline.setDateRange('2026-09-01', '2026-09-03')
+    await pipeline.loadLeads()
+
+    const params = fetchBoardMock.mock.calls[0][0]
+    expect(params.from).toBe(new Date(2026, 8, 1).toISOString())
+    expect(params.to).toBe(new Date(new Date(2026, 8, 4).getTime() - 1).toISOString())
+  })
+
+  it('sends no window for all dates', async () => {
+    const pipeline = setupPipeline()
+    pipeline.setDatePreset('today')
+    pipeline.setDatePreset('all')
+    await pipeline.loadLeads()
+
+    const params = fetchBoardMock.mock.calls[0][0]
+    expect(params.from).toBeUndefined()
+    expect(params.to).toBeUndefined()
+  })
+
+  it('clears the window with the other filters', () => {
+    const pipeline = setupPipeline()
+    pipeline.setDateRange('2026-09-01', '2026-09-03')
+    expect(pipeline.activeFilterCount.value).toBe(1)
+
+    pipeline.clearFilters()
+
+    expect(pipeline.datePreset.value).toBe('all')
+    expect(pipeline.fromDate.value).toBe('')
+    expect(pipeline.toDate.value).toBe('')
+    expect(pipeline.activeFilterCount.value).toBe(0)
   })
 })

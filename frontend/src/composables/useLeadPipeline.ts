@@ -1,6 +1,7 @@
 import { computed, shallowRef, watch } from 'vue'
 import { usePipelineStore } from '@/stores/pipeline'
 import { fetchBoard, updateLead, type Lead, type BoardStage } from '@/api/leads'
+import { dateWindow, type DatePreset } from '@/utils/time'
 import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
 
@@ -12,7 +13,9 @@ const search = shallowRef('')
 const outcomeFilter = shallowRef<'open' | 'won' | 'lost' | ''>('')
 // '__all__' = no assignee filter; 'none' = unassigned; otherwise a user id.
 const assigneeFilter = shallowRef('__all__')
-// Date range (RFC3339 or '') narrows the board window by created_at.
+// Board window: a named local-day preset, an explicit custom range, or no
+// window ('all'). The window narrows the board by created_at.
+const datePreset = shallowRef<DatePreset>('all')
 const fromDate = shallowRef('')
 const toDate = shallowRef('')
 
@@ -58,19 +61,36 @@ export function useLeadPipeline() {
         : pipelineStore.pipelines[0].id
   }
 
+  // setDatePreset switches the board window. Named presets and 'all' drop any
+  // custom range; 'custom' keeps the days an explicit range set.
+  function setDatePreset(preset: DatePreset) {
+    datePreset.value = preset
+    if (preset !== 'custom') {
+      fromDate.value = ''
+      toDate.value = ''
+    }
+  }
+
+  // setDateRange applies an explicit local-day range picked on the calendar.
+  function setDateRange(from: string, to: string) {
+    fromDate.value = from
+    toDate.value = to
+    datePreset.value = 'custom'
+  }
+
   const activeFilterCount = computed(
     () =>
       (search.value.trim() !== '' ? 1 : 0) +
       (outcomeFilter.value !== '' ? 1 : 0) +
       (assigneeFilter.value !== '__all__' ? 1 : 0) +
-      (fromDate.value !== '' ? 1 : 0) +
-      (toDate.value !== '' ? 1 : 0),
+      (datePreset.value !== 'all' ? 1 : 0),
   )
 
   function clearFilters() {
     search.value = ''
     outcomeFilter.value = ''
     assigneeFilter.value = '__all__'
+    datePreset.value = 'all'
     fromDate.value = ''
     toDate.value = ''
   }
@@ -107,16 +127,16 @@ export function useLeadPipeline() {
     }
     loading.value = true
     try {
-      // The date inputs are YYYY-MM-DD; the board filter expects RFC3339.
-      const from = fromDate.value ? `${fromDate.value}T00:00:00Z` : undefined
-      const to = toDate.value ? `${toDate.value}T23:59:59Z` : undefined
+      // Resolved per load, never cached: a tab left open across midnight must
+      // re-read the viewer's current "today" on the next refresh.
+      const bounds = dateWindow(datePreset.value, fromDate.value, toDate.value)
       const res = await fetchBoard({
         pipelineId,
         q: search.value.trim() || undefined,
         outcome: outcomeFilter.value || undefined,
         assignedTo: assigneeFilter.value === '__all__' ? undefined : assigneeFilter.value || undefined,
-        from,
-        to,
+        from: bounds?.from,
+        to: bounds?.to,
       })
       // The user may have switched pipelines or changed a filter while this
       // request was in flight; a stale response must not overwrite the
@@ -197,10 +217,13 @@ export function useLeadPipeline() {
     search,
     outcomeFilter,
     assigneeFilter,
+    datePreset,
     fromDate,
     toDate,
     activeFilterCount,
     clearFilters,
+    setDatePreset,
+    setDateRange,
     syncPipelineSelection,
     loadLeads,
     moveStage,

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { toLocalDateInput, toLocalTimeInput, timeAgo } from '@/utils/time'
+import { dateWindow, dayWindow, presetWindow, toLocalDateInput, toLocalTimeInput, timeAgo } from '@/utils/time'
+
+// A fixed local instant: Wednesday 30 September 2026, 12:00. Expectations are
+// built from the same local-date primitives, so they hold in any time zone.
+const now = new Date(2026, 8, 30, 12, 0, 0)
+const endOfToday = new Date(new Date(2026, 9, 1).getTime() - 1).toISOString()
 
 // These helpers render a stored instant into local wall-clock components for
 // <input type="date"> / <input type="time">, matching the local-time semantics
@@ -34,5 +39,73 @@ describe('timeAgo', () => {
     expect(timeAgo(new Date(now - 5 * 60_000).toISOString())).toBe('5m ago')
     expect(timeAgo(new Date(now - 2 * 60 * 60_000).toISOString())).toBe('2h ago')
     expect(timeAgo(new Date(now - 3 * 24 * 60 * 60_000).toISOString())).toBe('3d ago')
+  })
+})
+
+describe('presetWindow', () => {
+  it('covers the whole local day for today', () => {
+    expect(presetWindow('today', now)).toEqual({
+      from: new Date(2026, 8, 30).toISOString(),
+      to: endOfToday,
+    })
+  })
+
+  it('covers the previous local day for yesterday', () => {
+    expect(presetWindow('yesterday', now)).toEqual({
+      from: new Date(2026, 8, 29).toISOString(),
+      to: new Date(new Date(2026, 8, 30).getTime() - 1).toISOString(),
+    })
+  })
+
+  it('starts the week on Sunday', () => {
+    // 30 September 2026 is a Wednesday, so its week began Sunday the 27th.
+    expect(new Date(2026, 8, 30).getDay()).toBe(3)
+    expect(presetWindow('week', now)).toEqual({
+      from: new Date(2026, 8, 27).toISOString(),
+      to: endOfToday,
+    })
+  })
+
+  it('starts the month on the 1st and ends today', () => {
+    expect(presetWindow('month', now)).toEqual({
+      from: new Date(2026, 8, 1).toISOString(),
+      to: endOfToday,
+    })
+  })
+})
+
+describe('dayWindow', () => {
+  it('spans one local day to its last millisecond', () => {
+    expect(dayWindow('2026-09-01')).toEqual({
+      from: new Date(2026, 8, 1).toISOString(),
+      to: new Date(new Date(2026, 8, 2).getTime() - 1).toISOString(),
+    })
+  })
+
+  it('rejects malformed and impossible days', () => {
+    expect(dayWindow('')).toBeNull()
+    expect(dayWindow('2026-9-1')).toBeNull()
+    expect(dayWindow('2026-02-31')).toBeNull()
+  })
+})
+
+describe('dateWindow', () => {
+  it('has no window for all dates', () => {
+    expect(dateWindow('all', '', '', now)).toBeNull()
+  })
+
+  it('resolves a named preset', () => {
+    expect(dateWindow('today', '', '', now)).toEqual(presetWindow('today', now))
+  })
+
+  it('spans a custom range from the start day to the end day', () => {
+    expect(dateWindow('custom', '2026-09-01', '2026-09-03', now)).toEqual({
+      from: new Date(2026, 8, 1).toISOString(),
+      to: new Date(new Date(2026, 8, 4).getTime() - 1).toISOString(),
+    })
+  })
+
+  it('has no window while a custom range is incomplete', () => {
+    expect(dateWindow('custom', '2026-09-01', '', now)).toBeNull()
   })
 })

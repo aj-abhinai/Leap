@@ -4,6 +4,12 @@ import { bulkCreateLeads, type BulkLeadCreateResult } from '@/api/leads'
 import { listPrograms, type Program } from '@/api/programs'
 import { usePipelineStore } from '@/stores/pipeline'
 import { useUsersStore } from '@/stores/users'
+import { useAuthStore } from '@/stores/auth'
+import {
+  loadRememberedCreateValues,
+  rememberCreateValues,
+  rememberedStageId,
+} from '@/composables/useLeadFormDefaults'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,6 +45,7 @@ const NO_PROGRAM = '__none__'
 
 const pipelineStore = usePipelineStore()
 const users = useUsersStore()
+const auth = useAuthStore()
 
 const step = shallowRef<'form' | 'result'>('form')
 const formPipelineId = shallowRef('')
@@ -62,10 +69,36 @@ function defaultStageId(pipelineId: string): string {
   return pipelineStore.pipelines.find((p) => p.id === pipelineId)?.stages?.find((s) => !s.is_closing)?.id ?? ''
 }
 
-// loadOptions fills the pickers and seeds the defaults once: first pipeline,
-// its first open stage, no program, unassigned. A later open keeps the
-// operator's last choices.
+function stagesOf(pipelineId: string) {
+  return pipelineStore.pipelines.find((p) => p.id === pipelineId)?.stages ?? []
+}
+
+// seedStage seeds the pipeline's remembered stage when it is still an open
+// stage of that pipeline, else the pipeline's first open stage.
+function seedStage(pipelineId: string) {
+  formStageId.value =
+    rememberedStageId(auth.user?.id, pipelineId, stagesOf(pipelineId)) || defaultStageId(pipelineId)
+}
+
+// An assignee that is no longer listed (a deleted or deactivated user) must
+// not reach the create, or the run is refused (ErrInvalidAssignee). Only a
+// successful fetch proves the option list; a failed one must not unassign.
+function ensureValidAssignee() {
+  if (users.error) return
+  if (formAssignedTo.value !== UNASSIGNED && !users.options.some((u) => u.id === formAssignedTo.value)) {
+    formAssignedTo.value = UNASSIGNED
+  }
+}
+watch(() => users.options, ensureValidAssignee)
+
+// loadOptions fills the pickers and seeds the shared fields from the
+// remembered create values: the program and assignee, and the selected
+// pipeline's remembered stage, else its first open stage. Seeding happens
+// before the catalog refetch, so a late response can never overwrite a field
+// the operator already changed. The pipeline keeps its own first-pipeline
+// default — the memory never chooses a pipeline.
 async function loadOptions() {
+  const assignees = users.fetchOptions()
   if (pipelineStore.pipelines.length === 0) {
     try {
       await pipelineStore.fetchPipelines()
@@ -78,23 +111,37 @@ async function loadOptions() {
   }
   if (!formPipelineId.value && pipelineStore.pipelines.length > 0) {
     formPipelineId.value = pipelineStore.pipelines[0].id
-    formStageId.value = defaultStageId(formPipelineId.value)
   }
-  if (programs.value.length === 0) {
-    try {
-      const res = await listPrograms()
-      programs.value = res.data ?? []
-    } catch {
-      // The program picker degrades to "No program"; a failed catalog fetch
-      // must not block a create that does not need a program.
+  if (formPipelineId.value) seedStage(formPipelineId.value)
+
+  const remembered = loadRememberedCreateValues(auth.user?.id)
+  formProgramId.value = remembered.programId || NO_PROGRAM
+  formAssignedTo.value = remembered.assignedTo || UNASSIGNED
+
+  try {
+    // Refetched on every open: a remembered program is only usable while the
+    // live catalog still lists it (programs are archived, not deleted).
+    const res = await listPrograms()
+    programs.value = res.data ?? []
+    // Drop the remembered program when the live catalog no longer lists it and
+    // the operator has not replaced it since.
+    if (formProgramId.value === remembered.programId && remembered.programId
+      && !programs.value.some((p) => p.id === remembered.programId)) {
+      formProgramId.value = NO_PROGRAM
     }
+  } catch {
+    // The program picker degrades to "No program"; a failed catalog fetch
+    // must not block a create that does not need a program.
   }
-  users.fetchOptions()
+  await assignees
+  // Options another view already cached never re-emit, so the watcher above
+  // cannot validate them; do it once the list is known to have settled.
+  if (users.options.length > 0 && !users.loading) ensureValidAssignee()
 }
 
-// A pipeline switch resets the stage to that pipeline's first open stage.
+// A pipeline switch reseeds the stage from that pipeline's memory.
 watch(formPipelineId, (id, previous) => {
-  if (id !== previous) formStageId.value = defaultStageId(id)
+  if (id !== previous) seedStage(id)
 })
 
 watch(
@@ -104,7 +151,9 @@ watch(
     step.value = 'form'
     result.value = null
     error.value = ''
-    loadOptions()
+    // Fire-and-forget: seeding happens inside loadOptions, and a pending
+    // catalog must never gate the dialog's Cancel.
+    loadOptions().catch(() => {})
   },
   { immediate: true },
 )
@@ -114,6 +163,13 @@ async function submit() {
   submitting.value = true
   error.value = ''
   try {
+    // Remember what this run submits, so the next lead entry — here or on the
+    // single-lead form — starts from it.
+    rememberCreateValues(auth.user?.id, formPipelineId.value, {
+      programId: formProgramId.value === NO_PROGRAM ? '' : formProgramId.value,
+      assignedTo: formAssignedTo.value === UNASSIGNED ? '' : formAssignedTo.value,
+      stageId: formStageId.value,
+    })
     const res = await bulkCreateLeads({
       contact_ids: props.contactIds,
       pipeline_id: formPipelineId.value,

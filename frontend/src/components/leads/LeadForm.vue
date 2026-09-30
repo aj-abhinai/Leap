@@ -6,7 +6,13 @@ import { type Lead } from '@/stores/leads'
 import { useSettingsStore } from '@/stores/settings'
 import { useRBACStore } from '@/stores/rbac'
 import { useUsersStore } from '@/stores/users'
+import { useAuthStore } from '@/stores/auth'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
+import {
+  loadRememberedCreateValues,
+  rememberCreateValues,
+  rememberedStageId,
+} from '@/composables/useLeadFormDefaults'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -77,24 +83,37 @@ const emit = defineEmits<{
 
 const settings = useSettingsStore()
 const users = useUsersStore()
+const auth = useAuthStore()
 
 const UNASSIGNED = '__unassigned__'
+// Remembered create values (personal view defaults) seed a new lead's form;
+// editing always shows the lead's own values.
+const remembered = props.editingLead ? null : loadRememberedCreateValues(auth.user?.id)
 const programs = shallowRef<Program[]>([])
-const formProgramId = shallowRef<string>(props.editingLead?.program_id || '__none__')
+const formProgramId = shallowRef<string>(
+  props.editingLead?.program_id || remembered?.programId || '__none__',
+)
 const linkedContactId = shallowRef(props.editingLead?.contact_id || props.prefillContact?.id || null)
 const linkedContactName = shallowRef(props.editingLead?.contact_name || props.prefillContact?.name || '')
 const formNickname = shallowRef(props.editingLead?.nickname || '')
 const formNotes = shallowRef(props.editingLead?.notes || '')
 const formLostReason = shallowRef(props.editingLead?.lost_reason || '')
-const formAssignedTo = shallowRef(props.editingLead?.assigned_to || UNASSIGNED)
+const formAssignedTo = shallowRef(
+  props.editingLead?.assigned_to || remembered?.assignedTo || UNASSIGNED,
+)
 // defaultStageId picks the form's starting stage. In create mode a closing
 // stage is unreachable (ErrClosingStageAtCreate), so the kanban "+" column's
-// stage is only honored when it is open — otherwise the first open stage.
+// stage is only honored when it is open — then the stage remembered for this
+// pipeline, then the first open stage.
 function defaultStageId(): string {
   if (props.editingLead?.stage_id) return props.editingLead.stage_id
   if (props.initialStageId) {
     const s = props.stages.find((x) => x.id === props.initialStageId)
     if (s && (props.editingLead || !s.is_closing)) return s.id
+  }
+  if (!props.editingLead) {
+    const rememberedId = rememberedStageId(auth.user?.id, props.pipelineId, props.stages)
+    if (rememberedId) return rememberedId
   }
   return props.stages.find((s) => props.editingLead || !s.is_closing)?.id || props.stages[0]?.id || ''
 }
@@ -155,15 +174,16 @@ const selectedProgram = computed(() => programs.value.find(p => p.id === formPro
 // to Unassigned once the option list loads so the form can still be saved.
 // Only reset on a successful fetch: a transient fetch failure empties the
 // options too, and must not silently unassign a valid assignee.
-watch(
-  () => users.options,
-  () => {
-    if (users.error) return
-    if (formAssignedTo.value !== UNASSIGNED && !users.options.some((u) => u.id === formAssignedTo.value)) {
-      formAssignedTo.value = UNASSIGNED
-    }
-  },
-)
+function ensureValidAssignee() {
+  if (users.error) return
+  if (formAssignedTo.value !== UNASSIGNED && !users.options.some((u) => u.id === formAssignedTo.value)) {
+    formAssignedTo.value = UNASSIGNED
+  }
+}
+watch(() => users.options, ensureValidAssignee)
+// The watcher only fires on a fetch; options another view already cached never
+// change, so a remembered or edited assignee is validated here too.
+if (users.options.length > 0 && !users.loading) ensureValidAssignee()
 
 // snapshotValue returns the lead's saved value while the program is unchanged,
 // else the newly selected program's price — the price snapshot contract.
@@ -304,17 +324,56 @@ function chooseExisting() {
   newContactMode.value = false
 }
 
-onMounted(async () => {
+// pickersReady resolves once the program catalog and the assignee options have
+// settled. A create waits on it, so a remembered value can never be submitted
+// before the list that validates it has loaded.
+let pickersReady: Promise<void> = Promise.resolve()
+
+async function loadPickers(): Promise<void> {
   if (settings.lossReasons.length === 0) settings.fetchTags()
-  users.fetchOptions()
+  const assignees = users.fetchOptions()
   try {
     const res = await listPrograms()
     programs.value = res.data
+    // A remembered program may have been archived since it was used; only a
+    // successful fetch proves the active catalog, so the fallback to "No
+    // program" happens here, never on a fetch failure.
+    if (!isEditing.value && formProgramId.value !== '__none__'
+      && !programs.value.some((p) => p.id === formProgramId.value)) {
+      formProgramId.value = '__none__'
+    }
   } catch {}
+  await assignees
+}
+
+onMounted(() => {
+  // A picker failure must never block a save: the empty list simply validates
+  // nothing, and the server stays the backstop.
+  pickersReady = loadPickers().catch(() => {})
 })
 
+// savePending covers the click-to-emit span, which contains network waits
+// (picker lists, phone resolve): the button must react on click and a second
+// click must not run a second save.
+const savePending = shallowRef(false)
+
 async function handleSave() {
+  if (savePending.value) return
+  savePending.value = true
+  try {
+    await submitForm()
+  } finally {
+    savePending.value = false
+  }
+}
+
+// submitForm validates the form and emits the save; handleSave guards against
+// concurrent runs.
+async function submitForm() {
   formError.value = ''
+  // A remembered program or assignee is only trusted once its picker list has
+  // settled; a prefilled contact makes Create clickable before that.
+  if (!isEditing.value) await pickersReady
   const body: LeadSaveBody = {
     nickname: formNickname.value,
     pipeline_id: props.pipelineId,
@@ -379,6 +438,16 @@ async function handleSave() {
   if (isEditing.value && isClosingStage.value && props.editingLead?.stage_outcome === 'open') {
     pendingCloseBody.value = body
     return
+  }
+
+  // Remember what this create submits so the next entry starts from it: the
+  // program and assignee across pipelines, the stage per pipeline.
+  if (!isEditing.value) {
+    rememberCreateValues(auth.user?.id, props.pipelineId, {
+      programId: programIdToSend(),
+      assignedTo: formAssignedTo.value === UNASSIGNED ? '' : formAssignedTo.value,
+      stageId: formStageId.value,
+    })
   }
 
   emit('save', body)
@@ -647,9 +716,9 @@ function createNewPersonInstead() {
     </div>
     <div class="border-t p-4">
       <div class="flex gap-2">
-        <Button @click="handleSave" :disabled="saving" class="flex-1">
-          <Loader2 v-if="saving" class="mr-2 size-4 animate-spin" />
-          {{ saving ? 'Saving...' : (isEditing ? 'Update' : 'Create') }}
+        <Button @click="handleSave" :disabled="saving || savePending" class="flex-1">
+          <Loader2 v-if="saving || savePending" class="mr-2 size-4 animate-spin" />
+          {{ saving || savePending ? 'Saving...' : (isEditing ? 'Update' : 'Create') }}
         </Button>
         <Button
           v-if="isEditing"

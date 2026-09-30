@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/sheet'
 import LeadKanban from '@/components/leads/LeadKanban.vue'
 import LeadForm from '@/components/leads/LeadForm.vue'
+import CreatedDateFilter from '@/components/leads/CreatedDateFilter.vue'
 import { useRBACStore } from '@/stores/rbac'
 import { useUsersStore } from '@/stores/users'
 import { toast } from 'vue-sonner'
@@ -31,6 +32,7 @@ import { useLeadDrawer } from '@/composables/useLeadDrawer'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 import { debounce } from '@/utils/debounce'
 import { getContact } from '@/api/contacts'
+import type { DatePreset } from '@/utils/time'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,10 +50,13 @@ const {
   search,
   outcomeFilter,
   assigneeFilter,
+  datePreset,
   fromDate,
   toDate,
   activeFilterCount,
   clearFilters,
+  setDatePreset,
+  setDateRange,
   syncPipelineSelection,
   loadLeads,
   moveStage,
@@ -86,7 +91,16 @@ const outcomeOptions = [
 // Debounce the text search; outcome/assignee/date filters apply immediately.
 const debouncedLoad = debounce(() => loadLeads(), 300)
 watch(search, debouncedLoad)
-watch([outcomeFilter, assigneeFilter, fromDate, toDate], () => loadLeads())
+watch([outcomeFilter, assigneeFilter, datePreset, fromDate, toDate], () => loadLeads())
+
+// Re-picking the active preset must still refresh: the window is resolved per
+// load, so a tab left open overnight re-reads "today" on the next pick. A
+// changed pick already reloads through the watch above.
+function onDatePreset(preset: DatePreset) {
+  const unchanged = datePreset.value === preset && fromDate.value === '' && toDate.value === ''
+  setDatePreset(preset)
+  if (unchanged) loadLeads()
+}
 
 // Press / anywhere (except inside an input or an open dialog) to jump to
 // search. Dialogs trap focus, so the shortcut stays inert while one is open.
@@ -276,11 +290,13 @@ watch(
         </SelectContent>
       </Select>
 
-      <div class="flex items-center gap-1.5">
-        <Input id="from-date" v-model="fromDate" type="date" class="h-9 w-28" aria-label="From date" title="From date" />
-        <span class="text-muted-foreground">–</span>
-        <Input id="to-date" v-model="toDate" type="date" class="h-9 w-28" aria-label="To date" title="To date" />
-      </div>
+      <CreatedDateFilter
+        :preset="datePreset"
+        :from="fromDate"
+        :to="toDate"
+        @select-preset="onDatePreset"
+        @select-range="setDateRange"
+      />
 
       <Button
         v-if="activeFilterCount > 0"
