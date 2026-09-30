@@ -85,6 +85,17 @@ func (s *Service) recordLogin(userID string) {
 	}
 }
 
+// purgeExpiredRefreshTokens deletes refresh tokens past their expiry. A row
+// past expires_at can never establish a session again — refresh rejects it —
+// so this only reclaims dead operational state, not audit history (that
+// lives in audit_logs). Best-effort like recordLogin: a failure must not
+// fail the issuance that triggered the purge.
+func (s *Service) purgeExpiredRefreshTokens() {
+	if _, err := s.db.Exec(`DELETE FROM refresh_tokens WHERE expires_at < now()`); err != nil {
+		slog.Error("purge expired refresh tokens", "error", err)
+	}
+}
+
 func (s *Service) refresh(refreshToken string) (*TokenResponse, error) {
 	hash := hashToken(refreshToken)
 
@@ -173,6 +184,9 @@ func (s *Service) generateTokenPair(userID string) (*TokenResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store refresh token: %w", err)
 	}
+	// Every issuance passes through here — login, refresh rotation, and
+	// password change — so expired rows are reclaimed as the table grows.
+	s.purgeExpiredRefreshTokens()
 
 	return &TokenResponse{
 		AccessToken:  accessToken,

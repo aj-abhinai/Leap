@@ -194,6 +194,72 @@ func TestRefreshRevokesExpiredTokenIntegration(t *testing.T) {
 	}
 }
 
+func TestPurgeExpiredRefreshTokensIntegration(t *testing.T) {
+	db := testdb.New(t)
+	userID := seedUser(t, db, "alice@example.com", "correct-horse")
+	svc := NewService(db, authTestConfig())
+
+	if _, _, err := svc.login("alice@example.com", "correct-horse"); err != nil {
+		t.Fatalf("first login: %v", err)
+	}
+	// A dead row from an older session: already past expiry, so refresh
+	// rejects it and only a purge can reclaim it.
+	if _, err := db.Exec(
+		`INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, now() - interval '1 minute')`,
+		userID, "expired-token-hash",
+	); err != nil {
+		t.Fatalf("insert expired token: %v", err)
+	}
+	// A revoked but unexpired row is not dead yet: until expiry, replay keeps
+	// answering TOKEN_REVOKED, so the purge must not claim it.
+	if _, err := db.Exec(
+		`INSERT INTO refresh_tokens (user_id, token_hash, expires_at, revoked) VALUES ($1, $2, now() + interval '1 hour', true)`,
+		userID, "revoked-token-hash",
+	); err != nil {
+		t.Fatalf("insert revoked token: %v", err)
+	}
+
+	// The next issuance purges the dead row.
+	if _, _, err := svc.login("alice@example.com", "correct-horse"); err != nil {
+		t.Fatalf("second login: %v", err)
+	}
+
+	var expired int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM refresh_tokens WHERE token_hash = $1`,
+		"expired-token-hash",
+	).Scan(&expired); err != nil {
+		t.Fatalf("count expired token: %v", err)
+	}
+	if expired != 0 {
+		t.Errorf("expected the expired row to be purged, got %d", expired)
+	}
+
+	var revoked int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM refresh_tokens WHERE token_hash = $1`,
+		"revoked-token-hash",
+	).Scan(&revoked); err != nil {
+		t.Fatalf("count revoked token: %v", err)
+	}
+	if revoked != 1 {
+		t.Errorf("expected the revoked but unexpired row to survive, got %d", revoked)
+	}
+
+	// The live issuance rows survive: the first login's token and the
+	// just-issued one.
+	var live int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM refresh_tokens WHERE user_id = $1 AND expires_at > now() AND NOT revoked`,
+		userID,
+	).Scan(&live); err != nil {
+		t.Fatalf("count live tokens: %v", err)
+	}
+	if live != 2 {
+		t.Errorf("expected 2 live tokens to survive, got %d", live)
+	}
+}
+
 func TestAccessTokenValidationIntegration(t *testing.T) {
 	db := testdb.New(t)
 	userID := seedUser(t, db, "alice@example.com", "correct-horse")
