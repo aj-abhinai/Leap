@@ -63,4 +63,18 @@ describe('AppSidebar settings nav visibility', () => {
 
     expect(wrapper.text()).not.toContain('Settings')
   })
+
+  // The click writes the sidebar_state cookie that SidebarProvider reads for
+  // defaultOpen; clear it so later mounts still start expanded.
+  it('collapses the sidebar from the in-sidebar control', async () => {
+    const wrapper = mountSidebar()
+    await flushPromises()
+
+    expect(wrapper.find('[data-slot="sidebar"]').attributes('data-state')).toBe('expanded')
+    await wrapper.find('button[aria-label="Collapse sidebar"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-slot="sidebar"]').attributes('data-state')).toBe('collapsed')
+
+    document.cookie = 'sidebar_state=; path=/; max-age=0'
+  })
 })

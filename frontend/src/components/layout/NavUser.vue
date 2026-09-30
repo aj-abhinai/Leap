@@ -51,11 +51,11 @@ async function handleLogout() {
               </Avatar>
               <span class="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-sidebar bg-success ring-2 ring-sidebar group-data-[collapsible=icon]:hidden" />
             </div>
-            <div class="grid flex-1 text-left text-sm leading-tight">
+            <div class="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
               <span class="truncate font-semibold">{{ auth.user?.name || 'User' }}</span>
               <span class="truncate text-xs text-muted-foreground">{{ auth.user?.email || '' }}</span>
             </div>
-            <ChevronDown class="ml-auto size-4 opacity-50" />
+            <ChevronDown class="ml-auto size-4 opacity-50 group-data-[collapsible=icon]:hidden" />
           </SidebarMenuButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent

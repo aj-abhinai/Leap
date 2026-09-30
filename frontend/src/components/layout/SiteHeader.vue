@@ -3,12 +3,13 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { Sun, Moon, ChevronRight, Home } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { SidebarTrigger } from '@/components/ui/sidebar'
+import { SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
 import { useThemeStore } from '@/stores/theme'
 
 const route = useRoute()
 const theme = useThemeStore()
+const { state, isMobile } = useSidebar()
 const title = computed(() => (route.meta.title as string) || 'Leap')
 
 const breadcrumbs = computed(() => {
@@ -35,8 +36,10 @@ const breadcrumbs = computed(() => {
 
 <template>
   <header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-    <SidebarTrigger class="h-9 w-9 md:h-7 md:w-7" />
-    <Separator orientation="vertical" class="mr-2 h-4" />
+    <template v-if="isMobile || state === 'collapsed'">
+      <SidebarTrigger class="h-9 w-9 md:h-7 md:w-7" />
+      <Separator orientation="vertical" class="mr-2 h-4" />
+    </template>
     <nav class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-sm text-muted-foreground">
       <Home class="size-3.5 shrink-0" />
       <template v-for="(crumb, i) in breadcrumbs" :key="i">

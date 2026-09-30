@@ -47,7 +47,9 @@ export const sidebarMenuButtonVariants = cva(
       size: {
         default: "h-8 text-sm",
         sm: "h-7 text-xs",
-        lg: "h-12 text-sm group-data-[collapsible=icon]:p-0!",
+        // Collapsed lg buttons centre their lone child; callers must hide any
+        // extra children in icon mode or the overflowing flex row defeats it.
+        lg: "h-12 text-sm group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center",
       },
     },
     defaultVariants: {

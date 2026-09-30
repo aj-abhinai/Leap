@@ -296,12 +296,3 @@
 [data-sidebar="menu-button"][data-active="true"] span {
   color: var(--sidebar-foreground);
 }
-
-.group[data-collapsible="icon"] [data-sidebar="sidebar"] {
-  padding-left: 2px;
-  padding-right: 2px;
-}
-
-.group[data-collapsible="icon"] [data-sidebar="menu-button"][data-size="lg"] {
-  padding: 6px !important;
-}
