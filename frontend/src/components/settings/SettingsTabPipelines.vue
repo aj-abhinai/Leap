@@ -47,9 +47,9 @@ const deletingStage = shallowRef<{ id: string; name: string } | null>(null)
 
 onMounted(() => loadPipelines())
 
-async function loadPipelines() {
+async function loadPipelines(force = false) {
   try {
-    await pipelineStore.fetchPipelines()
+    await pipelineStore.fetchPipelines(force)
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to load pipelines'))
   }
@@ -67,7 +67,7 @@ async function createPipeline() {
     toast.success('Pipeline created')
     newPipelineName.value = ''
     newPipelineDesc.value = ''
-    loadPipelines()
+    loadPipelines(true)
   } catch (e) {
     newPipelineError.value = errorMessage(e, 'Failed to create pipeline')
   } finally {
@@ -79,7 +79,7 @@ async function deletePipeline(pipelineId: string) {
   try {
     await apiDeletePipeline(pipelineId)
     toast.success('Pipeline deleted')
-    loadPipelines()
+    loadPipelines(true)
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to delete pipeline'))
   } finally {
@@ -111,7 +111,7 @@ async function savePipelineEdit(pipelineId: string) {
     })
     toast.success('Pipeline updated')
     cancelEditPipeline()
-    loadPipelines()
+    loadPipelines(true)
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to update pipeline'))
   } finally {
@@ -133,7 +133,7 @@ async function confirmDeleteStage() {
   try {
     await apiDeleteStage(stage.id)
     toast.success('Stage deleted')
-    loadPipelines()
+    loadPipelines(true)
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to delete stage'))
   } finally {
@@ -148,7 +148,7 @@ async function createStage(pipelineId: string) {
     await addStage(pipelineId, { name })
     toast.success('Stage added')
     newStageNames.value[pipelineId] = ''
-    loadPipelines()
+    loadPipelines(true)
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to add stage'))
   }
@@ -174,7 +174,7 @@ async function renameStage(stageId: string) {
     await updateStage(stageId, { name })
     toast.success('Stage renamed')
     cancelEditStage()
-    loadPipelines()
+    loadPipelines(true)
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to rename stage'))
   }
@@ -191,7 +191,7 @@ async function moveStage(pipeline: Pipeline, stageId: string, direction: -1 | 1)
   ;[ordered[idx], ordered[target]] = [ordered[target], ordered[idx]]
   try {
     await reorderStages(pipeline.id, ordered)
-    loadPipelines()
+    loadPipelines(true)
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to reorder stage'))
   }
@@ -204,7 +204,7 @@ async function setStageOutcome(stage: Stage, outcome: string) {
   try {
     await updateStage(stage.id, { outcome })
     toast.success(outcome === 'open' ? 'Stage is now open' : `Stage marked as ${outcome}`)
-    loadPipelines()
+    loadPipelines(true)
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to update stage outcome'))
   }

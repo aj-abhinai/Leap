@@ -327,7 +327,7 @@ watch(
         @move-stage="moveStage"
         @bulk-move="bulkMoveStage"
         @reload="loadLeads"
-        @stage-added="async () => { await pipelineStore.fetchPipelines(); loadLeads() }"
+        @stage-added="async () => { await pipelineStore.fetchPipelines(true); loadLeads() }"
       />
     </div>
   </div>
