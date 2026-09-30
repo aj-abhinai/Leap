@@ -176,6 +176,23 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	// An empty patch changes nothing: skip the write (which would only bump
+	// updated_at) and the audit row it would produce.
+	if req.Name == nil && req.Phone == nil {
+		u, err := h.svc.getUser(userID)
+		if err != nil {
+			respond.ServerError(w, err)
+			return
+		}
+		respond.JSON(
+			w,
+			http.StatusOK,
+			u,
+			nil,
+			nil,
+		)
+		return
+	}
 	u, err := h.svc.updateProfile(userID, req)
 	if err != nil {
 		writeAuthError(w, http.StatusBadRequest, err)

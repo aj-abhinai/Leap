@@ -402,6 +402,51 @@ func TestHandlerUpdateProfile(t *testing.T) {
 	}
 }
 
+func TestHandlerUpdateProfileEmptyPatchSkipsWrite(t *testing.T) {
+	db := testdb.New(t)
+	id := seedUser(t, db, "alice@example.com", "correct-horse")
+	h := NewHandler(NewService(db, authTestConfig()), activity.NewService(db))
+
+	var before time.Time
+	if err := db.QueryRow(`SELECT updated_at FROM users WHERE id = $1`, id).Scan(&before); err != nil {
+		t.Fatalf("load updated_at: %v", err)
+	}
+
+	rec, env := doJSON(t, h.UpdateProfile, http.MethodPatch, "/api/auth/me", `{}`,
+		func(r *http.Request) *http.Request {
+			return r.WithContext(ctxutil.WithUserID(r.Context(), id))
+		})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var u User
+	if err := json.Unmarshal(env.Data, &u); err != nil {
+		t.Fatalf("decode data: %v", err)
+	}
+	if u.Name != "Test User" {
+		t.Errorf("expected the current user body, got name %q", u.Name)
+	}
+
+	// The no-op patch must not touch the row, not even updated_at.
+	var after time.Time
+	if err := db.QueryRow(`SELECT updated_at FROM users WHERE id = $1`, id).Scan(&after); err != nil {
+		t.Fatalf("reload updated_at: %v", err)
+	}
+	if !after.Equal(before) {
+		t.Errorf("expected updated_at to stay %v, got %v", before, after)
+	}
+
+	// Nor may it leave an empty audit row behind (ADR 013).
+	var auditRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE action = 'profile_update'`).Scan(&auditRows); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	if auditRows != 0 {
+		t.Errorf("expected no audit row for a no-op patch, got %d", auditRows)
+	}
+}
+
 func TestHandlerUpdateProfileRejectsInvalidFields(t *testing.T) {
 	db := testdb.New(t)
 	id := seedUser(t, db, "alice@example.com", "correct-horse")
