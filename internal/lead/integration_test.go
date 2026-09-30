@@ -519,6 +519,141 @@ func TestCreateLeadBlocksWhileProgramLockedIntegration(t *testing.T) {
 	}
 }
 
+func TestCreateLeadBlocksWhileContactLockedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+
+	var contactID string
+	if err := db.QueryRow(
+		`INSERT INTO contacts (name) VALUES ('Locked Contact') RETURNING id`,
+	).Scan(&contactID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
+
+	lockTx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin lock tx: %v", err)
+	}
+	defer lockTx.Rollback()
+	if _, err := lockTx.Exec(
+		`SELECT id FROM contacts WHERE id = $1 FOR UPDATE`,
+		contactID,
+	); err != nil {
+		t.Fatalf("lock contact: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		id := contactID
+		_, err := svc.create(CreateRequest{
+			ContactID:  &id,
+			PipelineID: pipelineID,
+			StageID:    stageID,
+		}, "")
+		done <- err
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("create returned while the contact row was locked; FOR SHARE lock is missing")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// The delete that held the lock commits: the create must refuse instead
+	// of linking a lead to the hidden contact.
+	if _, err := lockTx.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, contactID); err != nil {
+		t.Fatalf("soft-delete contact: %v", err)
+	}
+	if err := lockTx.Commit(); err != nil {
+		t.Fatalf("commit lock tx: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrContactNotActive) {
+			t.Fatalf("create after contact delete = %v, want ErrContactNotActive", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("create did not complete after the contact lock was released")
+	}
+}
+
+func TestResolveContactBlocksWhileContactLockedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+
+	const phone = "9876543210"
+	var contactID string
+	if err := db.QueryRow(
+		`INSERT INTO contacts (name) VALUES ('Resolved Contact') RETURNING id`,
+	).Scan(&contactID); err != nil {
+		t.Fatalf("seed contact: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO contact_phones (contact_id, value, is_primary) VALUES ($1, $2, true)`,
+		contactID, phone,
+	); err != nil {
+		t.Fatalf("seed contact phone: %v", err)
+	}
+
+	lockTx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin lock tx: %v", err)
+	}
+	defer lockTx.Rollback()
+	if _, err := lockTx.Exec(
+		`SELECT id FROM contacts WHERE id = $1 FOR UPDATE`,
+		contactID,
+	); err != nil {
+		t.Fatalf("lock contact: %v", err)
+	}
+
+	created := make(chan *Lead, 1)
+	failed := make(chan error, 1)
+	go func() {
+		lead, err := svc.create(CreateRequest{
+			NewContact: &NewContact{Name: "Fresh", Phone: phone},
+			PipelineID: pipelineID,
+			StageID:    stageID,
+		}, "")
+		if err != nil {
+			failed <- err
+			return
+		}
+		created <- lead
+	}()
+
+	select {
+	case <-created:
+		t.Fatal("create returned while the resolved contact was locked; FOR SHARE lock is missing")
+	case err := <-failed:
+		t.Fatalf("create failed while the contact was locked: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// The delete that held the lock commits: resolving must fall through to a
+	// fresh contact, never link the lead to the hidden one.
+	if _, err := lockTx.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1`, contactID); err != nil {
+		t.Fatalf("soft-delete contact: %v", err)
+	}
+	if err := lockTx.Commit(); err != nil {
+		t.Fatalf("commit lock tx: %v", err)
+	}
+
+	select {
+	case err := <-failed:
+		t.Fatalf("create after contact delete: %v", err)
+	case lead := <-created:
+		if lead.ContactID == contactID {
+			t.Fatal("lead linked to the contact that was deleted while resolving")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("create did not complete after the contact lock was released")
+	}
+}
+
 func TestUpdateLeadMissingReturnsNotFoundIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

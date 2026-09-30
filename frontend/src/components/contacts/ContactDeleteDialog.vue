@@ -27,7 +27,7 @@ const emit = defineEmits<{
       <AlertDialogHeader>
         <AlertDialogTitle>Delete Contact</AlertDialogTitle>
         <AlertDialogDescription>
-          Are you sure you want to delete <strong>{{ contactName }}</strong>? This removes the contact from all lists; it can be recovered by an administrator.
+          Are you sure you want to delete <strong>{{ contactName }}</strong>? This removes the contact and their leads from all lists; they can be recovered by an administrator.
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>

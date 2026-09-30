@@ -313,6 +313,111 @@ func TestSoftDeleteContactIntegration(t *testing.T) {
 	assertAuditRow(t, db, created.ID, "delete")
 }
 
+func TestDeleteContactCascadesToLeadsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	userID := seedTestUser(t, db, "cascade@example.com")
+
+	var pipelineID, openStageID, wonStageID string
+	if err := db.QueryRow(
+		`INSERT INTO pipelines (name) VALUES ('Cascade Pipeline') RETURNING id`,
+	).Scan(&pipelineID); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Open', 0, 'open') RETURNING id`,
+		pipelineID,
+	).Scan(&openStageID); err != nil {
+		t.Fatalf("seed open stage: %v", err)
+	}
+	if err := db.QueryRow(
+		`INSERT INTO lead_stages (pipeline_id, name, "order", outcome) VALUES ($1, 'Won', 1, 'won') RETURNING id`,
+		pipelineID,
+	).Scan(&wonStageID); err != nil {
+		t.Fatalf("seed won stage: %v", err)
+	}
+
+	created, err := svc.create(CreateRequest{Name: "Alice Example", Phone: "9876543210"})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	var openLeadID, wonLeadID string
+	if err := db.QueryRow(
+		`INSERT INTO leads (contact_id, pipeline_id, stage_id, nickname) VALUES ($1, $2, $3, 'Open lead') RETURNING id`,
+		created.ID, pipelineID, openStageID,
+	).Scan(&openLeadID); err != nil {
+		t.Fatalf("seed open lead: %v", err)
+	}
+	if err := db.QueryRow(
+		`INSERT INTO leads (contact_id, pipeline_id, stage_id) VALUES ($1, $2, $3) RETURNING id`,
+		created.ID, pipelineID, wonStageID,
+	).Scan(&wonLeadID); err != nil {
+		t.Fatalf("seed won lead: %v", err)
+	}
+	var taskID string
+	if err := db.QueryRow(
+		`INSERT INTO lead_activities (lead_id, stage_id, stage_name, type, scheduled_at)
+		VALUES ($1, $2, 'Open', 'Call', now() + interval '1 day') RETURNING id`,
+		openLeadID, openStageID,
+	).Scan(&taskID); err != nil {
+		t.Fatalf("seed open task: %v", err)
+	}
+
+	if err := svc.delete(created.ID, userID); err != nil {
+		t.Fatalf("delete contact: %v", err)
+	}
+
+	if _, err := svc.get(created.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("expected sql.ErrNoRows for deleted contact, got %v", err)
+	}
+
+	for _, leadID := range []string{openLeadID, wonLeadID} {
+		var deleted sql.NullTime
+		if err := db.QueryRow(`SELECT deleted_at FROM leads WHERE id = $1`, leadID).Scan(&deleted); err != nil {
+			t.Fatalf("load lead %s: %v", leadID, err)
+		}
+		if !deleted.Valid {
+			t.Errorf("lead %s is still live after its contact was deleted", leadID)
+		}
+	}
+
+	var cancelled bool
+	if err := db.QueryRow(`SELECT is_cancelled FROM lead_activities WHERE id = $1`, taskID).Scan(&cancelled); err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if !cancelled {
+		t.Error("open task on the deleted contact's lead was not cancelled")
+	}
+
+	assertAuditRow(t, db, created.ID, "delete")
+	for _, leadID := range []string{openLeadID, wonLeadID} {
+		var count int
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FROM audit_logs WHERE resource_type = 'lead' AND resource_id = $1 AND action = 'delete'`,
+			leadID,
+		).Scan(&count); err != nil {
+			t.Fatalf("query lead audit rows: %v", err)
+		}
+		if count < 1 {
+			t.Errorf("expected a delete audit row for lead %s", leadID)
+		}
+	}
+
+	// The per-lead audit row names the lead: nickname first, contact name as
+	// the fallback.
+	var desc string
+	if err := db.QueryRow(
+		`SELECT description FROM audit_logs WHERE resource_type = 'lead' AND resource_id = $1 AND action = 'delete'`,
+		openLeadID,
+	).Scan(&desc); err != nil {
+		t.Fatalf("load lead audit description: %v", err)
+	}
+	if desc != `Deleted lead "Open lead"` {
+		t.Errorf("lead audit description = %q, want %q", desc, `Deleted lead "Open lead"`)
+	}
+}
+
 func TestUpdateContactStoresActorIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

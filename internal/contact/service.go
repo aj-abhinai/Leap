@@ -1099,17 +1099,64 @@ func syncTags(q queryer, contactID string, tagIDs []string) ([]string, error) {
 	return unknown, nil
 }
 
+// delete soft-deletes a contact and every live lead linked to it. A lead has
+// no identity without its contact, so it must not outlive it: the leads are
+// hidden in the same transaction and their open tasks are cancelled, mirroring
+// the lead delete path. The contact row is locked so a concurrent lead write
+// (which takes a shared lock on the contact) cannot slip a live lead past the
+// cascade.
 func (s *Service) delete(id string, userID string) error {
-	// Capture the name before the soft delete so the audit row names the
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("delete contact: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Capture the name before the soft delete so the audit rows name the
 	// contact; the row hides from every read path afterwards.
 	var name string
-	if err := s.db.QueryRow(`SELECT name FROM contacts WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&name); err != nil {
+	if err := tx.QueryRow(
+		`SELECT name FROM contacts WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, id,
+	).Scan(&name); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("delete contact: load name: %w", err)
 	}
-	res, err := s.db.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
+
+	// Capture the leads before hiding them: their ids scope the task cancel
+	// and their display names feed the per-lead audit rows.
+	type leadRef struct {
+		id          string
+		displayName string
+	}
+	rows, err := tx.Query(
+		`SELECT l.id, COALESCE(NULLIF(l.nickname, ''), c.name)
+		FROM leads l
+		JOIN contacts c ON c.id = l.contact_id
+		WHERE l.contact_id = $1 AND l.deleted_at IS NULL
+		ORDER BY l.created_at`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("delete contact: load leads: %w", err)
+	}
+	leads := []leadRef{}
+	for rows.Next() {
+		var l leadRef
+		if err := rows.Scan(&l.id, &l.displayName); err != nil {
+			rows.Close()
+			return fmt.Errorf("delete contact: scan lead: %w", err)
+		}
+		leads = append(leads, l)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("delete contact: iterate leads: %w", err)
+	}
+	rows.Close()
+
+	res, err := tx.Exec(`UPDATE contacts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
 		return fmt.Errorf("delete contact: %w", err)
 	}
@@ -1120,7 +1167,30 @@ func (s *Service) delete(id string, userID string) error {
 	if affected == 0 {
 		return ErrNotFound
 	}
+	if _, err := tx.Exec(`UPDATE leads SET deleted_at = now() WHERE contact_id = $1 AND deleted_at IS NULL`, id); err != nil {
+		return fmt.Errorf("delete contact: hide leads: %w", err)
+	}
+	if len(leads) > 0 {
+		ids := make([]string, 0, len(leads))
+		for _, l := range leads {
+			ids = append(ids, l.id)
+		}
+		if _, err := tx.Exec(
+			`UPDATE lead_activities SET is_cancelled = true
+			WHERE lead_id = ANY($1::uuid[]) AND NOT is_done AND NOT is_cancelled`,
+			ids,
+		); err != nil {
+			return fmt.Errorf("delete contact: cancel lead tasks: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete contact: commit: %w", err)
+	}
+
 	s.auditLogDesc(fmt.Sprintf("Deleted contact %q", name), "contact", id, "delete", userID)
+	for _, l := range leads {
+		s.auditLogDesc(fmt.Sprintf("Deleted lead %q", l.displayName), "lead", l.id, "delete", userID)
+	}
 	return nil
 }
 

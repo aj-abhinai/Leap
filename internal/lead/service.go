@@ -580,16 +580,18 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 		if !util.IsUUID(*contactID) {
 			return "", ErrInvalidContactID
 		}
+		// The shared row lock pairs with the lock a contact delete takes, so
+		// a contact cannot be hidden between this check and the commit.
 		var live bool
 		err := tx.QueryRow(
-			`SELECT EXISTS(SELECT 1 FROM contacts WHERE id = $1 AND deleted_at IS NULL)`,
+			`SELECT true FROM contacts WHERE id = $1 AND deleted_at IS NULL FOR SHARE`,
 			*contactID,
 		).Scan(&live)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrContactNotActive
+		}
 		if err != nil {
 			return "", fmt.Errorf("validate contact: %w", err)
-		}
-		if !live {
-			return "", ErrContactNotActive
 		}
 		return *contactID, nil
 	}
@@ -628,14 +630,18 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	// the incoming value is keyed in national form and matched against the
 	// stored value with the same transformation. Any phone/email on a contact
 	// counts as a match (not just the primary), so an alternate number still
-	// resolves to the contact.
+	// resolves to the contact. Both match queries take the shared row lock a
+	// contact delete pairs with: a contact hidden while resolving is dropped
+	// on re-check, so the lead falls through to a fresh contact instead of
+	// linking to a deleted one.
 	if phoneKey != "" {
 		var found string
 		err := tx.QueryRow(
 			`SELECT cp.contact_id FROM contact_phones cp
 			JOIN contacts c ON c.id = cp.contact_id AND c.deleted_at IS NULL
 			WHERE `+util.PhoneMatchCond("cp.value", "$1", "$2")+`
-			LIMIT 1`,
+			LIMIT 1
+			FOR SHARE OF c`,
 			phoneKey, codedKey,
 		).Scan(&found)
 		if err == nil {
@@ -650,7 +656,8 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 		err := tx.QueryRow(
 			`SELECT ce.contact_id FROM contact_emails ce
 			JOIN contacts c ON c.id = ce.contact_id AND c.deleted_at IS NULL
-			WHERE lower(trim(ce.value)) = $1 LIMIT 1`,
+			WHERE lower(trim(ce.value)) = $1 LIMIT 1
+			FOR SHARE OF c`,
 			email,
 		).Scan(&found)
 		if err == nil {
@@ -883,16 +890,18 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 		if !util.IsUUID(*req.ContactID) {
 			return nil, ErrInvalidContactID
 		}
+		// The shared row lock pairs with the lock a contact delete takes, so
+		// a contact cannot be hidden between this check and the commit.
 		var live bool
 		err := tx.QueryRow(
-			`SELECT EXISTS(SELECT 1 FROM contacts WHERE id = $1 AND deleted_at IS NULL)`,
+			`SELECT true FROM contacts WHERE id = $1 AND deleted_at IS NULL FOR SHARE`,
 			*req.ContactID,
 		).Scan(&live)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrContactNotActive
+		}
 		if err != nil {
 			return nil, fmt.Errorf("update lead: validate contact: %w", err)
-		}
-		if !live {
-			return nil, ErrContactNotActive
 		}
 	}
 	if err := s.validateAssignedToTx(tx, req.AssignedTo); err != nil {
