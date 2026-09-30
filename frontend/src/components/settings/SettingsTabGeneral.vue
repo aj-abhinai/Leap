@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'vue-sonner'
 import { getNudgeLeadMinutes, setNudgeLeadMinutes, getDefaultCountryCode, setDefaultCountryCode } from '@/api/settings'
 import { errorMessage } from '@/utils/errors'
+import SettingsSectionMenu from '@/components/settings/SettingsSectionMenu.vue'
 import { Clock, Phone } from '@lucide/vue'
 
 const nudgeMinutes = shallowRef(5)
@@ -72,47 +73,56 @@ onMounted(() => {
   loadNudge()
   loadCountryCode()
 })
+
+const sections = [
+  { value: 'reminders', label: 'Reminders' },
+  { value: 'default-country-code', label: 'Default country code' },
+]
 </script>
 
 <template>
-  <div class="space-y-4">
-    <Card>
-      <CardHeader>
-        <CardTitle class="text-base flex items-center gap-2">
-          <Clock class="size-4 text-muted-foreground" /> Reminders
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div class="flex items-end gap-3">
-          <div class="space-y-1.5">
-            <Label for="nudge-lead">Remind before tasks start (minutes)</Label>
-            <Input id="nudge-lead" v-model.number="nudgeMinutes" type="number" min="0" class="w-32" />
+  <SettingsSectionMenu :sections="sections">
+    <template #reminders>
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-base flex items-center gap-2">
+            <Clock class="size-4 text-muted-foreground" /> Reminders
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div class="flex items-end gap-3">
+            <div class="space-y-1.5">
+              <Label for="nudge-lead">Remind before tasks start (minutes)</Label>
+              <Input id="nudge-lead" v-model.number="nudgeMinutes" type="number" min="0" class="w-32" />
+            </div>
+            <Button :disabled="nudgeLoading" @click="saveNudge">Save</Button>
           </div>
-          <Button :disabled="nudgeLoading" @click="saveNudge">Save</Button>
-        </div>
-        <p class="mt-2 text-xs text-muted-foreground">
-          Tasks scheduled without an explicit reminder get one this many minutes before the start time.
-        </p>
-      </CardContent>
-    </Card>
-    <Card>
-      <CardHeader>
-        <CardTitle class="text-base flex items-center gap-2">
-          <Phone class="size-4 text-muted-foreground" /> Default country code
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div class="flex items-end gap-3">
-          <div class="space-y-1.5">
-            <Label for="country-code">Country code</Label>
-            <Input id="country-code" v-model="countryCode" placeholder="+91" class="w-32" />
+          <p class="mt-2 text-xs text-muted-foreground">
+            Tasks scheduled without an explicit reminder get one this many minutes before the start time.
+          </p>
+        </CardContent>
+      </Card>
+    </template>
+    <template #default-country-code>
+      <Card>
+        <CardHeader>
+          <CardTitle class="text-base flex items-center gap-2">
+            <Phone class="size-4 text-muted-foreground" /> Default country code
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div class="flex items-end gap-3">
+            <div class="space-y-1.5">
+              <Label for="country-code">Country code</Label>
+              <Input id="country-code" v-model="countryCode" placeholder="+91" class="w-32" />
+            </div>
+            <Button :disabled="countryCodeLoading" @click="saveCountryCode">Save</Button>
           </div>
-          <Button :disabled="countryCodeLoading" @click="saveCountryCode">Save</Button>
-        </div>
-        <p class="mt-2 text-xs text-muted-foreground">
-          Phone numbers typed without an international prefix get this country code. Use the form +91 or +971.
-        </p>
-      </CardContent>
-    </Card>
-  </div>
+          <p class="mt-2 text-xs text-muted-foreground">
+            Phone numbers typed without an international prefix get this country code. Use the form +91 or +971.
+          </p>
+        </CardContent>
+      </Card>
+    </template>
+  </SettingsSectionMenu>
 </template>

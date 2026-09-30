@@ -71,6 +71,9 @@ const fieldsKey = (pipelineId: string) => `crm:kanban:fields:${pipelineId}`
 const DEFAULT_WIDTH = 288
 const MIN_WIDTH = 200
 const MAX_WIDTH = 480
+// A collapsed column shrinks to this rail: the stage name reads vertically so
+// the board needs much less horizontal scrolling.
+const RAIL_WIDTH = 44
 
 const collapsed = shallowRef<Record<string, boolean>>(loadJson(collapsedKey(props.pipelineId), {}))
 const columnWidths = shallowRef<Record<string, number>>(loadJson(widthsKey(props.pipelineId), {}))
@@ -435,10 +438,14 @@ function showField(key: string): boolean {
           v-for="(col, ci) in columns"
           :key="col.id"
           class="card-in group relative shrink-0"
-          :style="{ width: `${columnWidth(col.id)}px`, animationDelay: `${Math.min(ci * 60, 300)}ms` }"
+          :class="{ 'transition-[width] duration-200 ease-out': resizingStage !== col.id }"
+          :style="{ width: `${isCollapsed(col.id) ? RAIL_WIDTH : columnWidth(col.id)}px`, animationDelay: `${Math.min(ci * 60, 300)}ms` }"
         >
-          <div class="flex h-full flex-col rounded-lg bg-muted/40 p-2 pt-1.5">
-            <div class="mb-2 flex items-center gap-1.5 px-1">
+          <div
+            class="flex h-full flex-col rounded-lg bg-muted/40"
+            :class="isCollapsed(col.id) ? 'px-1 py-1.5' : 'p-2 pt-1.5'"
+          >
+            <div v-if="!isCollapsed(col.id)" class="mb-2 flex items-center gap-1.5 px-1">
           <Checkbox
             v-if="rbac.can('lead:write') && selectableLeads(col).length > 0"
             :model-value="columnCheckState(col)"
@@ -450,11 +457,10 @@ function showField(key: string): boolean {
           <button
             type="button"
             class="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-            :aria-label="`${isCollapsed(col.id) ? 'Expand' : 'Collapse'} ${col.name}`"
+            :aria-label="`Collapse ${col.name}`"
             @click="toggleCollapsed(col.id)"
           >
-            <ChevronDown v-if="isCollapsed(col.id)" class="size-3.5 shrink-0 text-muted-foreground" />
-            <ChevronUp v-else class="size-3.5 shrink-0 text-muted-foreground" />
+            <ChevronUp class="size-3.5 shrink-0 text-muted-foreground" />
             <span class="truncate text-sm font-medium">{{ col.name }}</span>
             <Badge variant="secondary" class="text-xs px-1.5" :title="col.count > col.leads.length ? `${col.count} total in this stage` : undefined">
               {{ col.count }}
@@ -469,6 +475,25 @@ function showField(key: string): boolean {
           >
             <Plus class="size-3.5" />
           </Button>
+        </div>
+
+        <!-- Collapsed rail: one expand control, the stage name set vertically,
+             and the count. No cards, no selection or add controls, and no
+             resize handle — and with no draggable mounted, the rail refuses
+             drops outright. -->
+        <div v-else class="flex min-h-0 flex-1 flex-col">
+          <button
+            type="button"
+            class="flex min-h-0 w-full flex-1 flex-col items-center gap-2"
+            :aria-label="`Expand ${col.name}`"
+            @click="toggleCollapsed(col.id)"
+          >
+            <ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
+            <span class="rail-name min-h-0 flex-1 text-sm font-medium">{{ col.name }}</span>
+            <Badge variant="secondary" class="shrink-0 text-xs px-1.5" :title="col.count > col.leads.length ? `${col.count} total in this stage` : undefined">
+              {{ col.count }}
+            </Badge>
+          </button>
         </div>
 
         <div v-if="!isCollapsed(col.id)">
@@ -610,8 +635,9 @@ function showField(key: string): boolean {
         </div>
         </div>
 
-        <!-- resize handle -->
+        <!-- resize handle (hidden while the column is a rail) -->
         <div
+          v-if="!isCollapsed(col.id)"
           class="absolute right-0 top-0 z-10 flex h-full w-1.5 cursor-col-resize items-center justify-center"
           :class="resizingStage === col.id ? 'bg-primary/30' : 'opacity-0 group-hover:opacity-100'"
           @mousedown.prevent.stop="startResize(col.id, $event)"
@@ -698,6 +724,15 @@ function showField(key: string): boolean {
   transform: rotate(1deg);
   z-index: 50;
   box-shadow: var(--shadow-xl);
+}
+
+/* Collapsed rail: the stage name runs down the column so a 44px rail still
+   reads. The flex parent caps the height, so long names truncate vertically. */
+.rail-name {
+  writing-mode: vertical-rl;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Board entrance: columns rise in on a fresh load (first render or pipeline

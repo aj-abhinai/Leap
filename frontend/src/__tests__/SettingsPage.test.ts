@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import SettingsPage from '@/views/SettingsPage.vue'
+import SettingsSectionMenu from '@/components/settings/SettingsSectionMenu.vue'
 import { apiClient } from '@/composables/useApi'
 
 vi.mock('@/composables/useApi', () => ({
@@ -77,16 +78,45 @@ describe('SettingsPage visibility', () => {
     expect(html).not.toContain('Add Program')
     expect(wrapper.text()).not.toContain('Add')
 
-    // Activating the Sales tab mounts the programs card, which fetches the
-    // public lead:read list — never the settings:manage one. (The reka
-    // trigger's click is not fired by jsdom in controlled mode, so the
-    // model-value update is emitted directly.)
+    // Activating the Sales tab mounts the Pipelines section (ADR 015); open
+    // Programs to mount its card, which fetches the public lead:read list —
+    // never the settings:manage one. (The reka trigger's click is not fired
+    // by jsdom in controlled mode, so the model-value update is emitted
+    // directly.)
     getMock.mockClear()
     wrapper.findComponent({ name: 'Tabs' }).vm.$emit('update:model-value', 'sales')
     await flushPromises()
+
+    wrapper
+      .findComponent(SettingsSectionMenu)
+      .findComponent({ name: 'Tabs' })
+      .vm.$emit('update:model-value', 'programs')
+    await flushPromises()
+
     const called = getMock.mock.calls.map((c) => String(c[0]))
     expect(called.some((u) => u === '/api/programs')).toBe(true)
     expect(called.some((u) => u.includes('/api/programs/manage'))).toBe(false)
+  })
+
+  it('opens the Team tab at Users and reaches Roles on the section row', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    wrapper.findComponent({ name: 'Tabs' }).vm.$emit('update:model-value', 'team')
+    await flushPromises()
+
+    // Users opens first (ADR 015); Roles stays one click away.
+    expect(wrapper.text()).toContain('Create User')
+    expect(wrapper.text()).not.toContain('New Role')
+
+    wrapper
+      .findComponent(SettingsSectionMenu)
+      .findComponent({ name: 'Tabs' })
+      .vm.$emit('update:model-value', 'roles')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('New Role')
+    expect(wrapper.text()).not.toContain('Create User')
   })
 
   it('shows the audit log tab to a data:export holder', async () => {

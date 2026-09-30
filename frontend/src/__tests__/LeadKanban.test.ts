@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, type Component } from 'vue'
@@ -225,5 +225,101 @@ describe('LeadKanban close confirmation', () => {
     expect(dialog.props('title')).toContain('Closed Lost')
     expect(wrapper.emitted('moveStage')).toBeUndefined()
     wrapper.unmount()
+  })
+})
+
+describe('LeadKanban collapsed rails', () => {
+  // The item slot must render for card-visibility assertions; the default
+  // draggable stub swallows it.
+  const slotDraggable = {
+    props: ['list'],
+    template: '<div><div v-for="item in list" :key="item.id"><slot name="item" :element="item" /></div></div>',
+  }
+
+  function columnWidthPx(wrapper: ReturnType<typeof mountKanban>, index: number): string {
+    return (wrapper.findAll('.card-in')[index].element as HTMLElement).style.width
+  }
+
+  // jsdom has no ResizeObserver; the board observes its scroller on mount.
+  beforeAll(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+  })
+
+  // Collapse prefs persist to localStorage per pipeline; each test starts
+  // from an empty board state.
+  beforeEach(() => localStorage.clear())
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('collapses a column into a 44px rail with its name and count', async () => {
+    const wrapper = mountKanban()
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="Collapse Open"]').trigger('click')
+    await nextTick()
+
+    const col = wrapper.findAll('.card-in')[0]
+    expect(columnWidthPx(wrapper, 0)).toBe('44px')
+    expect(col.find('button[aria-label="Expand Open"]').exists()).toBe(true)
+    expect(col.get('.rail-name').text()).toBe('Open')
+    expect(col.text()).toContain('1')
+  })
+
+  it('hides cards, selection and add controls, and the resize handle while collapsed', async () => {
+    const wrapper = mountKanban(makeLead({}), slotDraggable)
+    const rbac = useRBACStore()
+    rbac.permissions = ['lead:write']
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Alice')
+    expect(wrapper.find('button[aria-label="Select all in Open"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="Add lead to Open"]').exists()).toBe(true)
+    expect(wrapper.findAll('.cursor-col-resize')).toHaveLength(4)
+
+    await wrapper.get('button[aria-label="Collapse Open"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('Alice')
+    expect(wrapper.find('button[aria-label="Select all in Open"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="Add lead to Open"]').exists()).toBe(false)
+    expect(wrapper.findAll('.cursor-col-resize')).toHaveLength(3)
+    // No draggable is mounted in the collapsed column, so it accepts no drops.
+    expect(wrapper.findAllComponents(draggable)).toHaveLength(3)
+  })
+
+  it('expands the rail back to its previous width and cards', async () => {
+    const wrapper = mountKanban(makeLead({}), slotDraggable)
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="Collapse Open"]').trigger('click')
+    await nextTick()
+    expect(columnWidthPx(wrapper, 0)).toBe('44px')
+
+    await wrapper.get('button[aria-label="Expand Open"]').trigger('click')
+    await nextTick()
+
+    expect(columnWidthPx(wrapper, 0)).toBe('288px')
+    expect(wrapper.text()).toContain('Alice')
+  })
+
+  it('remembers the collapsed set under the per-pipeline preference key', async () => {
+    const wrapper = mountKanban()
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="Collapse Open"]').trigger('click')
+    await nextTick()
+
+    expect(JSON.parse(localStorage.getItem('crm:kanban:collapsed:p1') ?? '{}')).toEqual({
+      'stage-open': true,
+    })
   })
 })
