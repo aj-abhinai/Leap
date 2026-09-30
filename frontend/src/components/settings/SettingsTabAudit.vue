@@ -14,6 +14,13 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge, type BadgeVariants } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import SettingsTabExport from '@/components/settings/SettingsTabExport.vue'
 import SettingsSectionMenu from '@/components/settings/SettingsSectionMenu.vue'
 import { RefreshCw, ScrollText } from '@lucide/vue'
@@ -26,6 +33,9 @@ const activity = useActivityStore()
 const rbac = useRBACStore()
 const activityPage = shallowRef(1)
 const activityPerPage = 20
+// Reka Select cannot carry an empty string as an item value, so the "All …"
+// choice travels as this sentinel and maps back to '' for the store call.
+const ALL = '__all__'
 const activityAction = shallowRef('')
 const activityResourceType = shallowRef('')
 const activityUserId = shallowRef('')
@@ -72,6 +82,23 @@ function applyActivityFilters() {
   loadActivity()
 }
 
+// Filter setters: sentinel ↔ '' mapping plus the page reset that the old
+// select @change handlers performed.
+function setActivityUser(v: unknown) {
+  activityUserId.value = v === ALL ? '' : String(v)
+  applyActivityFilters()
+}
+
+function setActivityAction(v: unknown) {
+  activityAction.value = v === ALL ? '' : String(v)
+  applyActivityFilters()
+}
+
+function setActivityResourceType(v: unknown) {
+  activityResourceType.value = v === ALL ? '' : String(v)
+  applyActivityFilters()
+}
+
 function activityPrevPage() {
   if (activityPage.value <= 1) return
   activityPage.value--
@@ -111,47 +138,59 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
         </CardHeader>
         <CardContent>
           <div class="mb-4 flex flex-wrap gap-2">
-            <select
-              v-model="activityUserId"
-              class="h-8 rounded-md border bg-background px-2 text-sm"
-              @change="applyActivityFilters()"
+            <Select
+              :model-value="activityUserId || ALL"
+              @update:model-value="setActivityUser"
             >
-              <option value="">All users</option>
-              <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
-            </select>
-            <select
-              v-model="activityAction"
-              class="h-8 rounded-md border bg-background px-2 text-sm"
-              @change="applyActivityFilters()"
+              <SelectTrigger size="sm" class="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="ALL">All users</SelectItem>
+                <SelectItem v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              :model-value="activityAction || ALL"
+              @update:model-value="setActivityAction"
             >
-              <option value="">All actions</option>
-              <option value="create">Create</option>
-              <option value="update">Update</option>
-              <option value="delete">Delete</option>
-              <option value="import">Import</option>
-              <option value="login">Login</option>
-              <option value="logout">Logout</option>
-              <option value="password_change">Password change</option>
-              <option value="profile_update">Profile update</option>
-              <option value="reset_password">Reset password</option>
-              <option value="reactivate">Reactivate</option>
-            </select>
-            <select
-              v-model="activityResourceType"
-              class="h-8 rounded-md border bg-background px-2 text-sm"
-              @change="applyActivityFilters()"
+              <SelectTrigger size="sm" class="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="ALL">All actions</SelectItem>
+                <SelectItem value="create">Create</SelectItem>
+                <SelectItem value="update">Update</SelectItem>
+                <SelectItem value="delete">Delete</SelectItem>
+                <SelectItem value="import">Import</SelectItem>
+                <SelectItem value="login">Login</SelectItem>
+                <SelectItem value="logout">Logout</SelectItem>
+                <SelectItem value="password_change">Password change</SelectItem>
+                <SelectItem value="profile_update">Profile update</SelectItem>
+                <SelectItem value="reset_password">Reset password</SelectItem>
+                <SelectItem value="reactivate">Reactivate</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              :model-value="activityResourceType || ALL"
+              @update:model-value="setActivityResourceType"
             >
-              <option value="">All types</option>
-              <option value="contact">Contact</option>
-              <option value="lead">Lead</option>
-              <option value="user">User</option>
-              <option value="role">Role</option>
-              <option value="pipeline">Pipeline</option>
-              <option value="program">Program</option>
-              <option value="tag">Vocabulary</option>
-              <option value="settings">Org settings</option>
-              <option value="contact_note">Note</option>
-            </select>
+              <SelectTrigger size="sm" class="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="ALL">All types</SelectItem>
+                <SelectItem value="contact">Contact</SelectItem>
+                <SelectItem value="lead">Lead</SelectItem>
+                <SelectItem value="user">User</SelectItem>
+                <SelectItem value="role">Role</SelectItem>
+                <SelectItem value="pipeline">Pipeline</SelectItem>
+                <SelectItem value="program">Program</SelectItem>
+                <SelectItem value="tag">Vocabulary</SelectItem>
+                <SelectItem value="settings">Org settings</SelectItem>
+                <SelectItem value="contact_note">Note</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div v-if="activity.entries.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
             <ScrollText class="size-10 text-muted-foreground/40 mb-3" />

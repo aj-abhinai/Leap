@@ -52,7 +52,7 @@ describe('SettingsPage visibility', () => {
 
     const html = wrapper.html()
     for (const label of ['Contacts', 'Sales', 'Team', 'General', 'Audit log']) {
-      expect(html).toContain(`>${label}</span>`)
+      expect(html).toContain(`>${label}</span></button>`)
     }
     // An admin lands on the Contacts tab and sees its mutation controls.
     expect(html).toContain('Tag name')
@@ -65,11 +65,11 @@ describe('SettingsPage visibility', () => {
     await flushPromises()
 
     const html = wrapper.html()
-    expect(html).toContain('>Contacts</span>')
-    expect(html).toContain('>Sales</span>')
-    expect(html).not.toContain('>Team</span>')
-    expect(html).not.toContain('>General</span>')
-    expect(html).not.toContain('>Audit log</span>')
+    expect(html).toContain('>Contacts</span></button>')
+    expect(html).toContain('>Sales</span></button>')
+    expect(html).not.toContain('>Team</span></button>')
+    expect(html).not.toContain('>General</span></button>')
+    expect(html).not.toContain('>Audit log</span></button>')
 
     // Read-only: the vocabulary lists render without the add controls (the
     // add input is hidden), and the create cards are gone.
@@ -98,25 +98,17 @@ describe('SettingsPage visibility', () => {
     expect(called.some((u) => u.includes('/api/programs/manage'))).toBe(false)
   })
 
-  it('opens the Team tab at Users and reaches Roles on the section row', async () => {
+  it('shows Users and Roles stacked on the Team tab with no section row', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
     wrapper.findComponent({ name: 'Tabs' }).vm.$emit('update:model-value', 'team')
     await flushPromises()
 
-    // Users opens first (ADR 015); Roles stays one click away.
+    // Team stacks both cards (amended ADR 015); no section row hides either.
     expect(wrapper.text()).toContain('Create User')
-    expect(wrapper.text()).not.toContain('New Role')
-
-    wrapper
-      .findComponent(SettingsSectionMenu)
-      .findComponent({ name: 'Tabs' })
-      .vm.$emit('update:model-value', 'roles')
-    await flushPromises()
-
     expect(wrapper.text()).toContain('New Role')
-    expect(wrapper.text()).not.toContain('Create User')
+    expect(wrapper.findComponent(SettingsSectionMenu).exists()).toBe(false)
   })
 
   it('shows the audit log tab to a data:export holder', async () => {
@@ -125,9 +117,9 @@ describe('SettingsPage visibility', () => {
     await flushPromises()
 
     const html = wrapper.html()
-    expect(html).toContain('>Audit log</span>')
-    expect(html).not.toContain('>Contacts</span>')
-    expect(html).not.toContain('>Team</span>')
+    expect(html).toContain('>Audit log</span></button>')
+    expect(html).not.toContain('>Contacts</span></button>')
+    expect(html).not.toContain('>Team</span></button>')
     // The export card is what the tab shows them.
     expect(html).toContain('Export CSV')
   })

@@ -19,6 +19,13 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ContactsPagination from '@/components/contacts/ContactsPagination.vue'
 import PageState from '@/components/PageState.vue'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -41,6 +48,9 @@ const remindersStore = useRemindersStore()
 const { openLeadDrawer } = useLeadDrawerGlobal()
 
 const search = shallowRef('')
+// Reka Select cannot carry an empty string as an item value, so "All types"
+// travels as this sentinel and maps back to '' for the query filter.
+const ALL_TYPES = '__all__'
 const typeFilter = shallowRef('')
 const sortBy = shallowRef('due_at')
 const sortOrder = shallowRef('desc')
@@ -48,6 +58,20 @@ const selected = shallowRef<Set<string>>(new Set())
 const deleting = shallowRef(false)
 const deletingIds = shallowRef<string[]>([])
 const loadError = shallowRef('')
+
+// Filter setters: sentinel ↔ '' mapping for the type picker; the sort picks
+// carry their values directly.
+function setTypeFilter(v: unknown) {
+  typeFilter.value = v === ALL_TYPES ? '' : String(v)
+}
+
+function setSortBy(v: unknown) {
+  sortBy.value = String(v)
+}
+
+function setSortOrder(v: unknown) {
+  sortOrder.value = String(v)
+}
 
 interface ViewDef {
   id: string
@@ -271,35 +295,50 @@ function prevPage() {
       <div class="min-w-0 flex-1 space-y-4">
         <!-- Filter bar -->
         <div class="flex flex-wrap items-center gap-2">
-          <select
-            v-model="typeFilter"
-            class="h-8 rounded-md border bg-background px-2 text-sm"
+          <Select
+            :model-value="typeFilter || ALL_TYPES"
+            @update:model-value="setTypeFilter"
           >
-            <option value="">All types</option>
-            <option v-for="t in settings.activityTypes" :key="t.id" :value="t.name">
-              {{ t.name }}
-            </option>
-          </select>
+            <SelectTrigger size="sm" class="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="ALL_TYPES">All types</SelectItem>
+              <SelectItem v-for="t in settings.activityTypes" :key="t.id" :value="t.name">
+                {{ t.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
           <Input
             v-model="search"
             class="h-8 w-48"
             placeholder="Search lead, notes…"
           />
-          <select
-            v-model="sortBy"
-            class="h-8 rounded-md border bg-background px-2 text-sm"
+          <Select
+            :model-value="sortBy"
+            @update:model-value="setSortBy"
           >
-            <option value="due_at">Sort: Due date</option>
-            <option value="type">Sort: Type</option>
-            <option value="created_at">Sort: Created</option>
-          </select>
-          <select
-            v-model="sortOrder"
-            class="h-8 rounded-md border bg-background px-2 text-sm"
+            <SelectTrigger size="sm" class="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="due_at">Sort: Due date</SelectItem>
+              <SelectItem value="type">Sort: Type</SelectItem>
+              <SelectItem value="created_at">Sort: Created</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            :model-value="sortOrder"
+            @update:model-value="setSortOrder"
           >
-            <option value="desc">Newest first</option>
-            <option value="asc">Oldest first</option>
-          </select>
+            <SelectTrigger size="sm" class="w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="desc">Newest first</SelectItem>
+              <SelectItem value="asc">Oldest first</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <!-- Mass action bar -->

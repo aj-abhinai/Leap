@@ -17,6 +17,13 @@ import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -39,6 +46,9 @@ const users = shallowRef<User[]>([])
 const roles = shallowRef<Role[]>([])
 const auth = useAuthStore()
 const rbac = useRBACStore()
+// Reka Select cannot carry an empty string as an item value, so "No role"
+// travels as this sentinel and maps back to '' at the API boundary.
+const NO_ROLE = '__none__'
 const newUserName = shallowRef('')
 const newUserEmail = shallowRef('')
 const newUserPassword = shallowRef('')
@@ -112,6 +122,13 @@ function preselectSalesRole() {
     const sales = selectableRoles.value.find((r) => r.name === 'Sales')
     if (sales) newUserRoleId.value = sales.id
   }
+}
+
+// The create form's role picker; "No role" is the sentinel the Select
+// carries, stored as '' so the create payload keeps sending role_id only
+// when a role is actually chosen.
+function setNewUserRole(v: unknown) {
+  newUserRoleId.value = v === NO_ROLE ? '' : String(v)
 }
 
 async function createUser() {
@@ -251,8 +268,8 @@ function isProtectedUser(u: User): boolean {
 // twice, and the select handler stays typed.
 const protectedIds = computed(() => new Set(users.value.filter(isProtectedUser).map((u) => u.id)))
 
-function onRoleChange(u: User, event: Event) {
-  setRole(u.id, (event.target as HTMLSelectElement).value)
+function onRoleChange(u: User, v: unknown) {
+  setRole(u.id, v === NO_ROLE ? '' : String(v))
 }
 
 const deactivatingName = computed(() => deactivatingUser.value?.name ?? '')
@@ -268,14 +285,18 @@ const deactivatingName = computed(() => deactivatingUser.value?.name ?? '')
         <div class="flex flex-wrap gap-2">
           <Input v-model="newUserName" placeholder="Name" class="min-w-32 flex-1" />
           <Input v-model="newUserEmail" placeholder="Email" type="email" class="min-w-32 flex-1" />
-          <select
-            v-model="newUserRoleId"
-            class="h-10 w-36 rounded-md border bg-background px-2 text-sm"
-            :aria-label="`Role for ${newUserName || 'new user'}`"
+          <Select
+            :model-value="newUserRoleId || NO_ROLE"
+            @update:model-value="setNewUserRole"
           >
-            <option value="">No role</option>
-            <option v-for="r in selectableRoles" :key="r.id" :value="r.id">{{ r.name }}</option>
-          </select>
+            <SelectTrigger class="w-36" :aria-label="`Role for ${newUserName || 'new user'}`">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="NO_ROLE">No role</SelectItem>
+              <SelectItem v-for="r in selectableRoles" :key="r.id" :value="r.id">{{ r.name }}</SelectItem>
+            </SelectContent>
+          </Select>
           <Input v-model="newUserPassword" placeholder="Password (10+ chars, strong)" type="password" class="min-w-32 flex-1" />
           <Button @click="createUser" :disabled="creatingUser">
             <Plus class="mr-2 size-4" /> Add User
@@ -323,16 +344,19 @@ const deactivatingName = computed(() => deactivatingUser.value?.name ?? '')
               </TableCell>
               <TableCell>
                 <div class="flex items-center gap-1.5">
-                  <select
-                    class="h-8 w-40 rounded-md border bg-background px-2 text-sm"
-                    :value="u.role?.id ?? ''"
-                    :aria-label="`Role for ${u.name}`"
+                  <Select
+                    :model-value="u.role?.id || NO_ROLE"
                     :disabled="u.active === false || protectedIds.has(u.id)"
-                    @change="onRoleChange(u, $event)"
+                    @update:model-value="(v) => onRoleChange(u, v)"
                   >
-                    <option value="">No role</option>
-                    <option v-for="r in roleOptionsFor(u)" :key="r.id" :value="r.id">{{ r.name }}</option>
-                  </select>
+                    <SelectTrigger size="sm" class="w-40" :aria-label="`Role for ${u.name}`">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem :value="NO_ROLE">No role</SelectItem>
+                      <SelectItem v-for="r in roleOptionsFor(u)" :key="r.id" :value="r.id">{{ r.name }}</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <ShieldCheck
                     v-if="u.protected"
                     class="size-3.5 text-muted-foreground"

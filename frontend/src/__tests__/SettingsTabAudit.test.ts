@@ -14,6 +14,23 @@ vi.mock('@/composables/useApi', () => ({
   },
 }))
 
+// The real ui/select renders its items through a portal that only mounts when
+// the dropdown is open, which jsdom cannot do; stub the module so options
+// render inline and the model can be driven from the tests. The Select stub
+// keeps reka's contract: an update:modelValue emit on the root.
+vi.mock('@/components/ui/select', () => ({
+  Select: {
+    name: 'Select',
+    props: ['modelValue'],
+    emits: ['update:modelValue'],
+    template: '<div><slot /></div>',
+  },
+  SelectTrigger: { name: 'SelectTrigger', template: '<button type="button"><slot /></button>' },
+  SelectValue: { name: 'SelectValue', template: '<span><slot /></span>' },
+  SelectContent: { name: 'SelectContent', template: '<div><slot /></div>' },
+  SelectItem: { name: 'SelectItem', template: '<div><slot /></div>' },
+}))
+
 // The section row and the content both read permissions, so each test sets
 // the holder it exercises.
 const { perms } = vi.hoisted(() => ({ perms: { current: [] as string[] } }))
@@ -61,8 +78,8 @@ describe('SettingsTabAudit user filter', () => {
 
     // Choosing a user refetches the trail with the user_id filter.
     getMock.mockClear()
-    const select = wrapper.find('select')
-    await select.setValue('u2')
+    const actor = wrapper.findAllComponents({ name: 'Select' })[0]
+    await actor.vm.$emit('update:model-value', 'u2')
     await flushPromises()
 
     const activityCalls = getMock.mock.calls
@@ -98,7 +115,7 @@ describe('SettingsTabAudit section permissions', () => {
 
     expect(wrapper.text()).toContain('Audit Log')
     expect(wrapper.text()).not.toContain('Export CSV')
-    expect(wrapper.find('select').exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'Select' }).exists()).toBe(true)
   })
 
   it('opens Export for a data:export holder and fetches nothing for the trail', async () => {
@@ -121,7 +138,7 @@ describe('SettingsTabAudit section permissions', () => {
 
     expect(wrapper.text()).toContain('Audit Log')
     expect(wrapper.text()).not.toContain('Export CSV')
-    expect(wrapper.find('select').exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'Select' }).exists()).toBe(true)
 
     await switchSection(wrapper, 'export')
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import SettingsTabUsers from '@/components/settings/SettingsTabUsers.vue'
 import { apiClient } from '@/composables/useApi'
@@ -12,6 +12,31 @@ vi.mock('@/composables/useApi', () => ({
     delete: vi.fn(),
   },
 }))
+
+// The real ui/select renders its items through a portal that only mounts when
+// the dropdown is open, which jsdom cannot do; stub the module so options
+// render inline and the model can be driven from the tests. The Select stub
+// keeps reka's contract: an update:modelValue emit on the root.
+vi.mock('@/components/ui/select', () => ({
+  Select: {
+    name: 'Select',
+    props: ['modelValue'],
+    emits: ['update:modelValue'],
+    template: '<div><slot /></div>',
+  },
+  SelectTrigger: { name: 'SelectTrigger', template: '<button type="button"><slot /></button>' },
+  SelectValue: { name: 'SelectValue', template: '<span><slot /></span>' },
+  SelectContent: { name: 'SelectContent', template: '<div><slot /></div>' },
+  SelectItem: { name: 'SelectItem', template: '<div><slot /></div>' },
+}))
+
+function selectByLabel(wrapper: VueWrapper, label: string) {
+  const select = wrapper
+    .findAllComponents({ name: 'Select' })
+    .find((s) => s.find(`[aria-label="${label}"]`).exists())
+  if (!select) throw new Error(`select "${label}" not found`)
+  return select
+}
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
@@ -76,8 +101,8 @@ describe('SettingsTabUsers', () => {
     const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
-    const select = wrapper.find('select[aria-label="Role for Alice"]')
-    await select.setValue('r2')
+    const alice = selectByLabel(wrapper, 'Role for Alice')
+    await alice.vm.$emit('update:model-value', 'r2')
     await flushPromises()
 
     expect(putMock).toHaveBeenCalledWith('/api/users/u1/role', { role_id: 'r2' })
@@ -87,8 +112,10 @@ describe('SettingsTabUsers', () => {
     const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
-    const select = wrapper.find('select[aria-label="Role for Alice"]')
-    await select.setValue('')
+    const alice = selectByLabel(wrapper, 'Role for Alice')
+    // "No role" is the sentinel the Select carries; the component maps it
+    // back to the API's explicit empty string.
+    await alice.vm.$emit('update:model-value', '__none__')
     await flushPromises()
 
     expect(putMock).toHaveBeenCalledWith('/api/users/u1/role', { role_id: '' })
@@ -98,16 +125,19 @@ describe('SettingsTabUsers', () => {
     const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
-    const createRole = wrapper.find('select[aria-label^="Role for"]')
+    const createSelect = wrapper.findAllComponents({ name: 'Select' })[0]
     // Sales is preselected by default — no interaction needed.
-    expect((createRole.element as HTMLSelectElement).value).toBe('r4')
-    const options = createRole.findAll('option').map((o) => o.text())
+    expect(createSelect.props('modelValue')).toBe('r4')
+    const options = createSelect.findAllComponents({ name: 'SelectItem' }).map((o) => o.text())
     expect(options).toContain('Sales')
+    expect(options).toContain('No role')
 
     await wrapper.find('input[placeholder="Name"]').setValue('New Rep')
     await wrapper.find('input[placeholder="Email"]').setValue('rep@example.com')
     await wrapper.find('input[placeholder*="Password"]').setValue('Strong-Pass-123')
-    await wrapper.find('button').trigger('click')
+    const addUser = wrapper.findAll('button').find((b) => b.text().includes('Add User'))
+    expect(addUser).toBeTruthy()
+    await addUser!.trigger('click')
     await flushPromises()
 
     expect(postMock).toHaveBeenCalledWith('/api/users', {
@@ -118,19 +148,20 @@ describe('SettingsTabUsers', () => {
     })
 
     // A second user starts from the Sales preselect again.
-    expect((createRole.element as HTMLSelectElement).value).toBe('r4')
+    expect(createSelect.props('modelValue')).toBe('r4')
   })
 
   it('hides the superadmin option from non-wildcard users', async () => {
     const wrapper = mount(SettingsTabUsers, { global: { plugins: [createPinia()] } })
     await flushPromises()
 
-    const selects = wrapper.findAll('select')
+    const selects = wrapper.findAllComponents({ name: 'Select' })
+    expect(selects.length).toBeGreaterThan(0)
     // The first user (editor) and the second (no role) are not superadmins,
     // so neither dropdown may offer the superadmin option. The create form
     // is equally restricted.
     for (const select of selects) {
-      const options = select.findAll('option').map((o) => o.text())
+      const options = select.findAllComponents({ name: 'SelectItem' }).map((o) => o.text())
       expect(options).not.toContain('superadmin')
       expect(options).toContain('editor')
       expect(options).toContain('manager')

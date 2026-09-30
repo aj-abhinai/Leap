@@ -9,7 +9,6 @@ import SettingsTabUsers from '@/components/settings/SettingsTabUsers.vue'
 import SettingsTabRoles from '@/components/settings/SettingsTabRoles.vue'
 import SettingsTabGeneral from '@/components/settings/SettingsTabGeneral.vue'
 import SettingsTabAudit from '@/components/settings/SettingsTabAudit.vue'
-import SettingsSectionMenu from '@/components/settings/SettingsSectionMenu.vue'
 import { Tags, Briefcase, User, Settings, ScrollText, Lock } from '@lucide/vue'
 
 const rbac = useRBACStore()
@@ -36,12 +35,8 @@ const tabs: SettingsTab[] = [
   { value: 'audit', label: 'Audit log', icon: ScrollText, permissions: ['settings:manage', 'data:export'] },
 ]
 
-// Team is the only tab whose sections live in this page rather than inside
-// the tab component; Users opens first on each visit (ADR 015).
-const teamSections = [
-  { value: 'users', label: 'Users' },
-  { value: 'roles', label: 'Roles' },
-]
+// Team is the only tab whose cards live in this page rather than inside the
+// tab component; both are short, so they render stacked (amended ADR 015).
 
 const visibleTabs = computed(() => {
   if (!permissionsLoaded.value) return tabs
@@ -117,14 +112,10 @@ function tabIcon(tab: SettingsTab): Component {
         <SettingsTabContacts v-if="tab.value === 'contacts'" :readonly="readonly" />
         <SettingsTabSales v-else-if="tab.value === 'sales'" :readonly="readonly" />
         <template v-else-if="tab.value === 'team'">
-          <SettingsSectionMenu :sections="teamSections">
-            <template #users>
-              <SettingsTabUsers />
-            </template>
-            <template #roles>
-              <SettingsTabRoles />
-            </template>
-          </SettingsSectionMenu>
+          <div class="space-y-4">
+            <SettingsTabUsers />
+            <SettingsTabRoles />
+          </div>
         </template>
         <SettingsTabGeneral v-else-if="tab.value === 'general'" />
         <SettingsTabAudit v-else-if="tab.value === 'audit'" />
