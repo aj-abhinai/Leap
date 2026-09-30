@@ -132,34 +132,15 @@ and has no effect outside development.
 ## Development
 
 ```shell
-# Start Postgres + pgweb in Docker (one-time, stays running)
-just dev-db
+just --list          # every recipe with its description
 
-# Everything in one command (Postgres + pgweb + backend + frontend; Ctrl+C stops all)
-just dev
+just dev             # Postgres + pgweb + backend + frontend (Ctrl+C stops all)
 
-# Or individually:
-just backend        # Postgres + pgweb + backend (in one terminal)
-just frontend       # Vite dev server (in a separate terminal — proxies /api to localhost:9000)
+just docker-build    # build the image
+just docker-down     # stop
+just docker-reset    # stop + remove volumes (destructive)
 
-# Run tests
-just test            # with coverage, no race detector (CGO-free)
-just test-race       # with the race detector (requires a C compiler)
-just test-frontend   # Vue component tests via Vitest
-
-# Lint and format
-just fmt vet lint
-just check           # fmt + vet + lint + test
-
-# Build the binary
-just build
-
-# Docker helpers
-just docker-up       # dev stack: start app + Postgres + pgweb (loopback binds)
-just docker-up-prod  # production stack: fails fast until docker/.env secrets are set
-just docker-rebuild  # rebuild image and start
-just docker-down     # stop the stack
-just docker-reset    # stop and remove volumes (destructive)
+just clean-all       # clean + node_modules
 ```
 
 The Vite dev server at `localhost:5173` proxies `/api/*` to the Go backend at `localhost:9000`.
