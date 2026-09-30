@@ -106,6 +106,7 @@ func (s *Service) bulkCreate(req BulkCreateRequest, userID string) (*BulkCreateR
 
 	resp := &BulkCreateResponse{}
 	loggedUnexpected := false
+	loggedVerifyFailure := false
 	for _, id := range ids {
 		contactID := id
 		_, err := s.create(CreateRequest{
@@ -143,7 +144,8 @@ func (s *Service) bulkCreate(req BulkCreateRequest, userID string) (*BulkCreateR
 			// An unexpected failure: create can fail after its transaction
 			// committed (display-name enrichment), so the lead may exist
 			// despite the error. Verify the slot before reporting the row.
-			if committed, verifyErr := s.openLeadCreatedSince(id, req.PipelineID, programID, runStart); verifyErr == nil && committed {
+			committed, verifyErr := s.openLeadCreatedSince(id, req.PipelineID, programID, runStart)
+			if verifyErr == nil && committed {
 				resp.Created++
 				continue
 			}
@@ -151,10 +153,16 @@ func (s *Service) bulkCreate(req BulkCreateRequest, userID string) (*BulkCreateR
 			row.Reason = "internal error — re-run to check this contact"
 			resp.Failed++
 			// The technical detail goes to the server log, never into the
-			// response: internal errors are not operator-facing text.
+			// response: internal errors are not operator-facing text. Each
+			// failing class logs at most once per run so a broken database
+			// cannot flood the log with hundreds of lines.
 			if !loggedUnexpected {
 				loggedUnexpected = true
 				slog.Error("bulk lead create: unexpected row error", "contact_id", id, "error", err)
+			}
+			if verifyErr != nil && !loggedVerifyFailure {
+				loggedVerifyFailure = true
+				slog.Error("bulk lead create: slot verification failed", "contact_id", id, "error", verifyErr)
 			}
 		}
 		if row.Name == "" {

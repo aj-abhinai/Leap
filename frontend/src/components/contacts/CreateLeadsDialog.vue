@@ -67,7 +67,14 @@ function defaultStageId(pipelineId: string): string {
 // operator's last choices.
 async function loadOptions() {
   if (pipelineStore.pipelines.length === 0) {
-    await pipelineStore.fetchPipelines()
+    try {
+      await pipelineStore.fetchPipelines()
+    } catch (e) {
+      // Pipelines are required for this dialog: without them the form is
+      // unusable, so the failure is surfaced instead of leaving a silently
+      // disabled create button. Reopening the dialog retries.
+      error.value = errorMessage(e, 'Failed to load pipelines')
+    }
   }
   if (!formPipelineId.value && pipelineStore.pipelines.length > 0) {
     formPipelineId.value = pipelineStore.pipelines[0].id

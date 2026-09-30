@@ -91,6 +91,18 @@ describe('CreateLeadsDialog', () => {
     expect(html).not.toContain('Closed Lost')
   })
 
+  it('surfaces a pipeline load failure instead of a silent disabled form', async () => {
+    vi.mocked(listPipelines).mockReset().mockRejectedValue(new Error('network down'))
+    const wrapper = mountDialog()
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    expect(vm.formPipelineId).toBe('')
+    expect(vm.error).toContain('network down')
+    expect(wrapper.html()).toContain('network down')
+    expect(bulkCreateLeads).not.toHaveBeenCalled()
+  })
+
   it('resets the stage when the pipeline changes', async () => {
     const wrapper = mountDialog()
     await flushPromises()
