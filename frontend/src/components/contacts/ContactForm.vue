@@ -174,6 +174,15 @@ async function handleSave() {
     }
   }
 
+  // Every phone row reaches storage too; one without a digit would be
+  // rejected by the server's canonicalization, so surface it on the form.
+  for (const p of phoneList) {
+    if (!/\d/.test(p.value)) {
+      formError.value = `"${p.value}" is not a valid phone number`
+      return
+    }
+  }
+
   await emit('save', {
     name: result.data.name,
     nickname: formNickname.value,

@@ -49,7 +49,10 @@ export const contactSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   nickname: z.string().optional(),
   email: z.email('Invalid email').optional().or(z.literal('')),
-  phone: z.string().optional(),
+  phone: z
+    .string()
+    .optional()
+    .refine((v) => !v || /\d/.test(v), { message: 'Phone must contain at least one digit' }),
   location: z.string().optional(),
   age: z.number().int().positive().optional(),
   date_of_birth: dateOfBirthSchema.optional().or(z.literal('')),

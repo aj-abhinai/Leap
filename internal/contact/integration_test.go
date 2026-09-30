@@ -786,10 +786,31 @@ func TestBulkCreateRejectsRowsWithoutPhoneOrEmailIntegration(t *testing.T) {
 	if resp.Imported != 1 || resp.Failed != 2 {
 		t.Fatalf("imported/failed = %d/%d, want 1/2", resp.Imported, resp.Failed)
 	}
-	for _, rowErr := range resp.Errors {
-		if rowErr.Message != "phone or email is required" {
-			t.Errorf("row error = %q, want the identity message", rowErr.Message)
-		}
+	// The blank row has no identity; the "call me" row carries text that is
+	// not a phone, so each is rejected for its own reason.
+	if resp.Errors[0].Row != 1 || resp.Errors[0].Message != "phone or email is required" {
+		t.Errorf("row 1 error = %+v, want the identity message", resp.Errors[0])
+	}
+	if resp.Errors[1].Row != 2 || resp.Errors[1].Message != "phone must contain at least one digit" {
+		t.Errorf("row 2 error = %+v, want the digitless-phone message", resp.Errors[1])
+	}
+}
+
+func TestBulkCreateRejectsDigitlessPhoneIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+		{Name: "Alice", Phone: "abc", Email: "alice@example.com"},
+	}})
+	if err != nil {
+		t.Fatalf("bulk create: %v", err)
+	}
+	if resp.Imported != 0 || resp.Failed != 1 {
+		t.Fatalf("imported/failed = %d/%d, want 0/1", resp.Imported, resp.Failed)
+	}
+	if len(resp.Errors) != 1 || resp.Errors[0].Row != 1 || resp.Errors[0].Message != "phone must contain at least one digit" {
+		t.Errorf("errors = %+v, want row 1 digitless-phone failure", resp.Errors)
 	}
 }
 
@@ -947,6 +968,23 @@ func TestCreateContactRejectsInvalidStatusIntegration(t *testing.T) {
 	}
 }
 
+func TestCreateContactRejectsDigitlessPhoneIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	// The scalar form: a non-blank phone with no digits must not be folded
+	// into an empty phone row.
+	if _, err := svc.create(CreateRequest{Name: "Alice", Phone: "abc", Email: "alice@example.com"}); !errors.Is(err, ErrInvalidPhone) {
+		t.Errorf("create with digitless scalar phone = %v, want ErrInvalidPhone", err)
+	}
+
+	// The list form: an entry that canonicalizes to empty is never stored.
+	phones := []PhoneValue{{Value: "abc", IsPrimary: true}}
+	if _, err := svc.create(CreateRequest{Name: "Bob", Phones: phones, Email: "bob@example.com"}); !errors.Is(err, ErrInvalidPhone) {
+		t.Errorf("create with digitless phone list = %v, want ErrInvalidPhone", err)
+	}
+}
+
 func TestUpdateContactMissingReturnsNotFoundIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -1024,6 +1062,52 @@ func TestUpdateContactRejectsCollectionLimitIntegration(t *testing.T) {
 	overlongScalar := strings.Repeat("e", maxValueLength+1)
 	if _, err := svc.update(created.ID, UpdateRequest{Email: &overlongScalar}, ""); !errors.Is(err, ErrCollectionLimit) {
 		t.Errorf("update with overlong scalar email = %v, want ErrCollectionLimit", err)
+	}
+}
+
+func TestUpdateContactRejectsDigitlessPhoneIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	created, err := svc.create(CreateRequest{
+		Name:  "Alice Example",
+		Phone: "9876543210",
+		Email: "alice@example.com",
+	})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	// Scalar form: the digitless value must not clear the stored phone type.
+	digitless := "abc"
+	if _, err := svc.update(created.ID, UpdateRequest{Phone: &digitless}, ""); !errors.Is(err, ErrInvalidPhone) {
+		t.Errorf("update with digitless scalar phone = %v, want ErrInvalidPhone", err)
+	}
+
+	// List form: an entry that canonicalizes to empty is never stored.
+	phones := []PhoneValue{{Value: "abc", IsPrimary: true}}
+	if _, err := svc.update(created.ID, UpdateRequest{Phones: &phones}, ""); !errors.Is(err, ErrInvalidPhone) {
+		t.Errorf("update with digitless phone list = %v, want ErrInvalidPhone", err)
+	}
+
+	// The failed updates must leave the stored phone untouched: the sync
+	// deletes the old rows first, so a rejected value may never reach it.
+	got, err := svc.get(created.ID)
+	if err != nil {
+		t.Fatalf("get contact: %v", err)
+	}
+	if got.Phone != "+919876543210" {
+		t.Errorf("stored phone = %q, want +919876543210", got.Phone)
+	}
+
+	// A scalar "" keeps its clear meaning while the email still holds detail.
+	empty := ""
+	cleared, err := svc.update(created.ID, UpdateRequest{Phone: &empty}, "")
+	if err != nil {
+		t.Fatalf("clear scalar phone: %v", err)
+	}
+	if cleared.Phone != "" {
+		t.Errorf("phone = %q, want cleared", cleared.Phone)
 	}
 }
 

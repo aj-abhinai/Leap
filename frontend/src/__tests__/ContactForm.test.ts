@@ -83,3 +83,29 @@ describe('ContactForm duplicate dialog copy', () => {
     wrapper.unmount()
   })
 })
+
+describe('ContactForm phone validation', () => {
+  it('blocks save when a phone row has no digits', async () => {
+    const wrapper = mountForm({
+      duplicateMatches: null,
+      editingContact: {
+        ...makeContact(),
+        phones: [
+          { id: 'p1', value: '98764 32100', is_primary: true },
+          { id: 'p2', value: 'abc', is_primary: false },
+        ],
+      },
+    })
+    await flushPromises()
+
+    const update = wrapper.findAll('button').find((b) => b.text() === 'Update')
+    expect(update).toBeTruthy()
+    await update!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('"abc" is not a valid phone number')
+    expect(wrapper.emitted('save')).toBeUndefined()
+
+    wrapper.unmount()
+  })
+})

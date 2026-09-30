@@ -31,6 +31,9 @@ var (
 	// ErrInvalidEmail marks an email value that is not a plain address, so free
 	// text cannot land in the email columns.
 	ErrInvalidEmail = errors.New("invalid email address")
+	// ErrInvalidPhone marks a non-blank phone value that contains no digits, so
+	// it cannot canonicalize and must not be stored.
+	ErrInvalidPhone = errors.New("phone must contain at least one digit")
 	// ErrDuplicate marks a create whose primary phone or email collides with
 	// a live contact and the request did not confirm the duplicate. It wraps
 	// the matched contact(s) so the handler can return them in a 409.
@@ -468,7 +471,13 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 		return nil, err
 	}
 	if req.Phone != "" {
-		req.Phone = util.CanonicalPhone(req.Phone, defaultCC)
+		canonical := util.CanonicalPhone(req.Phone, defaultCC)
+		// A non-blank input that canonicalizes to empty is free text, not a
+		// phone; storing it would silently drop the number the user typed.
+		if canonical == "" {
+			return nil, ErrInvalidPhone
+		}
+		req.Phone = canonical
 	}
 	for i := range req.Phones {
 		req.Phones[i].Value = util.CanonicalPhone(req.Phones[i].Value, defaultCC)
@@ -622,6 +631,9 @@ func validateCollectionLimits(phones []PhoneValue, emails []EmailValue, tagIDs [
 		return fmt.Errorf("%w: at most %d tags per contact", ErrCollectionLimit, maxContactTags)
 	}
 	for _, p := range phones {
+		if p.Value == "" {
+			return ErrInvalidPhone
+		}
 		if len(p.Value) > maxValueLength {
 			return fmt.Errorf("%w: phone value is too long", ErrCollectionLimit)
 		}
@@ -817,6 +829,11 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		}
 		if req.Phone != nil {
 			canonical := util.CanonicalPhone(*req.Phone, defaultCC)
+			// Non-blank input with no digits cannot be a phone; the empty
+			// canonical would silently clear the stored type instead.
+			if canonical == "" && strings.TrimSpace(*req.Phone) != "" {
+				return nil, ErrInvalidPhone
+			}
 			req.Phone = &canonical
 		}
 		if req.Phones != nil {

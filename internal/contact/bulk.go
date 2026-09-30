@@ -145,7 +145,13 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "name is required"})
 			continue
 		}
+		rawPhone := c.Phone
 		c.Phone = util.CanonicalPhone(c.Phone, keys.cc)
+		if c.Phone == "" && strings.TrimSpace(rawPhone) != "" {
+			resp.Failed++
+			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "phone must contain at least one digit"})
+			continue
+		}
 		if len(c.Phone) > maxValueLength || len(c.Email) > maxValueLength {
 			resp.Failed++
 			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "phone or email value is too long"})

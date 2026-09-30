@@ -30,6 +30,9 @@ var (
 	ErrContactRequired = errors.New("a lead must reference a contact")
 	// ErrNoContactDetail marks a new_contact with neither a phone nor an email.
 	ErrNoContactDetail = errors.New("new contact must have at least one phone or one email")
+	// ErrInvalidPhone marks a non-blank new-contact phone that contains no
+	// digits, so it cannot canonicalize and must not be silently skipped.
+	ErrInvalidPhone = errors.New("phone must contain at least one digit")
 	// ErrClosingStageAtCreate marks lead creation into a closing stage; closing
 	// is reachable only by moving an existing lead.
 	ErrClosingStageAtCreate = errors.New("a lead cannot be created in a closing stage")
@@ -648,6 +651,11 @@ func (s *Service) resolveOrCreateContactTx(tx *sql.Tx, contactID *string, nc *Ne
 	}
 	phoneKey, codedKey := util.PhoneLookupKeys(nc.Phone, defaultCC)
 	emailKey := util.NormalizeEmail(nc.Email)
+	// A non-blank phone with no digits cannot canonicalize; the insert below
+	// would silently skip it, so reject it like the contact entry points do.
+	if strings.TrimSpace(nc.Phone) != "" && util.CanonicalPhone(nc.Phone, defaultCC) == "" {
+		return "", ErrInvalidPhone
+	}
 	if phoneKey == "" && emailKey == "" {
 		return "", ErrNoContactDetail
 	}

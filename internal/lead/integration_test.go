@@ -72,9 +72,9 @@ func TestLeadEntryContactStoresCanonicalPhoneIntegration(t *testing.T) {
 	}
 }
 
-// A phone with no digits at all is not a contact detail: lead entry rejects
-// it exactly like the contact module, instead of storing an empty row. A
-// valid email alongside it keeps the create legal and simply skips the phone.
+// A phone with no digits at all is not a phone: lead entry rejects it with
+// the same sentinel as the contact module, and no contact row is created —
+// whether or not an email is also present.
 func TestLeadEntryRejectsDigitslessPhoneIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -85,8 +85,8 @@ func TestLeadEntryRejectsDigitslessPhoneIntegration(t *testing.T) {
 		PipelineID: pipelineID,
 		StageID:    stageID,
 	}, "")
-	if !errors.Is(err, ErrNoContactDetail) {
-		t.Fatalf("create lead = %v, want ErrNoContactDetail", err)
+	if !errors.Is(err, ErrInvalidPhone) {
+		t.Fatalf("create lead = %v, want ErrInvalidPhone", err)
 	}
 	var contacts int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM contacts`).Scan(&contacts); err != nil {
@@ -96,20 +96,21 @@ func TestLeadEntryRejectsDigitslessPhoneIntegration(t *testing.T) {
 		t.Errorf("contacts = %d, want 0 (no empty phone rows)", contacts)
 	}
 
-	// With an email present the same create is legal and stores no phone.
-	if _, err := svc.create(CreateRequest{
+	// A valid email does not excuse the digitless phone: the create is
+	// rejected, not silently stripped of the phone.
+	_, err = svc.create(CreateRequest{
 		NewContact: &NewContact{Name: "Bob Example", Phone: "+", Email: "bob@example.com"},
 		PipelineID: pipelineID,
 		StageID:    stageID,
-	}, ""); err != nil {
-		t.Fatalf("create lead with email: %v", err)
+	}, "")
+	if !errors.Is(err, ErrInvalidPhone) {
+		t.Fatalf("create lead with email = %v, want ErrInvalidPhone", err)
 	}
-	var phoneRows int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM contact_phones`).Scan(&phoneRows); err != nil {
-		t.Fatalf("count phone rows: %v", err)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM contacts`).Scan(&contacts); err != nil {
+		t.Fatalf("count contacts: %v", err)
 	}
-	if phoneRows != 0 {
-		t.Errorf("phone rows = %d, want 0 (digitsless phone must be skipped)", phoneRows)
+	if contacts != 0 {
+		t.Errorf("contacts = %d, want 0 (rejected create must not store)", contacts)
 	}
 }
 
