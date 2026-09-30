@@ -358,3 +358,135 @@ describe('LeadKanban collapsed rails', () => {
     expect(wrapper.find('.from-background').exists()).toBe(false)
   })
 })
+
+describe('LeadKanban card', () => {
+  // The item slot must render for card assertions; the default draggable stub
+  // swallows it.
+  const slotDraggable = {
+    props: ['list'],
+    template: '<div><div v-for="item in list" :key="item.id"><slot name="item" :element="item" /></div></div>',
+  }
+
+  // jsdom has no ResizeObserver; the board observes its scroller on mount.
+  beforeAll(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    )
+  })
+
+  // Card-field prefs persist per pipeline; each test starts from the defaults.
+  beforeEach(() => localStorage.clear())
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('marks won and lost cards with distinct state dots', async () => {
+    const won = mountKanban(makeLead({ stage_id: 'stage-won', stage_outcome: 'won' }), slotDraggable)
+    await flushPromises()
+    expect(won.text()).toContain('Won')
+    expect(won.find('span.bg-success').exists()).toBe(true)
+    expect(won.find('span.bg-destructive').exists()).toBe(false)
+    won.unmount()
+
+    const lost = mountKanban(makeLead({ stage_id: 'stage-lost', stage_outcome: 'lost' }), slotDraggable)
+    await flushPromises()
+    expect(lost.text()).toContain('Lost')
+    expect(lost.find('span.bg-destructive').exists()).toBe(true)
+    lost.unmount()
+  })
+
+  it('gates each half of the meta line with its own card field', async () => {
+    localStorage.setItem('crm:kanban:fields:p1', JSON.stringify(['program', 'assignee']))
+    const both = mountKanban(makeLead({ program_name: 'Consultation', assigned_to: 'u1' }), slotDraggable)
+    await flushPromises()
+    expect(both.text()).toContain('Consultation')
+    expect(both.text()).toContain('Assigned')
+    both.unmount()
+
+    localStorage.setItem('crm:kanban:fields:p1', JSON.stringify(['assignee']))
+    const assigneeOnly = mountKanban(makeLead({ program_name: 'Consultation', assigned_to: 'u1' }), slotDraggable)
+    await flushPromises()
+    expect(assigneeOnly.text()).not.toContain('Consultation')
+    expect(assigneeOnly.text()).toContain('Assigned')
+    assigneeOnly.unmount()
+  })
+
+  it('reserves the selection rail and checkbox only for open leads', async () => {
+    const open = mountKanban(makeLead({}), slotDraggable)
+    useRBACStore().permissions = ['lead:write']
+    await flushPromises()
+    expect(open.find('[aria-label="Select Alice"]').exists()).toBe(true)
+    expect(open.find('.pl-9').exists()).toBe(true)
+    open.unmount()
+
+    const closed = mountKanban(makeLead({ stage_id: 'stage-lost', stage_outcome: 'lost' }), slotDraggable)
+    useRBACStore().permissions = ['lead:write']
+    await flushPromises()
+    expect(closed.find('[aria-label="Select Alice"]').exists()).toBe(false)
+    expect(closed.find('.pl-9').exists()).toBe(false)
+    closed.unmount()
+  })
+
+  it('mutes the value on a lost card', async () => {
+    const lost = mountKanban(makeLead({ stage_outcome: 'lost', value: 300 }), slotDraggable)
+    await flushPromises()
+    expect(lost.get('.card-value').classes()).toContain('text-muted-foreground')
+    lost.unmount()
+  })
+
+  it('drops a lead from the selection once it closes', async () => {
+    const lead = makeLead({})
+    const wrapper = mountKanban(lead, slotDraggable)
+    useRBACStore().permissions = ['lead:write']
+    await flushPromises()
+
+    await wrapper.get('[aria-label="Select Alice"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('1 selected')
+
+    // The same lead comes back closed: it can no longer be bulk-moved.
+    await wrapper.setProps({
+      columns: [
+        { ...openStage, leads: [{ ...lead, stage_outcome: 'lost' }], count: 1 },
+        { ...openStageB, leads: [], count: 0 },
+        { ...lostStage, leads: [], count: 0 },
+        { ...wonStage, leads: [], count: 0 },
+      ],
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('selected')
+    wrapper.unmount()
+  })
+
+  it('keeps a selected lead when it is merely filtered off the board', async () => {
+    const lead = makeLead({})
+    const wrapper = mountKanban(lead, slotDraggable)
+    useRBACStore().permissions = ['lead:write']
+    await flushPromises()
+
+    await wrapper.get('[aria-label="Select Alice"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('1 selected')
+
+    // The board no longer renders the lead, but it is still open work.
+    await wrapper.setProps({
+      columns: [
+        { ...openStage, leads: [], count: 0 },
+        { ...openStageB, leads: [], count: 0 },
+        { ...lostStage, leads: [], count: 0 },
+        { ...wonStage, leads: [], count: 0 },
+      ],
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('1 selected')
+    wrapper.unmount()
+  })
+})

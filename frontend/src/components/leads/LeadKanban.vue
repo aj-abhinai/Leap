@@ -34,6 +34,7 @@ import {
   ListChecks,
   BookOpen,
   Pencil,
+  Phone,
   CheckCircle2,
   GripVertical,
   SlidersHorizontal,
@@ -260,6 +261,13 @@ function isClosedLead(lead: Lead): boolean {
   return lead.stage_outcome === 'won' || lead.stage_outcome === 'lost'
 }
 
+// canSelect reports whether a card offers the hover checkbox: open work the
+// viewer may edit. The same predicate reserves the card's left gutter, so a
+// closed card never indents its title for a control that cannot render.
+function canSelect(lead: Lead): boolean {
+  return rbac.can('lead:write') && !isClosedLead(lead)
+}
+
 // selectableLeads is the subset of a column's cards that bulk selection
 // applies to — open leads only. All selection logic derives from this one
 // collection so the closed-lead rule is defined once.
@@ -307,6 +315,24 @@ function toggleColumnSelect(col: Stage & { leads: Lead[]; count: number }) {
 function clearSelection() {
   selectedIds.value = new Set()
 }
+
+// Selection is board state, not card state: a lead that closes (here or in
+// another session) can no longer be bulk-moved, so it is dropped from the
+// selection instead of lingering behind a card with no checkbox. Leads that are
+// merely filtered off the board keep their selection — they are still open work.
+watch(
+  () => props.columns.map((col) => col.leads.map((l) => `${l.id}:${l.stage_outcome}`).join(',')).join('|'),
+  () => {
+    const closed = new Set<string>()
+    for (const col of props.columns) {
+      for (const lead of col.leads) {
+        if (isClosedLead(lead)) closed.add(lead.id!)
+      }
+    }
+    const next = new Set([...selectedIds.value].filter((id) => !closed.has(id)))
+    if (next.size !== selectedIds.value.size) selectedIds.value = next
+  },
+)
 
 const bulkTargetStageId = shallowRef('')
 
@@ -414,6 +440,16 @@ function formatNextTaskAt(lead: Lead): string {
 
 function showField(key: string): boolean {
   return cardFields.value.includes(key)
+}
+
+// showProgram and showAssignee gate each half of the card's meta line with its
+// own Customize-cards toggle, so a hidden field never leaves a dangling separator.
+function showProgram(lead: Lead): boolean {
+  return showField('program') && !!lead.program_name
+}
+
+function showAssignee(lead: Lead): boolean {
+  return showField('assignee') && !!lead.assigned_to
 }
 </script>
 
@@ -534,13 +570,14 @@ function showField(key: string): boolean {
               <div
                 :key="lead.id"
                 tabindex="0"
-                class="group relative rounded-lg border bg-card p-3 text-sm shadow-sm transition-all hover:border-primary/20 hover:shadow-md cursor-pointer"
+                class="group relative rounded-lg border bg-card p-3 text-sm shadow-sm transition-all hover:border-primary/20 hover:shadow-md cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+                :class="{ 'pl-9': canSelect(lead), 'ring-1 ring-primary/40': isSelected(lead.id!) }"
                 @click="emit('viewActivities', lead)"
                 @keydown.enter.self.prevent="emit('viewActivities', lead)"
               >
                 <div class="absolute left-2 top-2 z-10">
                   <Checkbox
-                    v-if="rbac.can('lead:write') && !isClosedLead(lead)"
+                    v-if="canSelect(lead)"
                     :model-value="isSelected(lead.id!)"
                     class="size-4 opacity-0 transition-opacity group-hover:opacity-100"
                     :class="{ 'opacity-100': isSelected(lead.id!) }"
@@ -549,14 +586,14 @@ function showField(key: string): boolean {
                     @update:model-value="toggleSelect(lead.id!)"
                   />
                 </div>
-                <div class="flex items-start justify-between gap-2 pl-0" :class="{ 'pl-6': rbac.can('lead:write') }">
-                  <div class="min-w-0 font-medium truncate">{{ lead.display_name }}</div>
-                  <div class="flex shrink-0 items-center gap-0.5 text-muted-foreground">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0 font-medium truncate" :title="lead.display_name">{{ lead.display_name }}</div>
+                  <div class="flex shrink-0 items-center gap-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                     <Button
                       v-if="rbac.can('lead:write')"
                       variant="ghost"
                       size="icon-sm"
-                      class="size-8"
+                      class="size-7"
                       @click.stop="emit('edit', lead)"
                       title="Edit lead"
                       aria-label="Edit lead"
@@ -565,7 +602,7 @@ function showField(key: string): boolean {
                     </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger as-child @click.stop>
-                        <Button variant="ghost" size="icon-sm" class="size-8" aria-label="Lead actions">
+                        <Button variant="ghost" size="icon-sm" class="size-7" aria-label="Lead actions">
                           <MoreHorizontal class="size-3.5" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -583,32 +620,61 @@ function showField(key: string): boolean {
                     </DropdownMenu>
                   </div>
                 </div>
-                <div v-if="showField('contact') && (lead.contact_phone || lead.contact_email)" class="mt-0.5 text-xs text-muted-foreground truncate">
-                  {{ formatContactDetail(lead.contact_phone, lead.contact_email) }}
+                <div
+                  v-if="showField('contact') && (lead.contact_phone || lead.contact_email)"
+                  class="mt-1 flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+                  :title="formatContactDetail(lead.contact_phone, lead.contact_email)"
+                >
+                  <Phone v-if="lead.contact_phone" class="size-3 shrink-0" />
+                  <span class="truncate tabular-nums">{{ formatContactDetail(lead.contact_phone, lead.contact_email) }}</span>
                 </div>
-                <div v-if="showField('program') && lead.program_name" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  <BookOpen class="size-3" />
-                  <span class="truncate">{{ lead.program_name }}</span>
+                <div
+                  v-if="showProgram(lead) || showAssignee(lead)"
+                  class="mt-1 flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+                >
+                  <template v-if="showProgram(lead)">
+                    <BookOpen class="size-3 shrink-0" />
+                    <span class="truncate" :title="lead.program_name">{{ lead.program_name }}</span>
+                  </template>
+                  <span v-if="showProgram(lead) && showAssignee(lead)" class="shrink-0">·</span>
+                  <template v-if="showAssignee(lead)">
+                    <User class="size-3 shrink-0" />
+                    <span class="truncate" :title="assigneeName(lead.assigned_to)">{{ assigneeName(lead.assigned_to) }}</span>
+                  </template>
                 </div>
-                <div v-if="showField('assignee') && lead.assigned_to" class="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  <User class="size-3" />
-                  <span class="truncate">{{ assigneeName(lead.assigned_to) }}</span>
-                </div>
-                <div v-if="showField('outcome') && cardOutcome(lead)" class="mt-1.5 flex items-center gap-1.5">
-                  <Badge
-                    :variant="cardOutcome(lead) === 'won' ? 'default' : 'destructive'"
-                    class="text-xs px-1.5"
+                <div
+                  v-if="(showField('outcome') && cardOutcome(lead)) || (showField('value') && lead.value)"
+                  class="mt-1.5 flex items-center justify-between gap-2"
+                >
+                  <div class="flex min-w-0 items-center gap-1.5">
+                    <Badge
+                      v-if="showField('outcome') && cardOutcome(lead)"
+                      variant="secondary"
+                      class="shrink-0 gap-1 text-xs px-1.5"
+                    >
+                      <span
+                        class="size-1.5 shrink-0 rounded-full"
+                        :class="cardOutcome(lead) === 'won' ? 'bg-success' : 'bg-destructive'"
+                      />
+                      {{ cardOutcome(lead) === 'won' ? 'Won' : 'Lost' }}
+                    </Badge>
+                    <span
+                      v-if="showField('outcome') && cardOutcome(lead) === 'lost' && lead.lost_reason"
+                      class="truncate text-xs text-muted-foreground"
+                      :title="lead.lost_reason"
+                    >
+                      {{ lead.lost_reason }}
+                    </span>
+                  </div>
+                  <span
+                    v-if="showField('value') && lead.value"
+                    class="card-value shrink-0 text-sm font-semibold tabular-nums"
+                    :class="cardOutcome(lead) === 'lost' ? 'text-muted-foreground' : 'text-primary'"
                   >
-                    {{ cardOutcome(lead) === 'won' ? 'Won' : 'Lost' }}
-                  </Badge>
-                  <span v-if="cardOutcome(lead) === 'lost' && lead.lost_reason" class="text-xs text-muted-foreground truncate">
-                    {{ lead.lost_reason }}
+                    {{ formatCurrency(lead.value) }}
                   </span>
                 </div>
-                <div v-if="showField('value') && lead.value" class="mt-1.5 text-sm font-semibold text-primary tabular-nums">
-                  {{ formatCurrency(lead.value) }}
-                </div>
-                <div v-if="showField('next_task') || showField('last_touch')" class="mt-1.5 space-y-0.5">
+                <div v-if="showField('next_task') || showField('last_touch')" class="mt-1 space-y-0.5">
                   <div
                     v-if="showField('next_task') && lead.next_task_type"
                     class="flex items-center gap-1 text-xs"
