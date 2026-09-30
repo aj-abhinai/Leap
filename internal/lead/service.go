@@ -727,6 +727,18 @@ func normalizeProgram(programID *string) *string {
 	return programID
 }
 
+// nonEmptyOrNil maps an explicit empty string to nil (field absent) for
+// the three identity pointers. The UI omits these fields, and treating ""
+// as a value leaks into the slot-key computation and the NOT NULL contact
+// column. Only identity fields use this — assigned_to, program_id,
+// nickname, and notes treat "" as a deliberate clear.
+func nonEmptyOrNil(s *string) *string {
+	if s != nil && *s == "" {
+		return nil
+	}
+	return s
+}
+
 // sameProgram reports whether two program references denote the same slot key,
 // treating nil and an empty string as the program-less slot.
 func sameProgram(a, b *string) bool {
@@ -818,6 +830,12 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	if req.Value != nil {
 		return nil, ErrCustomValueRejected
 	}
+	// An explicit empty identity string means "field absent": keep the stored
+	// value. The same normalization must hold before validation and the
+	// slot-key computation, not only in the UPDATE statement.
+	req.PipelineID = nonEmptyOrNil(req.PipelineID)
+	req.StageID = nonEmptyOrNil(req.StageID)
+	req.ContactID = nonEmptyOrNil(req.ContactID)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("update lead: %w", err)
@@ -984,7 +1002,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Lead, er
 	err = tx.QueryRow(
 		`UPDATE leads SET
 			nickname = CASE WHEN $2::text IS NOT NULL THEN NULLIF($2::text, '') ELSE nickname END,
-			contact_id = CASE WHEN $3::text IS NOT NULL THEN NULLIF($3::text, '')::uuid ELSE contact_id END,
+			contact_id = COALESCE(NULLIF($3::text, '')::uuid, contact_id),
 			pipeline_id = COALESCE($4::uuid, pipeline_id),
 			stage_id = COALESCE($5::uuid, stage_id),
 			outcome = CASE WHEN $6::text IS NOT NULL THEN NULLIF($6::text, '') ELSE outcome END,
@@ -1362,9 +1380,9 @@ func (s *Service) cancelOpenTasksTx(tx *sql.Tx, leadID string) error {
 // 'lost', open tasks are cancelled, and the move is recorded in stage
 // history. It returns false (no move) when the lead already sits in the
 // target stage or when the lead is terminal (a closed row never re-closes),
-// and ErrNoLostStage when the pipeline has no lost closing stage. The outcome
-// rule mirrors update()'s: closing stages that carry the column default
-// 'open' count as lost.
+// and ErrNoLostStage when the pipeline has no lost closing stage. The target
+// is the first stage with outcome 'lost'; a stage that merely defaults to
+// 'open' is never targeted.
 func (s *Service) closeLostTx(tx *sql.Tx, leadID, userID string) (bool, error) {
 	var pipelineID, currentStageID, currentOutcome string
 	if err := tx.QueryRow(

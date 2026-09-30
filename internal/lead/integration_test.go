@@ -2174,3 +2174,74 @@ func TestResolveOrCreateSkipsDeletedContactsIntegration(t *testing.T) {
 		t.Error("lead resolved to the soft-deleted contact")
 	}
 }
+
+// TestUpdateEmptyIdentityNoopIntegration asserts that PATCHing a lead with
+// empty identity strings keeps the stored values: "" means "field absent" for
+// contact_id, pipeline_id, and stage_id, so the request answers 200 instead of
+// failing on the NOT NULL contact column or a misleading stage validation.
+func TestUpdateEmptyIdentityNoopIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	h := NewHandler(svc)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/leads/"+created.ID,
+		strings.NewReader(`{"contact_id":"","pipeline_id":""}`),
+	)
+	reqCtx := chi.NewRouteContext()
+	reqCtx.URLParams.Add("id", created.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, reqCtx))
+	rr := httptest.NewRecorder()
+
+	h.Update(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data Lead `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Data.ContactID != created.ContactID {
+		t.Errorf("contact_id = %q, want %q (unchanged)", payload.Data.ContactID, created.ContactID)
+	}
+	if payload.Data.PipelineID != created.PipelineID {
+		t.Errorf("pipeline_id = %q, want %q (unchanged)", payload.Data.PipelineID, created.PipelineID)
+	}
+	if payload.Data.StageID != created.StageID {
+		t.Errorf("stage_id = %q, want %q (unchanged)", payload.Data.StageID, created.StageID)
+	}
+
+	// The row was never written with a NULL contact: a fresh read still links
+	// the original contact.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/leads/"+created.ID, nil)
+	getCtx := chi.NewRouteContext()
+	getCtx.URLParams.Add("id", created.ID)
+	getReq = getReq.WithContext(context.WithValue(getReq.Context(), chi.RouteCtxKey, getCtx))
+	getRR := httptest.NewRecorder()
+	h.Get(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want 200; body = %s", getRR.Code, getRR.Body.String())
+	}
+	var got struct {
+		Data Lead `json:"data"`
+	}
+	if err := json.Unmarshal(getRR.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if got.Data.ContactID != created.ContactID {
+		t.Errorf("reloaded contact_id = %q, want %q", got.Data.ContactID, created.ContactID)
+	}
+}
