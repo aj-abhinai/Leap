@@ -113,9 +113,10 @@ func (a *Assets) ServeFrontend(w http.ResponseWriter, r *http.Request) {
 		a.serveFile(w, r, rel)
 		return
 	}
-	// index.html references hashed assets; always revalidate so new
-	// builds are picked up.
-	w.Header().Set("Cache-Control", "no-cache")
+	// index.html references hashed assets; always revalidate so new builds
+	// are picked up. no-transform forbids proxies from rewriting the HTML
+	// payload, which would otherwise inject third-party scripts.
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	a.serveFile(w, r, "index.html")
 }
 

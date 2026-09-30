@@ -90,8 +90,8 @@ func TestServeFrontendCacheHeaders(t *testing.T) {
 		want string
 	}{
 		{name: "assets immutable", path: "/assets/app.js", want: "public, max-age=31536000, immutable"},
-		{name: "index no-cache", path: "/", want: "no-cache"},
-		{name: "spa fallback no-cache", path: "/contacts/123", want: "no-cache"},
+		{name: "index revalidates, no transforms", path: "/", want: "no-cache, no-transform"},
+		{name: "spa fallback revalidates, no transforms", path: "/contacts/123", want: "no-cache, no-transform"},
 		{name: "top-level public file direct", path: "/logo.png", want: ""},
 	}
 	for _, tt := range tests {

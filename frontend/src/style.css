@@ -1,7 +1,15 @@
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
-
 @import "tailwindcss";
 @import "tw-animate-css";
+
+/* Geist is self-hosted (SIL OFL 1.1) so the app loads no third-party font
+   origin; the CSP allows fonts from 'self' only. */
+@font-face {
+  font-family: 'Geist';
+  src: url('./assets/fonts/geist-variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 
 @custom-variant dark (&:is(.dark *));
 

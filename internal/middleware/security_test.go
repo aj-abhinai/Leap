@@ -59,13 +59,18 @@ func TestSecurityHeaders(t *testing.T) {
 	csp := rec.Header().Get("Content-Security-Policy")
 	for _, want := range []string{
 		"script-src 'self' " + themeScriptHash(t),
-		"font-src 'self' https://fonts.gstatic.com",
-		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+		"style-src 'self' 'unsafe-inline'",
+		"font-src 'self'",
 		"object-src 'none'",
 		"frame-ancestors 'none'",
 	} {
 		if !strings.Contains(csp, want) {
 			t.Errorf("CSP missing %q: %s", want, csp)
+		}
+	}
+	for _, banned := range []string{"fonts.googleapis.com", "fonts.gstatic.com"} {
+		if strings.Contains(csp, banned) {
+			t.Errorf("CSP still allows third-party font origin %q: %s", banned, csp)
 		}
 	}
 }
