@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { shallowRef } from 'vue'
-import { useRBACStore } from '@/stores/rbac'
 import { downloadCsv } from '@/api/export'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -8,7 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Download } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
 
-const rbac = useRBACStore()
+// The card renders only inside the audit tab's Export section, which the
+// section menu already filters on data:export (ADR 015); the export route
+// enforces the permission server-side as well.
 
 const entity = shallowRef<'contacts' | 'leads' | 'both'>('contacts')
 const exporting = shallowRef(false)
@@ -68,14 +69,11 @@ async function runExport() {
           <option value="leads">Leads</option>
           <option value="both">Contacts &amp; Leads</option>
         </select>
-        <Button :disabled="exporting || !rbac.can('data:export')" @click="runExport">
+        <Button :disabled="exporting" @click="runExport">
           <Download class="mr-2 size-4" />
           {{ exporting ? 'Exporting…' : 'Export CSV' }}
         </Button>
       </div>
-      <p v-if="!rbac.can('data:export')" class="mt-3 text-sm text-muted-foreground">
-        You need the <span class="font-medium">data:export</span> permission to export data.
-      </p>
     </CardContent>
   </Card>
 </template>

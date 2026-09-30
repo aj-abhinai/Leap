@@ -139,6 +139,12 @@ function columnWidth(stageId: string): number {
   return columnWidths.value[stageId] ?? DEFAULT_WIDTH
 }
 
+// The count badge's tooltip notes when a column shows fewer leads than the
+// stage holds.
+function countTitle(col: { count: number; leads: Lead[] }): string | undefined {
+  return col.count > col.leads.length ? `${col.count} total in this stage` : undefined
+}
+
 // ---- column resize ----
 const resizingStage = shallowRef('')
 const resizeStartX = shallowRef(0)
@@ -180,6 +186,14 @@ function updateScrollHint() {
   const el = scroller.value
   if (!el) return
   canScrollRight.value = el.scrollWidth - el.scrollLeft - el.clientWidth > 24
+}
+
+// A collapse or expand changes a column's width, which can move the scroll
+// edge without a scroll or resize event; re-measure once the width transition
+// settles. Other transitions (hover colors, shadows) are not scroll changes.
+function onColumnWidthSettled(evt: TransitionEvent) {
+  if (evt.propertyName !== 'width') return
+  updateScrollHint()
 }
 
 // Column content changes (a stage added here, a board refresh, a resize) widen
@@ -433,6 +447,7 @@ function showField(key: string): boolean {
         ref="scroller"
         class="flex w-full min-w-0 gap-2 overflow-x-auto pb-4"
         @scroll="updateScrollHint"
+        @transitionend="onColumnWidthSettled"
       >
         <div
           v-for="(col, ci) in columns"
@@ -462,7 +477,7 @@ function showField(key: string): boolean {
           >
             <ChevronUp class="size-3.5 shrink-0 text-muted-foreground" />
             <span class="truncate text-sm font-medium">{{ col.name }}</span>
-            <Badge variant="secondary" class="text-xs px-1.5" :title="col.count > col.leads.length ? `${col.count} total in this stage` : undefined">
+            <Badge variant="secondary" class="text-xs px-1.5" :title="countTitle(col)">
               {{ col.count }}
             </Badge>
           </button>
@@ -490,7 +505,7 @@ function showField(key: string): boolean {
           >
             <ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
             <span class="rail-name min-h-0 flex-1 text-sm font-medium">{{ col.name }}</span>
-            <Badge variant="secondary" class="shrink-0 text-xs px-1.5" :title="col.count > col.leads.length ? `${col.count} total in this stage` : undefined">
+            <Badge variant="secondary" class="shrink-0 text-xs px-1.5" :title="countTitle(col)">
               {{ col.count }}
             </Badge>
           </button>

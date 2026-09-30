@@ -322,4 +322,39 @@ describe('LeadKanban collapsed rails', () => {
       'stage-open': true,
     })
   })
+
+  it('re-measures the scroll hint only when a width transition settles', async () => {
+    const wrapper = mountKanban()
+    await flushPromises()
+
+    // jsdom has no layout, so the edge hint starts off.
+    expect(wrapper.find('.from-background').exists()).toBe(false)
+
+    const scroller = wrapper.get('.overflow-x-auto').element as HTMLElement
+    Object.defineProperty(scroller, 'scrollWidth', { value: 1200, configurable: true })
+    Object.defineProperty(scroller, 'clientWidth', { value: 600, configurable: true })
+    Object.defineProperty(scroller, 'scrollLeft', { value: 0, configurable: true })
+
+    const settled = (propertyName: string) => {
+      const evt = new Event('transitionend', { bubbles: true }) as TransitionEvent
+      Object.defineProperty(evt, 'propertyName', { value: propertyName })
+      return evt
+    }
+
+    // A hover transition ends: the hint must not re-measure.
+    wrapper.findAll('.card-in')[0].element.dispatchEvent(settled('box-shadow'))
+    await nextTick()
+    expect(wrapper.find('.from-background').exists()).toBe(false)
+
+    // A column width settles with overflow to the right: the hint lights up.
+    wrapper.findAll('.card-in')[0].element.dispatchEvent(settled('width'))
+    await nextTick()
+    expect(wrapper.find('.from-background').exists()).toBe(true)
+
+    // The next width settle re-measures again, now with no overflow left.
+    Object.defineProperty(scroller, 'scrollWidth', { value: 600, configurable: true })
+    wrapper.findAll('.card-in')[0].element.dispatchEvent(settled('width'))
+    await nextTick()
+    expect(wrapper.find('.from-background').exists()).toBe(false)
+  })
 })
