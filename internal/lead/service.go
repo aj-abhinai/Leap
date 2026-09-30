@@ -365,6 +365,38 @@ func (s *Service) board(f BoardFilters) (*Board, error) {
 	return board, nil
 }
 
+// stats returns the dashboard stage-health aggregate for one pipeline: the
+// live-lead count and summed value per stage. Stages without live leads are
+// absent; the caller renders them as zero.
+func (s *Service) stats(pipelineID string) (*LeadStats, error) {
+	w := util.NewWhereBuilder("l.deleted_at IS NULL")
+	w.Add("l.pipeline_id = $?", pipelineID)
+	rows, err := s.db.Query(`
+		SELECT l.stage_id, COUNT(*), COALESCE(SUM(l.value), 0)::float8
+		FROM leads l
+		WHERE `+w.SQL()+`
+		GROUP BY l.stage_id`,
+		w.Args()...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load lead stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := &LeadStats{Stages: []StageStat{}}
+	for rows.Next() {
+		var st StageStat
+		if err := rows.Scan(&st.StageID, &st.Count, &st.ValueSum); err != nil {
+			return nil, fmt.Errorf("load lead stats: scan: %w", err)
+		}
+		stats.Stages = append(stats.Stages, st)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load lead stats: iterate: %w", err)
+	}
+	return stats, nil
+}
+
 func (s *Service) get(id string) (*Lead, error) {
 	l, err := scanLead(s.db.QueryRow(leadSelect+`
 		WHERE l.id = $1 AND l.deleted_at IS NULL`, id))

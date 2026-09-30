@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1903,6 +1904,90 @@ func TestBoardReturnsStageCountsIntegration(t *testing.T) {
 		}
 	}
 	t.Errorf("ranged lead %q missing from board", rangedLeadID)
+}
+
+// TestStatsReturnsStageCountsAndValueSumsIntegration seeds two pipelines,
+// spreads leads valued from seeded program prices across stages, and asserts
+// the dashboard aggregate: per-stage counts and summed values for the
+// requested pipeline only, with valueless leads counted at zero and empty
+// stages absent.
+func TestStatsReturnsStageCountsAndValueSumsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	seedPipeline := func(name string) string {
+		t.Helper()
+		var id string
+		if err := db.QueryRow(`INSERT INTO pipelines (name) VALUES ($1) RETURNING id`, name).Scan(&id); err != nil {
+			t.Fatalf("seed pipeline %s: %v", name, err)
+		}
+		return id
+	}
+	seedStage := func(pipelineID, name string, order int) string {
+		t.Helper()
+		var id string
+		if err := db.QueryRow(
+			`INSERT INTO lead_stages (pipeline_id, name, "order") VALUES ($1, $2, $3) RETURNING id`,
+			pipelineID, name, order,
+		).Scan(&id); err != nil {
+			t.Fatalf("seed stage %s: %v", name, err)
+		}
+		return id
+	}
+
+	// Lead values come from the program catalog; seed one price per value.
+	program100 := seedProgram(t, db, "Stats Program 100", 100)
+	program50 := seedProgram(t, db, "Stats Program 50", 50)
+	program25 := seedProgram(t, db, "Stats Program 25", 25)
+
+	pipelineA := seedPipeline("Stats Pipeline A")
+	pipelineB := seedPipeline("Stats Pipeline B")
+	stageA := seedStage(pipelineA, "New", 0)
+	stageB := seedStage(pipelineA, "Contacted", 1)
+	seedStage(pipelineA, "Empty", 2)
+	stageOther := seedStage(pipelineB, "New", 0)
+
+	for _, in := range []struct {
+		name     string
+		phone    string
+		stage    string
+		pipeline string
+		program  *string
+	}{
+		{"Alice", "9000000001", stageA, pipelineA, &program100},
+		{"Bob", "9000000002", stageA, pipelineA, &program50},
+		{"Carol", "9000000003", stageB, pipelineA, &program25},
+		{"Dave", "9000000004", stageB, pipelineA, nil},
+		{"Erin", "9000000005", stageOther, pipelineB, &program100},
+	} {
+		if _, err := svc.create(CreateRequest{
+			NewContact: &NewContact{Name: in.name, Phone: in.phone},
+			PipelineID: in.pipeline,
+			StageID:    in.stage,
+			ProgramID:  in.program,
+		}, ""); err != nil {
+			t.Fatalf("create lead %s: %v", in.name, err)
+		}
+	}
+
+	stats, err := svc.stats(pipelineA)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(stats.Stages) != 2 {
+		t.Fatalf("stages = %d, want 2", len(stats.Stages))
+	}
+	got := map[string]StageStat{}
+	for _, st := range stats.Stages {
+		got[st.StageID] = st
+	}
+	want := map[string]StageStat{
+		stageA: {StageID: stageA, Count: 2, ValueSum: 150},
+		stageB: {StageID: stageB, Count: 2, ValueSum: 25},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("stats = %+v, want %+v", got, want)
+	}
 }
 
 func seedProgram(t *testing.T, db *sql.DB, name string, price float64) string {

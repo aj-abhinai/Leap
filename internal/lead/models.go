@@ -135,6 +135,21 @@ type Board struct {
 // never deleted, just not rendered.
 const BoardWindow = 200
 
+// StageStat is one pipeline stage's dashboard aggregate: the count of live
+// leads in the stage and the summed value of those leads.
+type StageStat struct {
+	StageID  string  `json:"stage_id"`
+	Count    int     `json:"count"`
+	ValueSum float64 `json:"value_sum"`
+}
+
+// LeadStats is the dashboard stage-health payload: one entry per stage that
+// has live leads. Stages without live leads are absent; callers render them
+// as zero.
+type LeadStats struct {
+	Stages []StageStat `json:"stages"`
+}
+
 // Activity is a task on a lead with a lifecycle: scheduled, done, cancelled,
 // or responded via a quick reply.
 type Activity struct {

@@ -74,3 +74,17 @@ func TestBoardRejectsInvalidFilters(t *testing.T) {
 		}
 	}
 }
+
+func TestStatsRejectsInvalidPipeline(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	for _, q := range []string{"", "pipeline_id=not-a-uuid"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/leads/stats?"+q, nil)
+		rr := httptest.NewRecorder()
+		h.Stats(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%q: status = %d, want 400", q, rr.Code)
+		}
+	}
+}

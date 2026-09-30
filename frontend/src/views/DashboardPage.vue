@@ -8,6 +8,7 @@ import { useActivitiesStore } from '@/stores/activities'
 import { useRemindersStore } from '@/stores/reminders'
 import { useRBACStore } from '@/stores/rbac'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
+import { fetchLeadStats, type StageStat } from '@/api/leads'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
@@ -25,6 +26,9 @@ const remindersStore = useRemindersStore()
 const rbac = useRBACStore()
 const { openLeadDrawer } = useLeadDrawerGlobal()
 const loading = shallowRef(true)
+// stats carries the first pipeline's server-side aggregates; the health
+// bars render from it without loading lead rows.
+const stats = shallowRef<StageStat[]>([])
 
 onMounted(async () => {
   // App.vue fetches permissions fire-and-forget, which races this mount on a
@@ -38,16 +42,20 @@ onMounted(async () => {
     remindersStore.fetchReminders(),
   ]
   if (rbac.can('lead:read')) {
-    fetches.push(pipelineStore.fetchPipelines(), activitiesStore.fetchRecent(10))
+    fetches.push(activitiesStore.fetchRecent(10))
+    // The catalog must be loaded before the stats call needs its first
+    // pipeline id; chaining inside the batch keeps every other fetch parallel.
+    fetches.push(
+      pipelineStore.fetchPipelines().then(async () => {
+        const first = pipelineStore.pipelines[0]
+        if (!first) return
+        const res = await fetchLeadStats({ pipelineId: first.id })
+        stats.value = res.data?.stages ?? []
+      }),
+    )
   }
   try {
     await Promise.all(fetches)
-    // Load the first pipeline's leads so the stage distribution has data.
-    // fetchAllLeads loops pages so the distribution is never silently
-    // truncated at one page.
-    if (rbac.can('lead:read') && pipelineStore.pipelines.length > 0) {
-      await leadsStore.fetchAllLeads({ pipelineId: pipelineStore.pipelines[0].id })
-    }
   } catch {
     // Best-effort dashboard: one failed fetch must not blank the rest.
   } finally {
@@ -56,29 +64,30 @@ onMounted(async () => {
 })
 
 const pipeline = computed(() => pipelineStore.pipelines[0] ?? null)
-const pipelineLeads = computed(() => leadsStore.leads)
+const statsByStage = computed(() => new Map(stats.value.map((s) => [s.stage_id, s])))
 
-// stageRows aggregates the first pipeline's leads into per-stage counts and
-// summed lead values for the health bars.
+// stageRows maps the first pipeline's stages to their server aggregates;
+// stages without live leads are absent from the payload and read as zero.
 const stageRows = computed(() => {
   if (!pipeline.value?.stages) return []
   return pipeline.value.stages.map((stage) => {
-    const stageLeads = pipelineLeads.value.filter((l) => l.stage_id === stage.id)
+    const stat = statsByStage.value.get(stage.id)
     return {
       name: stage.name,
-      count: stageLeads.length,
-      value: stageLeads.reduce((sum, l) => sum + (l.value || 0), 0),
+      count: stat?.count ?? 0,
+      value: stat?.value_sum ?? 0,
       isClosing: stage.is_closing,
+      outcome: stage.outcome,
     }
   })
 })
 
 const stageMax = computed(() => Math.max(1, ...stageRows.value.map((r) => r.count)))
 
-const wonCount = computed(() => pipelineLeads.value.filter((l) => l.stage_outcome === 'won').length)
-const lostCount = computed(() => pipelineLeads.value.filter((l) => l.stage_outcome === 'lost').length)
-const openCount = computed(() => Math.max(0, pipelineLeads.value.length - wonCount.value - lostCount.value))
-const totalCount = computed(() => Math.max(1, pipelineLeads.value.length))
+const wonCount = computed(() => stageRows.value.filter((r) => r.outcome === 'won').reduce((n, r) => n + r.count, 0))
+const lostCount = computed(() => stageRows.value.filter((r) => r.outcome === 'lost').reduce((n, r) => n + r.count, 0))
+const openCount = computed(() => stageRows.value.filter((r) => r.outcome === 'open').reduce((n, r) => n + r.count, 0))
+const totalCount = computed(() => Math.max(1, stageRows.value.reduce((n, r) => n + r.count, 0)))
 
 const reminders = computed(() => remindersStore.reminders.slice(0, 5))
 

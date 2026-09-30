@@ -138,6 +138,23 @@ export function fetchBoard(params: {
   return apiClient.get(`/api/leads/board?${p}`)
 }
 
+// StageStat is one stage's dashboard aggregate: the true live-lead count and
+// the summed value of those leads (GET /api/leads/stats).
+export interface StageStat {
+  stage_id: string
+  count: number
+  value_sum: number
+}
+
+export interface LeadStats {
+  stages: StageStat[]
+}
+
+export function fetchLeadStats(params: { pipelineId: string }): Promise<ApiResponse<LeadStats>> {
+  const p = new URLSearchParams({ pipeline_id: params.pipelineId })
+  return apiClient.get(`/api/leads/stats?${p}`)
+}
+
 export function getLead(id: string): Promise<ApiResponse<Lead>> {
   return apiClient.get(`/api/leads/${id}`)
 }

@@ -148,6 +148,39 @@ func (h *Handler) Board(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, http.StatusOK, board, nil, nil)
 }
 
+// Stats returns per-stage dashboard aggregates (live-lead count and summed
+// value) for one pipeline. pipeline_id is required; the payload is bounded by
+// the stage count, never by lead volume.
+func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
+	pipelineID := r.URL.Query().Get("pipeline_id")
+	if pipelineID == "" {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "pipeline_id is required"},
+			nil,
+		)
+		return
+	}
+	if !util.IsUUID(pipelineID) {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "pipeline_id must be a valid id"},
+			nil,
+		)
+		return
+	}
+	stats, err := h.svc.stats(pipelineID)
+	if err != nil {
+		respond.ServerError(w, err)
+		return
+	}
+	respond.JSON(w, http.StatusOK, stats, nil, nil)
+}
+
 // leadFilterError validates the shared list/board query filters and returns a
 // client-facing message, or "" when every value is valid. "none" is valid only
 // for assigned_to (the unassigned sentinel); id filters must be UUIDs.
