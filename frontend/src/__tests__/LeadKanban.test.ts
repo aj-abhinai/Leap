@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { nextTick } from 'vue'
+import { nextTick, type Component } from 'vue'
 import LeadKanban from '@/components/leads/LeadKanban.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import draggable from 'vuedraggable'
 import { useUsersStore } from '@/stores/users'
+import { useRBACStore } from '@/stores/rbac'
 import type { Lead } from '@/stores/leads'
 import type { Stage } from '@/stores/pipeline'
 
@@ -52,7 +53,7 @@ function makeLead(overrides: Partial<Lead>): Lead {
   } as Lead
 }
 
-function mountKanban(lead: Lead = makeLead({})) {
+function mountKanban(lead: Lead = makeLead({}), draggableStub: boolean | Component = true) {
   const pinia = createPinia()
   setActivePinia(pinia)
   const users = useUsersStore()
@@ -70,7 +71,7 @@ function mountKanban(lead: Lead = makeLead({})) {
     },
     global: {
       plugins: [pinia],
-      stubs: { draggable: true, ConfirmDialog: true },
+      stubs: { draggable: draggableStub, ConfirmDialog: true },
     },
   })
 }
@@ -192,5 +193,37 @@ describe('LeadKanban close confirmation', () => {
 
     expect(wrapper.findComponent(ConfirmDialog).props('open')).toBe(false)
     expect(wrapper.emitted('moveStage')).toEqual([['lead-1', 'stage-won', 'stage-lost']])
+  })
+
+  it('asks before closing an open lead from the card menu', async () => {
+    const lead = makeLead({})
+    // The default draggable stub swallows the item slot; render it so the
+    // card (and its menu) exist in the DOM.
+    const slotDraggable = {
+      props: ['list'],
+      template: '<div><div v-for="item in list" :key="item.id"><slot name="item" :element="item" /></div></div>',
+    }
+    const wrapper = mountKanban(lead, slotDraggable)
+    const rbac = useRBACStore()
+    rbac.permissions = ['lead:write']
+    await flushPromises()
+
+    const trigger = wrapper.get('button[aria-label="Lead actions"]')
+    await trigger.trigger('click')
+    await nextTick()
+    await flushPromises()
+
+    const items = Array.from(document.querySelectorAll('[role="menuitem"]'))
+    const closeItem = items.find((el) => el.textContent?.includes('Move to Closed Lost'))
+    expect(closeItem).toBeTruthy()
+
+    closeItem!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await nextTick()
+
+    const dialog = wrapper.findComponent(ConfirmDialog)
+    expect(dialog.props('open')).toBe(true)
+    expect(dialog.props('title')).toContain('Closed Lost')
+    expect(wrapper.emitted('moveStage')).toBeUndefined()
+    wrapper.unmount()
   })
 })

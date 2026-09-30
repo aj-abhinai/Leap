@@ -140,6 +140,10 @@ export function useLeadPipeline() {
       if (!announce) return
       if (data.spawned) {
         toast.success('New lead cycle started')
+      } else if (data.lead.stage_outcome !== 'open') {
+        // The move closed the lead. Closing is terminal; a true undo cannot
+        // exist, so offer none.
+        toast.success('Lead closed')
       } else {
         toast.success('Lead moved', {
           action: previousStageId

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import LeadForm from '@/components/leads/LeadForm.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import type { Stage } from '@/api/pipelines'
 import { apiClient } from '@/composables/useApi'
 
@@ -57,7 +59,7 @@ function mountForm(props: Record<string, any> = {}) {
       pipelineId: 'p1',
       ...props,
     },
-    global: { plugins: [createPinia()] },
+    global: { plugins: [createPinia()], stubs: { ConfirmDialog: true } },
     attachTo: document.body,
   })
 }
@@ -203,6 +205,38 @@ describe('LeadForm', () => {
     const input = wrapper.find('input[placeholder="Search by name, phone or email"]')
     expect(input.attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('contact:read permission required to search contacts')
+    wrapper.unmount()
+  })
+
+  it('asks before a closing edit and saves on confirm', async () => {
+    const wrapper = mountForm({
+      editingLead: {
+        id: 'l1',
+        stage_id: 's-closed',
+        stage_outcome: 'open',
+        pipeline_id: 'p1',
+        display_name: 'Alice',
+        contact_id: 'c1',
+      },
+    })
+    await flushPromises()
+
+    const updateBtn = wrapper.findAll('button').find((b) => b.text() === 'Update')
+    expect(updateBtn).toBeTruthy()
+    await updateBtn!.trigger('click')
+    await flushPromises()
+
+    const dialog = wrapper.findComponent(ConfirmDialog)
+    expect(dialog.props('open')).toBe(true)
+    expect(dialog.props('title')).toContain('Closed Lost')
+    expect(wrapper.emitted('save')).toBeUndefined()
+
+    dialog.vm.$emit('confirm')
+    await nextTick()
+
+    expect(wrapper.emitted('save')).toHaveLength(1)
+    expect(wrapper.emitted('save')![0][0]).toMatchObject({ stage_id: 's-closed', contact_id: 'c1' })
+    expect(dialog.props('open')).toBe(false)
     wrapper.unmount()
   })
 })

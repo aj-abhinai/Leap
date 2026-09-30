@@ -342,6 +342,17 @@ function handleDragChange(evt: { added?: { element: Lead } }, newStageId: string
   emit('moveStage', evt.added.element.id!, newStageId, previousStageId)
 }
 
+// Closing is destructive: the card menu asks first, exactly like a drag
+// into a closing column.
+function askCloseMove(lead: Lead, target: Stage) {
+  pendingClose.value = {
+    leadId: lead.id!,
+    newStageId: target.id,
+    previousStageId: lead.stage_id,
+    stageName: target.name,
+  }
+}
+
 function confirmCloseMove() {
   const p = pendingClose.value
   if (p) emit('moveStage', p.leadId, p.newStageId, p.previousStageId)
@@ -477,8 +488,11 @@ function showField(key: string): boolean {
             <template #item="{ element: lead }">
               <div
                 :key="lead.id"
+                role="button"
+                tabindex="0"
                 class="group relative rounded-lg border bg-card p-3 text-sm shadow-sm transition-all hover:border-primary/20 hover:shadow-md cursor-pointer"
                 @click="emit('viewActivities', lead)"
+                @keydown.enter.self.prevent="emit('viewActivities', lead)"
               >
                 <div class="absolute left-2 top-2 z-10">
                   <Checkbox
@@ -515,7 +529,7 @@ function showField(key: string): boolean {
                         <template v-for="s in moveTargets[col.id]" :key="s.id">
                           <DropdownMenuItem
                             v-if="rbac.can('lead:write')"
-                            @click.stop="emit('moveStage', lead.id!, s.id)"
+                            @click.stop="s.outcome !== 'open' && !isClosedLead(lead) ? askCloseMove(lead, s) : emit('moveStage', lead.id!, s.id)"
                           >
                             <ChevronRight class="mr-2 size-3.5" />
                             Move to {{ s.name }}

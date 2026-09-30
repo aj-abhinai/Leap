@@ -27,6 +27,7 @@ import { errorMessage } from '@/utils/errors'
 import { listContacts, resolveContactByPhone, type ResolveMatch } from '@/api/contacts'
 import { listPrograms, type Program } from '@/api/programs'
 import { createLeadActivity, type OpenLeadRef } from '@/api/leads'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 export interface PrefillContact {
   id: string
@@ -100,6 +101,9 @@ function defaultStageId(): string {
 
 const formStageId = shallowRef(defaultStageId())
 const formError = shallowRef('')
+// A save that closes an open lead is held here until the user confirms:
+// closing is destructive and terminal, so the edit form asks first.
+const pendingCloseBody = shallowRef<LeadSaveBody | null>(null)
 
 // Contact picker state
 const contactSearch = shallowRef('')
@@ -364,7 +368,32 @@ async function handleSave() {
     body.contact_id = linkedContactId.value
   }
 
+  // Closing the lead is destructive and terminal; hold the save until the
+  // user confirms the move.
+  if (isEditing.value && isClosingStage.value && props.editingLead?.stage_outcome === 'open') {
+    pendingCloseBody.value = body
+    return
+  }
+
   emit('save', body)
+}
+
+const closeConfirmTitle = computed(() =>
+  pendingCloseBody.value ? `Close this deal in "${selectedStage.value?.name}"?` : '',
+)
+
+function confirmCloseSave() {
+  const body = pendingCloseBody.value
+  pendingCloseBody.value = null
+  if (body) emit('save', body)
+}
+
+function cancelCloseSave() {
+  pendingCloseBody.value = null
+}
+
+function handleCloseDialogUpdate(open: boolean) {
+  if (!open) pendingCloseBody.value = null
 }
 
 function linkResolvedMatch(m: ResolveMatch) {
@@ -625,5 +654,15 @@ function createNewPersonInstead() {
         </Button>
       </div>
     </div>
+    <ConfirmDialog
+      :open="pendingCloseBody !== null"
+      :title="closeConfirmTitle"
+      description="Open tasks on this deal will be cancelled and the record becomes terminal."
+      confirm-text="Close deal"
+      destructive
+      @update:open="handleCloseDialogUpdate"
+      @confirm="confirmCloseSave"
+      @cancel="cancelCloseSave"
+    />
   </div>
 </template>

@@ -86,10 +86,11 @@ function isUpcoming(a: LeadActivity): boolean {
   return !isTouchpoint(a) && !isOverdue(a)
 }
 
-// Upcoming sorted by soonest first; overdue sink to the top.
+// Upcoming sorted by soonest first; overdue sink to the top. Cancelled tasks
+// are history, not open work: they never belong to the actionable buckets.
 const openActivities = computed(() => {
   return activities.value
-    .filter((a) => !isTouchpoint(a))
+    .filter((a) => !isTouchpoint(a) && !a.is_cancelled)
     .sort((x, y) => {
       const tx = new Date(x.scheduled_end_at || x.scheduled_at || x.remind_at || x.created_at).getTime()
       const ty = new Date(y.scheduled_end_at || y.scheduled_at || y.remind_at || y.created_at).getTime()
@@ -99,7 +100,7 @@ const openActivities = computed(() => {
 
 const overdueActivities = computed(() => openActivities.value.filter(isOverdue))
 const upcomingActivities = computed(() => openActivities.value.filter(isUpcoming))
-const doneActivities = computed(() => activities.value.filter(isTouchpoint))
+const doneActivities = computed(() => activities.value.filter((a) => isTouchpoint(a) || a.is_cancelled))
 
 const visibleDone = computed(() =>
   historyExpanded.value ? doneActivities.value : doneActivities.value.slice(0, RECENT_LIMIT),

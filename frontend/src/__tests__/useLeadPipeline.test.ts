@@ -12,10 +12,11 @@ vi.mock('@/api/leads', () => ({
 const { toast } = vi.hoisted(() => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('vue-sonner', () => ({ toast }))
 
-import { fetchBoard } from '@/api/leads'
+import { fetchBoard, updateLead } from '@/api/leads'
 import { useLeadPipeline } from '@/composables/useLeadPipeline'
 
 const fetchBoardMock = vi.mocked(fetchBoard)
+const updateLeadMock = vi.mocked(updateLead)
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -31,14 +32,14 @@ function boardWith(lead: Lead): ApiResponse<Board> {
   return { data: { stages: [{ stage_id: 's1', count: 1, leads: [lead] }] } }
 }
 
-function makeLead(id: string): Lead {
+function makeLead(id: string, stageOutcome: 'open' | 'won' | 'lost' = 'open'): Lead {
   return {
     id,
     display_name: id,
     contact_id: 'c1',
     pipeline_id: 'p1',
     stage_id: 's1',
-    stage_outcome: 'open',
+    stage_outcome: stageOutcome,
     created_at: '2026-09-01T00:00:00Z',
     updated_at: '2026-09-01T00:00:00Z',
   }
@@ -102,5 +103,36 @@ describe('useLeadPipeline loadLeads sequence guard', () => {
 
     expect(toast.error).not.toHaveBeenCalled()
     expect(pipeline.kanbanColumns.value[0].leads.map((l) => l.id)).toEqual(['lead-new'])
+  })
+})
+
+describe('useLeadPipeline moveStage toasts', () => {
+  beforeEach(() => {
+    updateLeadMock.mockReset()
+    fetchBoardMock.mockReset().mockResolvedValue(boardWith(makeLead('lead-1')))
+    toast.error.mockReset()
+    toast.success.mockReset()
+  })
+
+  it('offers Undo for an open-to-open move', async () => {
+    updateLeadMock.mockResolvedValue({ data: { lead: makeLead('lead-1'), spawned: false } })
+    const pipeline = setupPipeline()
+
+    await pipeline.moveStage('lead-1', 's2', 's1')
+
+    expect(toast.success).toHaveBeenCalledWith(
+      'Lead moved',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) }),
+    )
+  })
+
+  it('toasts "Lead closed" with no Undo when the move closes the lead', async () => {
+    updateLeadMock.mockResolvedValue({ data: { lead: makeLead('lead-1', 'lost'), spawned: false } })
+    const pipeline = setupPipeline()
+
+    await pipeline.moveStage('lead-1', 's2', 's1')
+
+    expect(toast.success).toHaveBeenCalledWith('Lead closed')
+    expect(toast.success).not.toHaveBeenCalledWith('Lead moved', expect.anything())
   })
 })

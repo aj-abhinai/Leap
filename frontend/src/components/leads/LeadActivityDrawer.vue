@@ -141,11 +141,14 @@ function newLeadForContact() {
       </SheetHeader>
       <div v-if="lead" class="flex-1 space-y-4 overflow-y-auto px-6 py-4">
         <LeadActivityForm
-          v-if="rbac.can('lead:write')"
+          v-if="rbac.can('lead:write') && !isClosed()"
           :lead-id="lead.id!"
           @saved="handleSaved"
           @close-lost="handleCloseLost"
         />
+        <p v-else-if="rbac.can('lead:write') && isClosed()" class="text-xs text-muted-foreground">
+          This deal is closed. Tasks are read-only.
+        </p>
         <LeadActivity :lead-id="lead.id!" @close-lost="handleCloseLost" @tasks-changed="handleTasksChanged" />
         <LeadStageHistory :lead-id="lead.id!" />
       </div>
