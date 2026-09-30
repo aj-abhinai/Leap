@@ -195,3 +195,36 @@ export function listLeadHistory(leadId: string): Promise<ApiResponse<StageHistor
 export function listLeadsByContact(contactId: string): Promise<ApiResponse<Lead[]>> {
   return apiClient.get(`/api/leads?contact_id=${encodeURIComponent(contactId)}`)
 }
+
+// BulkLeadCreateBody is the POST /api/leads/bulk payload: one shared
+// pipeline/stage/program/assignee, one lead per contact id (max 500).
+export interface BulkLeadCreateBody {
+  contact_ids: string[]
+  pipeline_id: string
+  stage_id: string
+  program_id?: string
+  assigned_to?: string
+}
+
+// BulkLeadRowError is one non-created contact from a bulk run. outcome is
+// 'skipped' (an open lead already holds the slot) or 'failed' (a
+// contact-level error).
+export interface BulkLeadRowError {
+  contact_id: string
+  name: string
+  outcome: 'skipped' | 'failed'
+  message: string
+}
+
+// BulkLeadCreateResult reports one bulk run: counts plus one row entry for
+// every non-created contact.
+export interface BulkLeadCreateResult {
+  created: number
+  skipped: number
+  failed: number
+  errors?: BulkLeadRowError[]
+}
+
+export function bulkCreateLeads(body: BulkLeadCreateBody): Promise<ApiResponse<BulkLeadCreateResult>> {
+  return apiClient.post('/api/leads/bulk', body)
+}

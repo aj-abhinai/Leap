@@ -30,6 +30,9 @@ import ContactForm, { type ContactSaveBody } from '@/components/contacts/Contact
 import ContactCompactCard from '@/components/contacts/ContactCompactCard.vue'
 import ContactSpreadsheet from '@/components/contacts/ContactSpreadsheet.vue'
 import CsvImport from '@/components/contacts/CsvImport.vue'
+import CreateLeadsDialog from '@/components/contacts/CreateLeadsDialog.vue'
+import { Checkbox } from '@/components/ui/checkbox'
+import { useContactSelection } from '@/composables/useContactSelection'
 import ContactsToolbar, { type ContactViewMode } from '@/components/contacts/ContactsToolbar.vue'
 import ContactsPagination from '@/components/contacts/ContactsPagination.vue'
 import ContactDeleteDialog from '@/components/contacts/ContactDeleteDialog.vue'
@@ -73,6 +76,31 @@ onMounted(() => {
 })
 
 const importOpen = shallowRef(false)
+
+// ---- bulk lead entry ----
+const canLeadWrite = computed(() => rbac.can('lead:write'))
+const {
+  selectedIds,
+  count: selectedCount,
+  isSelected,
+  pageCheckState,
+  toggle: toggleSelect,
+  togglePage,
+  clear: clearSelection,
+} = useContactSelection(() => store.contacts.map((c) => c.id))
+const leadsDialogOpen = shallowRef(false)
+const selectedContactIds = computed(() => [...selectedIds.value])
+
+function closeLeadsDialog() {
+  leadsDialogOpen.value = false
+}
+
+// A finished run clears the selection: the contacts now hold the leads the
+// operator asked for, and the report has been read.
+function finishLeadsDialog() {
+  leadsDialogOpen.value = false
+  clearSelection()
+}
 
 // loadContacts fetches the current page, clamping back to the last page when
 // it falls past the end (e.g. after a delete). Failures surface as a banner
@@ -198,11 +226,31 @@ async function handleDelete() {
 
     <ErrorAlert v-if="loadError" :error="loadError" title="Failed to load contacts" @retry="loadContacts()" />
 
+    <div
+      v-if="canLeadWrite && selectedCount > 0"
+      class="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-lg border bg-card/95 px-3 py-2 shadow-sm backdrop-blur"
+    >
+      <span class="text-sm font-medium tabular-nums">{{ selectedCount }} selected</span>
+      <Button size="sm" @click="leadsDialogOpen = true">
+        <FolderKanban class="mr-2 size-3.5" /> Add to lead
+      </Button>
+      <Button size="sm" variant="ghost" @click="clearSelection()">Clear</Button>
+    </div>
+
     <template v-if="viewMode === 'table'">
       <div class="w-full min-w-0 overflow-x-auto rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow class="hover:bg-transparent">
+              <TableHead v-if="canLeadWrite" class="w-10">
+                <Checkbox
+                  :model-value="pageCheckState()"
+                  class="size-4"
+                  aria-label="Select all on this page"
+                  @click.stop
+                  @update:model-value="togglePage()"
+                />
+              </TableHead>
               <TableHead class="w-12" />
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
@@ -217,13 +265,13 @@ async function handleDelete() {
           <TableBody>
             <template v-if="store.loading">
               <TableRow v-for="i in 8" :key="i">
-                <TableCell v-for="j in 9" :key="j">
+                <TableCell v-for="j in canLeadWrite ? 10 : 9" :key="j">
                   <Skeleton class="h-5 w-full" />
                 </TableCell>
               </TableRow>
             </template>
             <TableRow v-else-if="store.contacts.length === 0">
-              <TableCell colspan="9">
+              <TableCell :colspan="canLeadWrite ? 10 : 9">
                 <div class="flex flex-col items-center justify-center py-12 text-center">
                   <Users class="size-10 text-muted-foreground/40 mb-3" />
                   <p class="text-sm font-medium text-muted-foreground">No contacts found</p>
@@ -234,6 +282,15 @@ async function handleDelete() {
               </TableCell>
             </TableRow>
             <TableRow v-else v-for="c in store.contacts" :key="c.id" class="group">
+              <TableCell v-if="canLeadWrite">
+                <Checkbox
+                  :model-value="isSelected(c.id)"
+                  class="size-4"
+                  :aria-label="`Select ${c.name}`"
+                  @click.stop
+                  @update:model-value="toggleSelect(c.id)"
+                />
+              </TableCell>
               <TableCell>
                 <div
                   class="flex size-8 items-center justify-center rounded-full text-xs font-medium"
@@ -313,7 +370,11 @@ async function handleDelete() {
     <ContactSpreadsheet
       v-else
       :contacts="store.contacts"
+      :selected-ids="canLeadWrite ? selectedIds : undefined"
+      :check-state="canLeadWrite ? pageCheckState() : undefined"
       @row-click="(id) => router.push({ name: 'ContactDetail', params: { id } })"
+      @toggle="toggleSelect"
+      @toggle-page="togglePage"
     />
 
     <Sheet v-model:open="drawerOpen">
@@ -348,5 +409,11 @@ async function handleDelete() {
       @next="nextPage"
     />
   </div>
+  <CreateLeadsDialog
+    :open="leadsDialogOpen"
+    :contact-ids="selectedContactIds"
+    @close="closeLeadsDialog"
+    @done="finishLeadsDialog"
+  />
   <CsvImport :open="importOpen" @close="importOpen = false; loadContacts()" />
 </template>

@@ -192,6 +192,9 @@ func main() {
 			r.Get("/api/leads", middleware.RequirePermission(rbacSvc, "lead:read", leadH.List))
 			r.Get("/api/leads/board", middleware.RequirePermission(rbacSvc, "lead:read", leadH.Board))
 			r.Post("/api/leads", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Create))
+			// Bulk entry for selected contacts; registered before the
+			// /api/leads/{id} routes so the literal path wins.
+			r.Post("/api/leads/bulk", middleware.RequirePermission(rbacSvc, "lead:write", leadH.BulkCreate))
 			r.Get("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:read", leadH.Get))
 			r.Patch("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Update))
 			r.Delete("/api/leads/{id}", middleware.RequirePermission(rbacSvc, "lead:write", leadH.Delete))

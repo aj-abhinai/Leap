@@ -191,7 +191,9 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 		errors.Is(err, ErrInvalidQuickReply), errors.Is(err, ErrEmptyType),
 		errors.Is(err, ErrInvalidRange), errors.Is(err, ErrSpawnOnlyStage),
 		errors.Is(err, ErrContactNotActive), errors.Is(err, ErrInvalidAssignee),
-		errors.Is(err, ErrInvalidContactID), errors.Is(err, ErrNothingToUpdate):
+		errors.Is(err, ErrInvalidContactID), errors.Is(err, ErrNothingToUpdate),
+		errors.Is(err, ErrBulkNoContacts), errors.Is(err, ErrBulkLimit),
+		errors.Is(err, ErrBulkInvalidID), errors.Is(err, ErrBulkInvalidField):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -278,6 +280,45 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		w,
 		http.StatusCreated,
 		l,
+		nil,
+		nil,
+	)
+}
+
+// BulkCreate creates one lead per selected contact under a shared pipeline,
+// stage, program, and assignee. Shared fields are validated before any write;
+// contact-level outcomes (skipped, failed) are reported per row.
+func (h *Handler) BulkCreate(w http.ResponseWriter, r *http.Request) {
+	var req BulkCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "Invalid JSON"},
+			nil,
+		)
+		return
+	}
+	if req.PipelineID == "" || req.StageID == "" {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: "BAD_REQUEST", Message: "pipeline_id and stage_id are required"},
+			nil,
+		)
+		return
+	}
+	resp, err := h.svc.bulkCreate(req, ctxutil.GetUserID(r))
+	if err != nil {
+		respondLeadMutationError(w, err)
+		return
+	}
+	respond.JSON(
+		w,
+		http.StatusOK,
+		resp,
 		nil,
 		nil,
 	)
