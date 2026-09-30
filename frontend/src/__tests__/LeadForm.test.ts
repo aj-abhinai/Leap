@@ -197,6 +197,26 @@ describe('LeadForm', () => {
     wrapper.unmount()
   })
 
+  it('blocks a digitless new-contact phone before the resolve call', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+
+    const newContactBtn = wrapper.findAll('button').find((b) => b.text() === 'New contact')
+    await newContactBtn!.trigger('click')
+    await wrapper.find('#nc-name').setValue('Fresh Person')
+    await wrapper.find('#nc-phone').setValue('abc')
+    await wrapper.find('#nc-email').setValue('fresh@example.com')
+
+    const createBtn = wrapper.findAll('button').find((b) => b.text() === 'Create')
+    await createBtn!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Phone must contain at least one digit')
+    expect(getMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/contacts/resolve'))
+    expect(wrapper.emitted('save')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('disables the search box and shows the hint without contact:read', async () => {
     rbacCan = (permission: string) => permission !== 'contact:read'
     const wrapper = mountForm()

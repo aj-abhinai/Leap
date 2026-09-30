@@ -879,6 +879,20 @@ func TestListCapsPerPageHandlerIntegration(t *testing.T) {
 	}
 }
 
+func TestCreateContactDigitlessPhoneHandlerIntegration(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db), stubPerms{can: true})
+
+	body, _ := json.Marshal(CreateRequest{Name: "Alice", Phone: "abc", Email: "alice@example.com"})
+	rr := httptest.NewRecorder()
+	h.Create(rr, httptest.NewRequest(http.MethodPost, "/api/contacts", bytes.NewReader(body)))
+
+	errResp := assertAPIError(t, rr, http.StatusBadRequest, "BAD_REQUEST")
+	if errResp.Message != "phone must contain at least one digit" {
+		t.Errorf("message = %q, want the digitless-phone message", errResp.Message)
+	}
+}
+
 func TestUpdateContactClearsNullableFieldsIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
@@ -982,6 +996,16 @@ func TestCreateContactRejectsDigitlessPhoneIntegration(t *testing.T) {
 	phones := []PhoneValue{{Value: "abc", IsPrimary: true}}
 	if _, err := svc.create(CreateRequest{Name: "Bob", Phones: phones, Email: "bob@example.com"}); !errors.Is(err, ErrInvalidPhone) {
 		t.Errorf("create with digitless phone list = %v, want ErrInvalidPhone", err)
+	}
+
+	// A whitespace-only scalar is blank, not invalid: it counts as no phone,
+	// matching update, bulk import, and lead entry.
+	blanked, err := svc.create(CreateRequest{Name: "Carol", Phone: "   ", Email: "carol@example.com"})
+	if err != nil {
+		t.Fatalf("create with blank scalar phone: %v", err)
+	}
+	if blanked.Phone != "" {
+		t.Errorf("phone = %q, want empty (blank input is not stored)", blanked.Phone)
 	}
 }
 

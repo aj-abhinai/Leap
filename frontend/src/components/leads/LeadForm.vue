@@ -342,6 +342,12 @@ async function handleSave() {
       formError.value = 'A phone or email is required for a new contact'
       return
     }
+    // A non-blank phone with no digits is rejected by the server; surface it
+    // before the resolve round-trip.
+    if (newContactPhone.value.trim() && !/\d/.test(newContactPhone.value)) {
+      formError.value = 'Phone must contain at least one digit'
+      return
+    }
     if (!resolvedOnce.value && newContactPhone.value.trim()) {
       try {
         const res = await resolveContactByPhone(newContactPhone.value.trim())

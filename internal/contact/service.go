@@ -474,7 +474,9 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 		canonical := util.CanonicalPhone(req.Phone, defaultCC)
 		// A non-blank input that canonicalizes to empty is free text, not a
 		// phone; storing it would silently drop the number the user typed.
-		if canonical == "" {
+		// A blank input ("" or spaces) counts as no phone, matching update,
+		// bulk import, and lead entry.
+		if canonical == "" && strings.TrimSpace(req.Phone) != "" {
 			return nil, ErrInvalidPhone
 		}
 		req.Phone = canonical

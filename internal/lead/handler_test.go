@@ -1,7 +1,9 @@
 package lead
 
 import (
+	"bytes"
 	"crm/internal/testdb"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -86,5 +88,36 @@ func TestStatsRejectsInvalidPipeline(t *testing.T) {
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("%q: status = %d, want 400", q, rr.Code)
 		}
+	}
+}
+
+func TestCreateLeadDigitlessPhoneReturns400(t *testing.T) {
+	db := testdb.New(t)
+	h := NewHandler(NewService(db))
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+
+	raw, _ := json.Marshal(map[string]any{
+		"new_contact": map[string]any{"name": "Alice", "phone": "abc", "email": "alice@example.com"},
+		"pipeline_id": pipelineID,
+		"stage_id":    stageID,
+	})
+	rr := httptest.NewRecorder()
+	h.Create(rr, httptest.NewRequest(http.MethodPost, "/api/leads", bytes.NewReader(raw)))
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Error.Code != "BAD_REQUEST" || payload.Error.Message != "phone must contain at least one digit" {
+		t.Errorf("error = %+v, want BAD_REQUEST with the digitless-phone message", payload.Error)
 	}
 }
