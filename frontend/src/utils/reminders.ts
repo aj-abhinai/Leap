@@ -1,10 +1,11 @@
 import { Phone, MessageCircle, Mail, NotepadText, CalendarClock, CheckCheck } from '@lucide/vue'
-import { toLocalDateInput, toLocalTimeInput } from './time'
+import { formatDate, formatDateTime, isAllDayRange, toLocalDateInput, toLocalTimeInput } from './time'
 
 export interface ReminderLike {
   type: string
   description?: string | null
   scheduled_at?: string | null
+  scheduled_end_at?: string | null
   remind_at?: string | null
 }
 
@@ -28,10 +29,16 @@ export function formatReminderText(r: ReminderLike): string {
 
 export function formatReminderTime(r: ReminderLike): string {
   if (r.scheduled_at) {
-    return `Scheduled for ${new Date(r.scheduled_at).toLocaleString()}`
+    if (isAllDayRange(r.scheduled_at, r.scheduled_end_at)) {
+      return `Scheduled for ${formatDate(r.scheduled_at)} (all day)`
+    }
+    if (r.scheduled_end_at) {
+      return `Scheduled for ${formatDateTime(r.scheduled_at)} – ${formatDateTime(r.scheduled_end_at)}`
+    }
+    return `Scheduled for ${formatDateTime(r.scheduled_at)}`
   }
   if (r.remind_at) {
-    return `Reminder at ${new Date(r.remind_at).toLocaleString()}`
+    return `Reminder at ${formatDateTime(r.remind_at)}`
   }
   return ''
 }

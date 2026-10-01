@@ -78,4 +78,45 @@ describe('LeadActivityForm', () => {
     expect(payload.scheduled_at).toBeUndefined()
     expect(payload.remind_at).toBeUndefined()
   })
+
+  // A new open task needs a date: the save stops before the API call.
+  it('requires a date for a new open task', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 'Call')
+    await flushPromises()
+
+    const save = wrapper.findAll('button').find((b) => b.text() === 'Save')
+    expect(save).toBeTruthy()
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Date is required')
+    expect(createMock).not.toHaveBeenCalled()
+  })
+
+  // A date without a time is an all-day task: the local day plus a 09:00 nudge.
+  it('sends an all-day window when only a date is set', async () => {
+    const wrapper = mountForm()
+    await flushPromises()
+
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 'Call')
+    await flushPromises()
+
+    const more = wrapper.findAll('button').find((b) => b.text().includes('More options'))
+    await more!.trigger('click')
+
+    await wrapper.find('input[type="date"]').setValue('2026-09-30')
+
+    const save = wrapper.findAll('button').find((b) => b.text() === 'Save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(createMock).toHaveBeenCalledTimes(1)
+    const payload = createMock.mock.calls[0][1]
+    expect(payload.scheduled_at).toBe(new Date(2026, 8, 30).toISOString())
+    expect(payload.scheduled_end_at).toBe(new Date(new Date(2026, 9, 1).getTime() - 1).toISOString())
+    expect(payload.remind_at).toBe(new Date(2026, 8, 30, 9, 0, 0).toISOString())
+  })
 })

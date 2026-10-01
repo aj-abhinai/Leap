@@ -21,4 +21,12 @@ describe('dueLabel', () => {
   it('is empty when there is no due boundary', () => {
     expect(dueLabel({ created_at: '2026-10-01T00:00:00Z' })).toBe('')
   })
+
+  it('shows an all-day task as its date', () => {
+    const start = new Date(2026, 8, 30).toISOString()
+    const end = new Date(new Date(2026, 9, 1).getTime() - 1).toISOString()
+    expect(dueLabel({ scheduled_at: start, scheduled_end_at: end })).toBe(
+      `${new Date(start).toLocaleDateString()} (all day)`,
+    )
+  })
 })

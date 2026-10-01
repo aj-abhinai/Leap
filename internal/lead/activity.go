@@ -839,9 +839,9 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 	case "created_at":
 		orderBy = "la.created_at"
 	case "due_at":
-		orderBy = "COALESCE(la.remind_at, la.scheduled_at, la.created_at)"
+		orderBy = "COALESCE(la.scheduled_end_at, la.scheduled_at, la.remind_at, la.created_at)"
 	default:
-		orderBy = "COALESCE(la.remind_at, la.scheduled_at, la.created_at)"
+		orderBy = "COALESCE(la.scheduled_end_at, la.scheduled_at, la.remind_at, la.created_at)"
 	}
 	offset := util.Offset(f.Page, f.PerPage)
 

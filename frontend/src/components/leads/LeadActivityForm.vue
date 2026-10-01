@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { ChevronDown, ChevronUp, Check } from '@lucide/vue'
 import { nextPresets, groupQuickReplies, findSelectedPreset, type NextPreset } from '@/utils/reminders'
-import { toLocalDateInput, toLocalTimeInput, mergeDateTime } from '@/utils/time'
+import { toLocalDateInput, toLocalTimeInput, mergeDateTime, allDayRange } from '@/utils/time'
 import { getNudgeLeadMinutes } from '@/api/settings'
 import { errorMessage } from '@/utils/errors'
 
@@ -227,9 +227,32 @@ async function handleSave() {
       payload.is_done = true
     }
   } else {
-    payload.scheduled_at = slotPayload(schedule.start)
-    payload.scheduled_end_at = slotPayload(schedule.end)
-    payload.remind_at = slotPayload(schedule.remind)
+    // A new open task needs a date; a time is optional (a date alone becomes an
+    // all-day task). A picked quick reply already completes the task, so no
+    // schedule is collected for it.
+    if (!quickReplyId.value) {
+      const date = schedule.start.date
+      const time = schedule.start.time
+      if (!date) {
+        error.value = 'Date is required'
+        return
+      }
+      if (!time) {
+        // A date with no time is an all-day task: the local day plus a 09:00 nudge.
+        const day = allDayRange(date)
+        if (!day) {
+          error.value = 'Enter a valid date'
+          return
+        }
+        payload.scheduled_at = day.start
+        payload.scheduled_end_at = day.end
+        payload.remind_at = day.remind
+      } else {
+        payload.scheduled_at = mergeDateTime(date, time)
+        payload.scheduled_end_at = slotPayload(schedule.end)
+        payload.remind_at = slotPayload(schedule.remind)
+      }
+    }
     // A close_lost quick reply completes the activity immediately so it is logged
     // as the closing touchpoint, not cancelled by the subsequent stage move.
     if (wasCloseLost) {

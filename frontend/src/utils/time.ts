@@ -4,6 +4,17 @@ export function timeAgo(dateStr: string): string {
   if (isNaN(then)) return ''
   const now = Date.now()
   const diff = now - then
+  // Future times read "in 5m" / "in 2h" / "in 3d"; the Dashboard reminder rows
+  // pass nudge times, which are future by definition. A sub-minute future stamp
+  // is clock skew on a server-stamped "now", so it keeps the "just now" reading.
+  if (diff < 0) {
+    if (diff > -60_000) return 'just now'
+    const ahead = Math.ceil(-diff / 60000)
+    if (ahead < 60) return `in ${Math.max(1, ahead)}m`
+    const hours = Math.floor(ahead / 60)
+    if (hours < 24) return `in ${hours}h`
+    return `in ${Math.floor(hours / 24)}d`
+  }
   const mins = Math.floor(diff / 60000)
   if (mins < 1) return 'just now'
   if (mins < 60) return `${mins}m ago`
@@ -106,6 +117,38 @@ export function dayWindow(day: string): DayWindow | null {
   }
   const end = new Date(year, month - 1, date + 1)
   return { from: start.toISOString(), to: new Date(end.getTime() - 1).toISOString() }
+}
+
+// AllDayRange is the UTC window of a local calendar day plus its 09:00 nudge.
+export interface AllDayRange {
+  start: string
+  end: string
+  remind: string
+}
+
+// allDayRange turns a "YYYY-MM-DD" day into the local day it spans: the first
+// and last millisecond, with the nudge at 09:00 local. dayWindow owns the
+// malformed and impossible-day checks.
+export function allDayRange(date: string): AllDayRange | null {
+  const w = dayWindow(date)
+  if (!w) return null
+  const remind = new Date(w.from)
+  remind.setHours(9, 0, 0, 0)
+  return { start: w.from, end: w.to, remind: remind.toISOString() }
+}
+
+// isAllDayRange reports whether a schedule is one local day: 00:00:00.000 to
+// 23:59:59.999 on the same local date.
+export function isAllDayRange(startIso?: string | null, endIso?: string | null): boolean {
+  if (!startIso || !endIso) return false
+  const s = new Date(startIso)
+  const e = new Date(endIso)
+  if (isNaN(s.getTime()) || isNaN(e.getTime())) return false
+  return (
+    s.getHours() === 0 && s.getMinutes() === 0 && s.getSeconds() === 0 && s.getMilliseconds() === 0 &&
+    e.getFullYear() === s.getFullYear() && e.getMonth() === s.getMonth() && e.getDate() === s.getDate() &&
+    e.getHours() === 23 && e.getMinutes() === 59 && e.getSeconds() === 59 && e.getMilliseconds() === 999
+  )
 }
 
 // dateWindow resolves the window for a preset. null means no window: 'all'

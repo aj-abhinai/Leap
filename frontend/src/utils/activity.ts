@@ -1,3 +1,5 @@
+import { formatDate, isAllDayRange } from './time'
+
 // Shared activity display helpers: status derivation and labels used by the
 // global activities list, the reminders page, and task rows.
 
@@ -35,7 +37,9 @@ export function due(item: Pick<ActivityStatusLike, 'scheduled_end_at' | 'schedul
 
 export function dueLabel(item: Pick<ActivityStatusLike, 'scheduled_end_at' | 'scheduled_at' | 'remind_at' | 'created_at'>): string {
   const t = due(item)
-  return t ? new Date(t).toLocaleString() : ''
+  if (!t) return ''
+  if (isAllDayRange(item.scheduled_at, item.scheduled_end_at)) return `${formatDate(t)} (all day)`
+  return new Date(t).toLocaleString()
 }
 
 // statusLabel returns the display status by precedence: cancelled, done,

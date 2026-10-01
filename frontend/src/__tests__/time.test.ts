@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dateWindow, dayWindow, presetWindow, toLocalDateInput, toLocalTimeInput, timeAgo } from '@/utils/time'
+import { allDayRange, dateWindow, dayWindow, isAllDayRange, presetWindow, toLocalDateInput, toLocalTimeInput, timeAgo } from '@/utils/time'
 
 // A fixed local instant: Wednesday 30 September 2026, 12:00. Expectations are
 // built from the same local-date primitives, so they hold in any time zone.
@@ -39,6 +39,46 @@ describe('timeAgo', () => {
     expect(timeAgo(new Date(now - 5 * 60_000).toISOString())).toBe('5m ago')
     expect(timeAgo(new Date(now - 2 * 60 * 60_000).toISOString())).toBe('2h ago')
     expect(timeAgo(new Date(now - 3 * 24 * 60 * 60_000).toISOString())).toBe('3d ago')
+  })
+
+  it('formats future times', () => {
+    const now = Date.now()
+    expect(timeAgo(new Date(now + 30_000).toISOString())).toBe('just now')
+    expect(timeAgo(new Date(now + 5 * 60_000).toISOString())).toBe('in 5m')
+    expect(timeAgo(new Date(now + 90 * 60_000).toISOString())).toBe('in 1h')
+    expect(timeAgo(new Date(now + 60 * 60_000).toISOString())).toBe('in 1h')
+    expect(timeAgo(new Date(now + 24 * 60 * 60_000).toISOString())).toBe('in 1d')
+    expect(timeAgo(new Date(now + 3 * 24 * 60 * 60_000).toISOString())).toBe('in 3d')
+  })
+})
+
+describe('allDayRange', () => {
+  it('spans the local day with a 09:00 reminder', () => {
+    expect(allDayRange('2026-09-30')).toEqual({
+      start: new Date(2026, 8, 30).toISOString(),
+      end: new Date(new Date(2026, 9, 1).getTime() - 1).toISOString(),
+      remind: new Date(2026, 8, 30, 9, 0, 0).toISOString(),
+    })
+  })
+
+  it('rejects malformed and impossible days', () => {
+    expect(allDayRange('2026-9-1')).toBeNull()
+    expect(allDayRange('2026-02-31')).toBeNull()
+  })
+})
+
+describe('isAllDayRange', () => {
+  it('matches a helper-built day', () => {
+    const day = allDayRange('2026-09-30')!
+    expect(isAllDayRange(day.start, day.end)).toBe(true)
+  })
+
+  it('rejects other schedules and missing inputs', () => {
+    const start = new Date(2026, 8, 30, 9, 0).toISOString()
+    const end = new Date(2026, 8, 30, 10, 0).toISOString()
+    expect(isAllDayRange(start, end)).toBe(false)
+    expect(isAllDayRange(undefined, end)).toBe(false)
+    expect(isAllDayRange(start, undefined)).toBe(false)
   })
 })
 

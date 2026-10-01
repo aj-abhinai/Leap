@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -21,7 +21,7 @@ import {
   MoreHorizontal, Trash2, CheckCircle2, Pencil, AlarmClockPlus, CalendarClock, Check,
 } from '@lucide/vue'
 import { nextPresets, reminderIcon, snoozePresets, groupQuickReplies, findSelectedPreset, type NextPreset } from '@/utils/reminders'
-import { formatDateTime, toLocalDateInput, toLocalTimeInput, mergeDateTime } from '@/utils/time'
+import { formatDateTime, formatDate, toLocalDateInput, toLocalTimeInput, mergeDateTime, allDayRange, isAllDayRange } from '@/utils/time'
 import { typeLabel } from '@/utils/activity'
 import { Badge } from '@/components/ui/badge'
 import { updateLeadActivity, type LeadActivity } from '@/api/leads'
@@ -72,13 +72,30 @@ function startEdit() {
   editing.value = true
   editType.value = props.activity.type
   editDescription.value = props.activity.description
-  editScheduledDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
-  editScheduledTime.value = props.activity.scheduled_at ? toLocalTimeInput(props.activity.scheduled_at) : ''
-  editEndDate.value = props.activity.scheduled_end_at ? toLocalDateInput(props.activity.scheduled_end_at) : ''
-  editEndTime.value = props.activity.scheduled_end_at ? toLocalTimeInput(props.activity.scheduled_end_at) : ''
+  // An all-day task prefills its date only: the day window is implied and
+  // rebuilt on save from the date alone.
+  if (isAllDayRange(props.activity.scheduled_at, props.activity.scheduled_end_at)) {
+    editScheduledDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
+    editScheduledTime.value = ''
+    editEndDate.value = ''
+    editEndTime.value = ''
+  } else {
+    editScheduledDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
+    editScheduledTime.value = props.activity.scheduled_at ? toLocalTimeInput(props.activity.scheduled_at) : ''
+    editEndDate.value = props.activity.scheduled_end_at ? toLocalDateInput(props.activity.scheduled_end_at) : ''
+    editEndTime.value = props.activity.scheduled_end_at ? toLocalTimeInput(props.activity.scheduled_end_at) : ''
+  }
   editRemindDate.value = props.activity.remind_at ? toLocalDateInput(props.activity.remind_at) : ''
   editRemindTime.value = props.activity.remind_at ? toLocalTimeInput(props.activity.remind_at) : ''
 }
+
+// The default all-day nudge sits on the start day. When the day moves, a
+// reminder still pinned to the old start day follows it; a custom reminder day
+// stays put.
+watch(editScheduledDate, (nextDate, prevDate) => {
+  if (!nextDate || editScheduledTime.value) return
+  if (editRemindDate.value === prevDate) editRemindDate.value = nextDate
+})
 
 function cancelEdit() {
   editing.value = false
@@ -91,11 +108,24 @@ async function saveEdit() {
   }
   savingEdit.value = true
   try {
+    // A date without a time is an all-day task; an empty date clears both ends.
+    let scheduledAt: string | null = null
+    let scheduledEnd: string | null = null
+    if (editScheduledDate.value && !editScheduledTime.value) {
+      const day = allDayRange(editScheduledDate.value)
+      if (day) {
+        scheduledAt = day.start
+        scheduledEnd = day.end
+      }
+    } else if (editScheduledDate.value && editScheduledTime.value) {
+      scheduledAt = mergeDateTime(editScheduledDate.value, editScheduledTime.value)
+      scheduledEnd = mergeDateTime(editEndDate.value, editEndTime.value)
+    }
     await updateLeadActivity(props.leadId, props.activity.id, {
       type: editType.value,
       description: editDescription.value.trim(),
-      scheduled_at: mergeDateTime(editScheduledDate.value, editScheduledTime.value),
-      scheduled_end_at: mergeDateTime(editEndDate.value, editEndTime.value),
+      scheduled_at: scheduledAt,
+      scheduled_end_at: scheduledEnd,
       remind_at: mergeDateTime(editRemindDate.value, editRemindTime.value),
     })
     toast.success('Task updated')
@@ -202,6 +232,9 @@ function statusChipClass(id: string): string {
 const selectedReschedulePreset = computed(() =>
   findSelectedPreset(rescheduleDate.value, rescheduleTime.value, nextPresets),
 )
+
+// An all-day task shows its date once; the day window itself is implied.
+const isAllDay = computed(() => isAllDayRange(props.activity.scheduled_at, props.activity.scheduled_end_at))
 </script>
 
 <template>
@@ -355,7 +388,10 @@ const selectedReschedulePreset = computed(() =>
             </div>
             <p v-if="activity.description" class="text-sm mt-0.5">{{ activity.description }}</p>
             <div class="flex flex-wrap gap-2 mt-1">
-              <span v-if="activity.scheduled_at && activity.scheduled_end_at" class="text-xs text-muted-foreground">
+              <span v-if="isAllDay" class="text-xs text-muted-foreground">
+                Scheduled: {{ formatDate(activity.scheduled_at!) }} (all day)
+              </span>
+              <span v-else-if="activity.scheduled_at && activity.scheduled_end_at" class="text-xs text-muted-foreground">
                 Scheduled: {{ formatDateTime(activity.scheduled_at) }} – {{ formatDateTime(activity.scheduled_end_at) }}
               </span>
               <span v-else-if="activity.scheduled_at" class="text-xs text-muted-foreground">

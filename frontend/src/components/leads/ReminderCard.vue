@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { AlarmClockPlus, X, ChevronRight } from '@lucide/vue'
 import { formatReminderText, reminderIcon, snoozePresets } from '@/utils/reminders'
-import { formatDateTime } from '@/utils/time'
+import { formatDate, formatDateTime, isAllDayRange } from '@/utils/time'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
 const props = defineProps<{
@@ -27,9 +27,13 @@ const { openLeadDrawer } = useLeadDrawerGlobal()
 
 const reminderText = computed(() => formatReminderText(props.reminder))
 const icon = computed(() => reminderIcon(props.reminder.type))
-const scheduledLabel = computed(() =>
-  props.reminder.scheduled_at ? formatDateTime(props.reminder.scheduled_at) : '',
-)
+const scheduledLabel = computed(() => {
+  const r = props.reminder
+  if (!r.scheduled_at) return ''
+  if (isAllDayRange(r.scheduled_at, r.scheduled_end_at)) return `${formatDate(r.scheduled_at)} (all day)`
+  if (r.scheduled_end_at) return `${formatDateTime(r.scheduled_at)} – ${formatDateTime(r.scheduled_end_at)}`
+  return formatDateTime(r.scheduled_at)
+})
 const remindLabel = computed(() =>
   props.reminder.remind_at ? formatDateTime(props.reminder.remind_at) : '',
 )

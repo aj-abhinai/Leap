@@ -917,6 +917,53 @@ func TestUpdateActivityQuickReplyWithRescheduleSpawnsNextIntegration(t *testing.
 	}
 }
 
+// The due_at sort uses the due boundary: the end for a range, the start for a
+// point task, the reminder for reply-only entries, then creation as the last key.
+func TestListAllActivitiesDueSortUsesBoundaryIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	now := time.Now().UTC()
+	pointStart := now.Add(-2 * time.Hour)
+	remindOnly := now.Add(-90 * time.Minute)
+	rangeStart := now.Add(-3 * time.Hour)
+	rangeEnd := now.Add(-30 * time.Minute)
+
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Point", ScheduledAt: &pointStart}); err != nil {
+		t.Fatalf("create point task: %v", err)
+	}
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Reminder", RemindAt: &remindOnly}); err != nil {
+		t.Fatalf("create reminder-only task: %v", err)
+	}
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Range", ScheduledAt: &rangeStart, ScheduledEndAt: &rangeEnd}); err != nil {
+		t.Fatalf("create range task: %v", err)
+	}
+
+	items, total, err := svc.listAllActivities(ActivityListFilters{Sort: "due_at", Order: "asc", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list due asc: %v", err)
+	}
+	if total != 3 || len(items) != 3 {
+		t.Fatalf("due asc = %d rows (total %d), want 3", len(items), total)
+	}
+	want := []string{"Point", "Reminder", "Range"}
+	for i, item := range items {
+		if item.Type != want[i] {
+			t.Errorf("due asc [%d] = %q, want %q", i, item.Type, want[i])
+		}
+	}
+}
+
 func TestUpdateActivityRejectsNonStatusOutcomeIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
