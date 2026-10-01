@@ -121,6 +121,66 @@ func TestMigration010DoesNotMarkFreshDatabase(t *testing.T) {
 	}
 }
 
+// A saved quick reply completes the task, and legacy un-completes keep no event
+// stamps: migration 000013 brings existing rows in line with the rule.
+func TestMigration013RepairsCompletionState(t *testing.T) {
+	db, dsn := scratchDB(t)
+	migrateScratch(t, dsn, 12)
+
+	stmts := []string{
+		`INSERT INTO pipelines (id, name) VALUES ('00000000-0000-0000-0000-0000000000a1', 'P')`,
+		`INSERT INTO lead_stages (id, pipeline_id, name) VALUES ('00000000-0000-0000-0000-0000000000a2', '00000000-0000-0000-0000-0000000000a1', 'Stage')`,
+		`INSERT INTO contacts (id, name) VALUES ('00000000-0000-0000-0000-0000000000a3', 'Alice')`,
+		`INSERT INTO leads (id, contact_id, pipeline_id, stage_id) VALUES ('00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a3', '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-0000000000a2')`,
+		`INSERT INTO tags (id, name, type) VALUES ('00000000-0000-0000-0000-0000000000a5', 'Share Details', 'quick_reply')`,
+		`INSERT INTO lead_activities (id, lead_id, stage_id, type, quick_reply_id, responded_at) VALUES ('00000000-0000-0000-0000-0000000000a6', '00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a2', 'Call', '00000000-0000-0000-0000-0000000000a5', now())`,
+		`INSERT INTO lead_activities (id, lead_id, stage_id, type, responded_at) VALUES ('00000000-0000-0000-0000-0000000000a7', '00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a2', 'Call', now())`,
+		`INSERT INTO lead_activities (id, lead_id, stage_id, type) VALUES ('00000000-0000-0000-0000-0000000000a8', '00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a2', 'Call')`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed pre-013 rows: %v", err)
+		}
+	}
+
+	migrateScratch(t, dsn, 13)
+
+	var done bool
+	if err := db.QueryRow(
+		`SELECT is_done FROM lead_activities WHERE id = '00000000-0000-0000-0000-0000000000a6'`,
+	).Scan(&done); err != nil {
+		t.Fatalf("load quick-reply row: %v", err)
+	}
+	if !done {
+		t.Error("a row with a quick reply should be done after the backfill")
+	}
+
+	var occurred, responded sql.NullTime
+	if err := db.QueryRow(
+		`SELECT occurred_at, responded_at FROM lead_activities WHERE id = '00000000-0000-0000-0000-0000000000a7'`,
+	).Scan(&occurred, &responded); err != nil {
+		t.Fatalf("load orphan-stamp row: %v", err)
+	}
+	if occurred.Valid || responded.Valid {
+		t.Errorf("orphan stamps = %v/%v, want NULL", occurred.Time, responded.Time)
+	}
+
+	var open bool
+	if err := db.QueryRow(
+		`SELECT is_done FROM lead_activities WHERE id = '00000000-0000-0000-0000-0000000000a8'`,
+	).Scan(&open); err != nil {
+		t.Fatalf("load plain row: %v", err)
+	}
+	if open {
+		t.Error("a plain open row must stay open")
+	}
+
+	// The down file is comments only: a round trip proves the migrator executes
+	// it, and the repair re-runs as a no-op.
+	migrateScratch(t, dsn, 12)
+	migrateScratch(t, dsn, 13)
+}
+
 // A rollback must remove every table its up migration created: 000004 creates
 // the settings table, so a down-then-up round trip has to drop it and recreate
 // it cleanly.

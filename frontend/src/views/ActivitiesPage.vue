@@ -414,7 +414,7 @@ function prevPage() {
                     </span>
                   </TableCell>
                   <TableCell class="text-xs" :class="isOverdue(item) ? 'text-destructive' : 'text-muted-foreground'">
-                    {{ dueLabel(item) }}
+                    {{ dueLabel(item) || '—' }}
                   </TableCell>
                   <TableCell>
                     <Badge :variant="statusVariant(statusLabel(item))" class="text-xs">

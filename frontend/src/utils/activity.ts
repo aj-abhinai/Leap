@@ -24,12 +24,13 @@ export function isOverdue(item: Pick<ActivityStatusLike, 'is_done' | 'is_cancell
   return !!boundary && new Date(boundary).getTime() < Date.now()
 }
 
-// due returns the effective due time: end (for a range), start, reminder, else created_at.
+// due returns the effective due time: end (for a range), start, or reminder;
+// created_at is a record, never a due time.
 export function due(item: Pick<ActivityStatusLike, 'scheduled_end_at' | 'scheduled_at' | 'remind_at' | 'created_at'>): string {
   if (item.scheduled_end_at) return item.scheduled_end_at
   if (item.scheduled_at) return item.scheduled_at
   if (item.remind_at) return item.remind_at
-  return item.created_at || ''
+  return ''
 }
 
 export function dueLabel(item: Pick<ActivityStatusLike, 'scheduled_end_at' | 'scheduled_at' | 'remind_at' | 'created_at'>): string {

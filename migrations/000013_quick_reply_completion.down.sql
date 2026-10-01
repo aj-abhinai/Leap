@@ -1,0 +1,3 @@
+-- The backfill is one-way: after it runs, the flipped rows are
+-- indistinguishable from rows that always were done. A downgrade keeps the
+-- repaired state; nothing to undo.

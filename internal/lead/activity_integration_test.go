@@ -1,12 +1,18 @@
 package lead
 
 import (
+	"context"
 	"crm/internal/testdb"
 	"database/sql"
 	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func TestDismissReminderMissingIntegration(t *testing.T) {
@@ -593,6 +599,12 @@ func TestCreateActivityWithOutcomeSetsRespondedAtIntegration(t *testing.T) {
 	if act.RespondedAt == nil {
 		t.Error("responded_at should be set when activity is created with an outcome")
 	}
+	if !act.IsDone {
+		t.Error("a saved quick reply should complete the activity")
+	}
+	if act.OccurredAt == nil {
+		t.Error("occurred_at should be stamped when the quick reply completes the activity")
+	}
 	if act.QuickReplyName != "No Reply" {
 		t.Errorf("quick_reply_name = %q, want No Reply", act.QuickReplyName)
 	}
@@ -604,6 +616,9 @@ func TestCreateActivityWithOutcomeSetsRespondedAtIntegration(t *testing.T) {
 	}
 	if plain.RespondedAt != nil {
 		t.Error("responded_at should be nil for an activity without an outcome")
+	}
+	if plain.IsDone {
+		t.Error("an activity without an outcome stays open")
 	}
 }
 
@@ -636,6 +651,9 @@ func TestUpdateActivityMarksResponseOnceIntegration(t *testing.T) {
 	if updated.RespondedAt == nil {
 		t.Fatal("responded_at should be set on first outcome mark")
 	}
+	if !updated.IsDone {
+		t.Error("a recorded quick reply should complete the task")
+	}
 	first := updated.RespondedAt.Unix()
 
 	// Change outcome again: responded_at must NOT move.
@@ -645,6 +663,257 @@ func TestUpdateActivityMarksResponseOnceIntegration(t *testing.T) {
 	}
 	if changed.RespondedAt == nil || changed.RespondedAt.Unix() != first {
 		t.Errorf("responded_at moved on outcome change: got %v, want %v", changed.RespondedAt, first)
+	}
+}
+
+// An un-complete on a task that carries a recorded quick reply is refused: the
+// reply is the record of what happened, not a state flag.
+func TestUpdateActivityRefusesUncompleteWithQuickReplyIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call", QuickReplyID: &qrID})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	undone := false
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsDone: &undone}); !errors.Is(err, ErrQuickReplyRecorded) {
+		t.Fatalf("un-complete with a recorded reply = %v, want ErrQuickReplyRecorded", err)
+	}
+
+	var isDone bool
+	var occurred, responded sql.NullTime
+	if err := db.QueryRow(
+		`SELECT is_done, occurred_at, responded_at FROM lead_activities WHERE id = $1`, act.ID,
+	).Scan(&isDone, &occurred, &responded); err != nil {
+		t.Fatalf("load row state: %v", err)
+	}
+	if !isDone {
+		t.Error("a refused un-complete must leave the task done")
+	}
+	if !occurred.Valid || !responded.Valid {
+		t.Error("a refused un-complete must leave the event stamps intact")
+	}
+}
+
+// The refusal maps to 422 (not 500) at the HTTP boundary.
+func TestUpdateActivityUncompleteWithQuickReplyReturns422Integration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	h := NewHandler(svc)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call", QuickReplyID: &qrID})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/leads/"+created.ID+"/activities/"+act.ID,
+		strings.NewReader(`{"is_done":false}`),
+	)
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", created.ID)
+	ctx.URLParams.Add("activity_id", act.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+
+	h.UpdateActivity(rr, req)
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 (not 500): %s", rr.Code, rr.Body.String())
+	}
+}
+
+// Erasing a recorded reply maps to 422 (not 500) at the HTTP boundary.
+func TestUpdateActivityEraseQuickReplyReturns422Integration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+	h := NewHandler(svc)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call", QuickReplyID: &qrID})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/leads/"+created.ID+"/activities/"+act.ID,
+		strings.NewReader(`{"quick_reply_id":""}`),
+	)
+	ctx := chi.NewRouteContext()
+	ctx.URLParams.Add("id", created.ID)
+	ctx.URLParams.Add("activity_id", act.ID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, ctx))
+	rr := httptest.NewRecorder()
+
+	h.UpdateActivity(rr, req)
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 (not 500): %s", rr.Code, rr.Body.String())
+	}
+}
+
+// A task with no recorded reply can return to open; its event stamps clear so
+// the open set and the timeline agree.
+func TestUpdateActivityUncompleteClearsStampsIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	done := true
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsDone: &done}); err != nil {
+		t.Fatalf("complete activity: %v", err)
+	}
+
+	undone := false
+	reopened, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsDone: &undone})
+	if err != nil {
+		t.Fatalf("un-complete plain task: %v", err)
+	}
+	if reopened.IsDone || reopened.OccurredAt != nil || reopened.RespondedAt != nil {
+		t.Errorf(
+			"reopened = done %v, occurred %v, responded %v; want open with nil stamps",
+			reopened.IsDone, reopened.OccurredAt, reopened.RespondedAt,
+		)
+	}
+
+	open, openTotal, err := svc.listAllActivities(ActivityListFilters{Status: "open", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list open: %v", err)
+	}
+	if openTotal != 1 || len(open) != 1 || open[0].ID != act.ID {
+		t.Errorf("open filter = %d rows %+v, want the reopened task", openTotal, open)
+	}
+	doneItems, doneTotal, err := svc.listAllActivities(ActivityListFilters{Status: "done", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list done: %v", err)
+	}
+	if doneTotal != 0 || len(doneItems) != 0 {
+		t.Errorf("done filter = %d rows %+v, want none", doneTotal, doneItems)
+	}
+}
+
+// A task created with a quick reply reads as done on the list filters from the
+// moment it is saved.
+func TestListAllActivitiesQuickReplyRowsAreDoneIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Share Details", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call", QuickReplyID: &qrID})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	open, openTotal, err := svc.listAllActivities(ActivityListFilters{Status: "open", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list open: %v", err)
+	}
+	if openTotal != 0 || len(open) != 0 {
+		t.Errorf("open filter = %d rows %+v, want none", openTotal, open)
+	}
+	doneItems, doneTotal, err := svc.listAllActivities(ActivityListFilters{Status: "done", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list done: %v", err)
+	}
+	if doneTotal != 1 || len(doneItems) != 1 || doneItems[0].ID != act.ID {
+		t.Errorf("done filter = %d rows %+v, want the logged attempt", doneTotal, doneItems)
+	}
+}
+
+// A quick reply that completes the task with a reschedule time spawns the next
+// occurrence: the completion comes from the reply, not from an explicit is_done.
+func TestUpdateActivityQuickReplyWithRescheduleSpawnsNextIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Rescheduled", "next")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	next := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
+		QuickReplyID: &qrID,
+		RescheduleAt: &next,
+	})
+	if err != nil {
+		t.Fatalf("reschedule with a quick reply: %v", err)
+	}
+	if !updated.IsDone {
+		t.Error("the logged attempt should be done")
+	}
+
+	var nextCount int
+	if err := db.QueryRow(
+		`SELECT count(*) FROM lead_activities WHERE lead_id = $1 AND type = 'Call' AND NOT is_done AND scheduled_at = $2`,
+		created.ID, next,
+	).Scan(&nextCount); err != nil {
+		t.Fatalf("count next tasks: %v", err)
+	}
+	if nextCount != 1 {
+		t.Errorf("next tasks = %d, want 1", nextCount)
 	}
 }
 
@@ -1547,7 +1816,8 @@ func TestUpdateActivityReturnsJoinedNamesIntegration(t *testing.T) {
 	}
 }
 
-func TestUpdateActivityClearsQuickReplyIntegration(t *testing.T) {
+// A recorded quick reply can be replaced but not erased: the reply is history.
+func TestUpdateActivityRefusesQuickReplyErasureIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
@@ -1570,19 +1840,51 @@ func TestUpdateActivityClearsQuickReplyIntegration(t *testing.T) {
 	}
 
 	empty := ""
-	cleared, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &empty})
-	if err != nil {
-		t.Fatalf("clear quick reply: %v", err)
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &empty}); !errors.Is(err, ErrQuickReplyErasure) {
+		t.Fatalf("erase quick reply = %v, want ErrQuickReplyErasure", err)
 	}
-	if cleared.QuickReplyID != "" {
-		t.Errorf("quick_reply_id after clear = %q, want empty", cleared.QuickReplyID)
-	}
+
 	var stored sql.NullString
 	if err := db.QueryRow(`SELECT quick_reply_id FROM lead_activities WHERE id = $1`, act.ID).Scan(&stored); err != nil {
 		t.Fatalf("load stored quick reply: %v", err)
 	}
-	if stored.Valid {
-		t.Errorf("stored quick_reply_id = %q, want NULL", stored.String)
+	if !stored.Valid || stored.String != qrID {
+		t.Errorf("stored quick_reply_id = %q (valid %v), want %q", stored.String, stored.Valid, qrID)
+	}
+}
+
+// A recorded quick reply is editable: a new reply replaces the old one, and the
+// first response time stands.
+func TestUpdateActivityReplacesQuickReplyIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	firstID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	secondID := seedQuickReplyTagBehavior(t, db, "Share Details", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call", QuickReplyID: &firstID})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	firstStamp := act.RespondedAt
+
+	replaced, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &secondID})
+	if err != nil {
+		t.Fatalf("replace quick reply: %v", err)
+	}
+	if replaced.QuickReplyID != secondID || replaced.QuickReplyName != "Share Details" {
+		t.Errorf("reply = %q/%q, want %q/Share Details", replaced.QuickReplyID, replaced.QuickReplyName, secondID)
+	}
+	if firstStamp == nil || replaced.RespondedAt == nil || replaced.RespondedAt.Unix() != firstStamp.Unix() {
+		t.Errorf("responded_at = %v, want the first response time %v", replaced.RespondedAt, firstStamp)
 	}
 }
 
@@ -1632,12 +1934,12 @@ func TestCloseLostWithoutLostStageIntegration(t *testing.T) {
 	}
 }
 
-func TestCreateCloseLostActivityNotDoneDoesNotCloseLeadIntegration(t *testing.T) {
+func TestCreateCloseLostQuickReplyClosesLeadIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
 	pipelineID, stageID := seedPipelineAndStage(t, db)
-	_ = seedClosingStage(t, db, pipelineID)
+	lostStageID := seedClosingStage(t, db, pipelineID)
 	created, err := svc.create(CreateRequest{
 		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
 		PipelineID: pipelineID,
@@ -1648,27 +1950,27 @@ func TestCreateCloseLostActivityNotDoneDoesNotCloseLeadIntegration(t *testing.T)
 	}
 	qrID := seedQuickReplyTagBehavior(t, db, "Closed Lost", "close_lost")
 
-	// A scheduled close_lost task (no is_done) must not close the lead.
+	// A saved close_lost reply completes the attempt, so the deal ends at save.
 	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
 		Type:         "Call 1",
 		QuickReplyID: &qrID,
 	})
 	if err != nil {
-		t.Fatalf("create scheduled close_lost activity: %v", err)
+		t.Fatalf("create close_lost activity: %v", err)
 	}
-	if act.IsDone || act.IsCancelled {
-		t.Errorf("activity is_done = %v, is_cancelled = %v; want open", act.IsDone, act.IsCancelled)
+	if !act.IsDone {
+		t.Error("a saved close_lost reply should complete the activity")
 	}
 
 	got, err := svc.get(created.ID)
 	if err != nil {
 		t.Fatalf("get lead: %v", err)
 	}
-	if got.StageID != stageID {
-		t.Errorf("stage_id = %q, want open stage %q (scheduled close_lost task must not close)", got.StageID, stageID)
+	if got.StageID != lostStageID {
+		t.Errorf("stage_id = %q, want lost stage %q", got.StageID, lostStageID)
 	}
-	if got.Outcome != "" {
-		t.Errorf("outcome = %q, want empty", got.Outcome)
+	if got.Outcome != "lost" {
+		t.Errorf("outcome = %q, want lost", got.Outcome)
 	}
 }
 

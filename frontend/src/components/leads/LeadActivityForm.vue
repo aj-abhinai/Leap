@@ -81,7 +81,11 @@ const selectedBehavior = computed(() => selectedChip.value?.behavior || 'log')
 
 const showNextFields = computed(() => selectedBehavior.value === 'next')
 const showCloseNotice = computed(() => selectedBehavior.value === 'close_lost')
-const showMoreScheduleFields = computed(() => !showNextFields.value && !showCloseNotice.value)
+// A picked quick reply already means the attempt happened, so there is nothing
+// left to schedule: the fields hide, the same reason next and close_lost do.
+const showMoreScheduleFields = computed(
+  () => !showNextFields.value && !showCloseNotice.value && !quickReplyId.value,
+)
 const hasNextTime = computed(() => !!mergeDateTime(schedule.next.date, schedule.next.time))
 const moreOptions = ref(false)
 

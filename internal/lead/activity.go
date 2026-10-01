@@ -25,6 +25,14 @@ var ErrSnoozePast = errors.New("remind_at must be in the future")
 // ErrSnoozeTooFar marks a snooze beyond the allowed horizon.
 var ErrSnoozeTooFar = errors.New("remind_at is too far in the future")
 
+// ErrQuickReplyRecorded marks an un-complete on a task whose quick reply
+// already records what happened: the reply is history, not a state flag.
+var ErrQuickReplyRecorded = errors.New("a task with a recorded quick reply cannot be reopened")
+
+// ErrQuickReplyErasure marks an attempt to clear a recorded quick reply:
+// history is replaced, never erased. Delete the task to remove the record.
+var ErrQuickReplyErasure = errors.New("a recorded quick reply cannot be erased")
+
 // maxSnoozeHorizon bounds how far a snooze may push a reminder forward so a
 // misbehaving client cannot queue tasks years out. The frontend presets cap at
 // 24 hours; a year is far beyond any legitimate manual entry.
@@ -195,8 +203,8 @@ func (s *Service) insertActivityTx(tx *sql.Tx, leadID, stageID, userID, typeValu
 // close_lost quick reply also moves the lead to its pipeline's lost closing
 // stage in the same transaction, so the log and the stage move cannot
 // diverge; ErrNoLostStage is returned when the pipeline has no such stage.
-// The move happens only when the activity is created completed (is_done or
-// reschedule_at) — a scheduled close_lost task does not close the lead.
+// A saved quick reply completes the activity, so the move happens whenever
+// the reply is created; a plain scheduled task never closes the lead.
 func (s *Service) createActivity(leadID, stageID, userID string, req CreateActivityRequest) (*Activity, error) {
 	if err := validateActivityFields(req.Type); err != nil {
 		return nil, err
@@ -228,15 +236,16 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 		return nil, err
 	}
 
-	// An activity created with a quick reply is already "responded" — log the time.
-	// A reschedule_at also implies the attempt happened, so it is done too.
-	// IsDone completes an activity created in one shot (close_lost from the
-	// create form), stamping occurred_at so it survives the closing-stage move.
+	// A quick reply records what happened, so it completes the activity. A
+	// reschedule_at also implies the attempt happened. IsDone completes an
+	// activity created in one shot (close_lost from the create form), stamping
+	// occurred_at so it survives the closing-stage move.
+	newQuickReply := req.QuickReplyID != nil && *req.QuickReplyID != ""
 	var respondedAt any
-	if (req.QuickReplyID != nil && *req.QuickReplyID != "") || req.RescheduleAt != nil {
+	if newQuickReply || req.RescheduleAt != nil {
 		respondedAt = time.Now()
 	}
-	isDone := req.RescheduleAt != nil || (req.IsDone != nil && *req.IsDone)
+	isDone := req.RescheduleAt != nil || (req.IsDone != nil && *req.IsDone) || newQuickReply
 	var occurredAt any
 	if isDone {
 		occurredAt = time.Now()
@@ -303,9 +312,9 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 // A quick reply whose behavior is close_lost also moves the lead to its
 // pipeline's lost closing stage in the same transaction, so the logged reply
 // and the stage move cannot diverge; ErrNoLostStage is returned when the
-// pipeline has no such stage. The move happens only when the update completes
-// the task (is_done=true) — editing an already-closed task never re-closes
-// the lead.
+// pipeline has no such stage. A saved quick reply completes the task, so the
+// move happens whenever the reply is set; editing an already-closed task
+// never re-closes the lead.
 func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateActivityRequest) (*Activity, error) {
 	if req.QuickReplyID == nil && req.IsDone == nil && req.Type == nil && req.Description == nil &&
 		!req.ScheduledAt.Set && !req.ScheduledEndAt.Set && !req.RemindAt.Set && req.OccurredAt == nil &&
@@ -388,12 +397,40 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	if req.IsDone != nil {
 		markDone = *req.IsDone
 	}
+	// A saved quick reply records what happened, so it completes the task even
+	// when the request does not send is_done.
+	if req.QuickReplyID != nil && *req.QuickReplyID != "" {
+		markDone = true
+	}
+
+	// Un-completing is allowed only while no quick reply records what happened;
+	// the reply is history. A plain done task returns to a true open state and
+	// its event stamps clear in the UPDATE below.
+	if req.IsDone != nil && !*req.IsDone && cur.IsDone && cur.QuickReplyID != "" {
+		return nil, ErrQuickReplyRecorded
+	}
+
+	// A recorded quick reply can be replaced but not erased: the reply is
+	// history. Only the empty clear is refused; a no-op clear on a row without
+	// a reply passes through.
+	if req.QuickReplyID != nil && *req.QuickReplyID == "" && cur.QuickReplyID != "" {
+		return nil, ErrQuickReplyErasure
+	}
 
 	// Stamp the response time when the activity gains a quick reply or is marked
-	// done for the first time. Clear is never applied to responded_at.
+	// done for the first time. Only an un-complete clears it, in the UPDATE
+	// below.
 	var respondedAt any
 	if cur.RespondedAt == nil && (willHaveQuickReply || markDone) {
 		respondedAt = time.Now()
+	}
+
+	// Three states for the flag: true completes, false returns the task to open,
+	// nil keeps the stored value.
+	var done *bool
+	if req.IsDone != nil || markDone {
+		v := markDone
+		done = &v
 	}
 
 	var updatedID string
@@ -401,23 +438,44 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		UPDATE lead_activities SET
 			quick_reply_id = CASE WHEN $3::text IS NOT NULL THEN NULLIF($3::text, '')::uuid ELSE quick_reply_id END,
 			is_done = COALESCE($4, is_done),
-			responded_at = COALESCE($5, responded_at),
+			responded_at = CASE WHEN $4 = false THEN NULL ELSE COALESCE($5, responded_at) END,
 			type = COALESCE($6, type),
 			description = COALESCE($7, description),
 			scheduled_at = CASE WHEN $8 THEN $9 ELSE scheduled_at END,
 			scheduled_end_at = CASE WHEN $10 THEN $11 ELSE scheduled_end_at END,
 			remind_at = CASE WHEN $12 THEN $13 ELSE remind_at END,
 			is_reminded = CASE WHEN $12 AND $13::timestamptz IS NOT NULL THEN false ELSE is_reminded END,
-			occurred_at = COALESCE($14, occurred_at, CASE WHEN $4 = true THEN now() ELSE NULL END),
+			occurred_at = CASE
+				WHEN $4 = false AND $14::timestamptz IS NULL THEN NULL
+				ELSE COALESCE($14, occurred_at, CASE WHEN $4 = true THEN now() ELSE NULL END)
+			END,
 			is_cancelled = COALESCE($15, is_cancelled),
 			updated_at = now()
 		WHERE id = $1 AND lead_id = $2
+			AND ($4 IS DISTINCT FROM false OR NOT is_done OR quick_reply_id IS NULL)
 		RETURNING id`,
-		activityID, leadID, req.QuickReplyID, req.IsDone, respondedAt, req.Type, desc,
+		activityID, leadID, req.QuickReplyID, done, respondedAt, req.Type, desc,
 		req.ScheduledAt.Set, req.ScheduledAt.Value, req.ScheduledEndAt.Set, req.ScheduledEndAt.Value,
 		req.RemindAt.Set, req.RemindAt.Value,
 		req.OccurredAt, req.IsCancelled,
 	).Scan(&updatedID)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The WHERE clause re-checks the refusal against the row as the UPDATE
+		// sees it, so a reply recorded concurrently cannot slip past the guard's
+		// snapshot. A still-present row means the refusal; a missing row was
+		// deleted concurrently.
+		var exists bool
+		if checkErr := tx.QueryRow(
+			`SELECT EXISTS(SELECT 1 FROM lead_activities WHERE id = $1 AND lead_id = $2)`,
+			activityID, leadID,
+		).Scan(&exists); checkErr != nil {
+			return nil, fmt.Errorf("update activity: %w", checkErr)
+		}
+		if exists {
+			return nil, ErrQuickReplyRecorded
+		}
+		return nil, ErrNotFound
+	}
 	if err != nil {
 		return nil, fmt.Errorf("update activity: %w", err)
 	}
@@ -438,11 +496,12 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		return nil, err
 	}
 
-	// "Log attempt + next": a completed activity with a reschedule time spawns
-	// the next occurrence of the same type at the new time. A close_lost reply
-	// never spawns a next task — the deal ends here. The next task's reminder
-	// defaults to the nudge lead time before the new schedule.
-	if req.RescheduleAt != nil && (req.IsDone != nil && *req.IsDone) && !a.IsCancelled && behavior != closeLostBehavior {
+	// "Log attempt + next": when this update completes the task and carries a
+	// reschedule time, the next occurrence of the same type is created at the
+	// new time. A close_lost reply never spawns a next task — the deal ends
+	// here. The next task's reminder defaults to the nudge lead time before the
+	// new schedule.
+	if req.RescheduleAt != nil && markDone && !a.IsCancelled && behavior != closeLostBehavior {
 		nextRemind := req.RescheduleAt
 		if lead, err := settings.NudgeLeadMinutes(tx); err != nil {
 			return nil, err

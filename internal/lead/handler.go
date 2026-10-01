@@ -243,7 +243,7 @@ func respondLeadMutationError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "NOT_FOUND", Message: ErrNotFound.Error()},
 			nil,
 		)
-	case errors.Is(err, ErrStageNotInPipeline), errors.Is(err, ErrClosingStageAtCreate), errors.Is(err, ErrNoLostStage), errors.Is(err, ErrClosedToClosedMove), errors.Is(err, ErrLeadClosed):
+	case errors.Is(err, ErrStageNotInPipeline), errors.Is(err, ErrClosingStageAtCreate), errors.Is(err, ErrNoLostStage), errors.Is(err, ErrClosedToClosedMove), errors.Is(err, ErrLeadClosed), errors.Is(err, ErrQuickReplyRecorded), errors.Is(err, ErrQuickReplyErasure):
 		respond.JSON(
 			w,
 			http.StatusUnprocessableEntity,
