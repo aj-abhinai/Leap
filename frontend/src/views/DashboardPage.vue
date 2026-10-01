@@ -89,7 +89,7 @@ const lostCount = computed(() => stageRows.value.filter((r) => r.outcome === 'lo
 const openCount = computed(() => stageRows.value.filter((r) => r.outcome === 'open').reduce((n, r) => n + r.count, 0))
 const totalCount = computed(() => Math.max(1, stageRows.value.reduce((n, r) => n + r.count, 0)))
 
-const reminders = computed(() => remindersStore.reminders.slice(0, 5))
+const reminders = computed(() => remindersStore.openReminders.slice(0, 5))
 
 function goToLeads() {
   router.push({ name: 'Leads' })
@@ -150,14 +150,14 @@ function goToActivities() {
       <Card v-else class="relative overflow-hidden">
         <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-primary to-primary/60" />
         <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle class="text-sm font-medium">Active Leads</CardTitle>
+          <CardTitle class="text-sm font-medium">Total Leads</CardTitle>
           <div class="flex size-8 items-center justify-center rounded-lg bg-primary/10">
             <FolderOpen class="size-4 text-primary" />
           </div>
         </CardHeader>
         <CardContent>
           <div class="text-3xl font-bold tracking-tight tabular-nums">{{ leadsStore.total }}</div>
-          <p class="mt-1 text-xs text-muted-foreground">Open leads across all pipelines</p>
+          <p class="mt-1 text-xs text-muted-foreground">All leads across pipelines</p>
         </CardContent>
       </Card>
 
@@ -180,7 +180,7 @@ function goToActivities() {
           </div>
         </CardHeader>
         <CardContent>
-          <div class="text-3xl font-bold tracking-tight tabular-nums">{{ remindersStore.reminders.length }}</div>
+          <div class="text-3xl font-bold tracking-tight tabular-nums">{{ remindersStore.openReminders.length }}</div>
           <p class="mt-1 text-xs text-muted-foreground">Awaiting action across leads</p>
         </CardContent>
       </Card>
