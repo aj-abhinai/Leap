@@ -172,9 +172,9 @@ describe('TaskRow', () => {
     expect(payload.follow_up).toBeUndefined()
   })
 
-  // An all-day task prefills its date only: the time box stays empty so the
-  // save rebuilds the whole day instead of a midnight point.
-  it('prefills the date only for an all-day task', async () => {
+  // The follow-up date starts empty, exactly like the What-happened form: the
+  // reply alone records the attempt, and a date is a choice, never a default.
+  it('starts the follow-up fields empty', async () => {
     const wrapper = mount(TaskRow, {
       props: {
         leadId: 'l1',
@@ -192,7 +192,39 @@ describe('TaskRow', () => {
     await chip!.trigger('click')
     await nextTick()
 
-    expect((wrapper.find('input[type="date"]').element as HTMLInputElement).value).toBe('2026-09-30')
+    expect((wrapper.find('input[type="date"]').element as HTMLInputElement).value).toBe('')
     expect((wrapper.find('input[type="time"]').element as HTMLInputElement).value).toBe('')
+  })
+
+  // The release-review regression: a next reply with the date untouched must
+  // not schedule a copy of the task it just closed.
+  it('creates no follow-up when a next reply carries no date', async () => {
+    const wrapper = mount(TaskRow, {
+      props: {
+        leadId: 'l1',
+        activity: allDayActivity(),
+        quickReplies: [{ id: 'q2', name: 'No Reply', group_name: 'NC', sort_order: 0, behavior: 'next' }],
+        activityTypes: [],
+      },
+    })
+    const vm = wrapper.vm as unknown as { startReschedule: () => void }
+    vm.startReschedule()
+    await nextTick()
+
+    const chip = wrapper.findAll('button').find((b) => b.text().includes('No Reply'))
+    expect(chip).toBeTruthy()
+    await chip!.trigger('click')
+    await nextTick()
+
+    const save = wrapper.findAll('button').find((b) => b.text() === 'Save')
+    expect(save).toBeTruthy()
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    const payload = updateMock.mock.calls[0][2] as Record<string, unknown>
+    expect(payload.is_done).toBe(true)
+    expect(payload.quick_reply_id).toBe('q2')
+    expect(payload.follow_up).toBeUndefined()
   })
 })

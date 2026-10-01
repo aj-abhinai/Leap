@@ -334,8 +334,8 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 // time; occurred_at is stamped on completion unless supplied explicitly.
 // Editing remind_at re-opens the reminder (is_reminded = false).
 //
-// The "log attempt + next" follow-up flow: when a completion carries a
-// follow_up, the completed attempt is logged and the next Open task is created
+// The "log attempt + next" follow-up flow: a follow_up completes the task —
+// the same implication as the create path — and creates the next Open task
 // from the follow-up fields; its type defaults to the completed task's type
 // and an explicit remind wins over the nudge-lead default.
 //
@@ -433,6 +433,12 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	// A saved quick reply records what happened, so it completes the task even
 	// when the request does not send is_done.
 	if req.QuickReplyID != nil && *req.QuickReplyID != "" {
+		markDone = true
+	}
+	// A follow-up continues from a recorded attempt, so it completes the task
+	// even when the request does not send is_done — the same rule as the
+	// create path and a recorded quick reply.
+	if req.FollowUp != nil {
 		markDone = true
 	}
 

@@ -163,16 +163,11 @@ const showRescheduleCloseNotice = computed(() => rescheduleBehavior.value === 'c
 function startReschedule() {
   rescheduling.value = true
   rescheduleQuickReply.value = ''
-  // An all-day task prefills its date only: the day window is implied and is
-  // rebuilt on save from the date alone. Seeding 00:00 would turn the
-  // follow-up into a midnight point task with a previous-evening reminder.
-  if (isAllDayRange(props.activity.scheduled_at, props.activity.scheduled_end_at)) {
-    rescheduleDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
-    rescheduleTime.value = ''
-  } else {
-    rescheduleDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
-    rescheduleTime.value = props.activity.scheduled_at ? toLocalTimeInput(props.activity.scheduled_at) : ''
-  }
+  // The follow-up date starts empty, exactly like the What-happened form: a
+  // reply alone records the attempt, and a next task exists only when a date
+  // is chosen. Prefilling the task's own date would silently schedule a copy.
+  rescheduleDate.value = ''
+  rescheduleTime.value = ''
 }
 
 function cancelReschedule() {

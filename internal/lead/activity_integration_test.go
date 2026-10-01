@@ -1183,6 +1183,53 @@ func TestUpdateActivityFollowUpSpawnsNextIntegration(t *testing.T) {
 	}
 }
 
+// A follow-up continues from a recorded attempt: the update completes the
+// task even when the request does not send is_done — the same rule as the
+// create path and a recorded quick reply — and the next Open task spawns.
+func TestUpdateActivityFollowUpImpliesCompletionIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call 1"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	next := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
+		FollowUp: &FollowUpRequest{ScheduledAt: next},
+	})
+	if err != nil {
+		t.Fatalf("follow-up without is_done: %v", err)
+	}
+	if !updated.IsDone || updated.OccurredAt == nil || updated.RespondedAt == nil {
+		t.Errorf(
+			"implied completion = done %v, occurred %v, responded %v; want done with both stamps",
+			updated.IsDone, updated.OccurredAt, updated.RespondedAt,
+		)
+	}
+
+	var nextCount int
+	if err := db.QueryRow(
+		`SELECT count(*) FROM lead_activities WHERE lead_id = $1 AND type = 'Call 1' AND NOT is_done AND scheduled_at = $2`,
+		created.ID, next,
+	).Scan(&nextCount); err != nil {
+		t.Fatalf("count next tasks: %v", err)
+	}
+	if nextCount != 1 {
+		t.Errorf("next tasks = %d, want 1", nextCount)
+	}
+}
+
 func TestCreateActivityFollowUpSpawnsNextIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
