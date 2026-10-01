@@ -34,8 +34,9 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
-import { reminderIcon, snoozePresets, snoozeRemindAt } from '@/utils/reminders'
+import { allDaySnoozePresets, reminderIcon, snoozePresets, snoozeTarget, type ReminderLike } from '@/utils/reminders'
 import { isOverdue, statusLabel, statusVariant, dueLabel, typeLabel } from '@/utils/activity'
+import { isAllDayRange } from '@/utils/time'
 import { toast } from 'vue-sonner'
 import { CheckCircle2, Trash2, MoreHorizontal, AlarmClockPlus, ClipboardList } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
@@ -237,9 +238,14 @@ async function doMarkDone(item: { id: string; lead_id: string }) {
   }
 }
 
-async function doSnooze(item: { id: string; lead_id: string }, minutes: number) {
+// An all-day task gets day-based snooze presets so its window keeps the shape.
+function snoozeOptions(item: ReminderLike) {
+  return isAllDayRange(item.scheduled_at, item.scheduled_end_at) ? allDaySnoozePresets : snoozePresets
+}
+
+async function doSnooze(item: ReminderLike & { id: string; lead_id: string }, minutes: number) {
   try {
-    await remindersStore.snoozeReminder(item.lead_id, item.id, snoozeRemindAt(minutes))
+    await remindersStore.snoozeReminder(item.lead_id, item.id, snoozeTarget(item, minutes))
     toast.success('Reminder snoozed')
     load()
   } catch (e) {
@@ -449,7 +455,7 @@ function prevPage() {
                           </DropdownMenuSubTrigger>
                           <DropdownMenuSubContent>
                             <DropdownMenuItem
-                              v-for="preset in snoozePresets"
+                              v-for="preset in snoozeOptions(item)"
                               :key="preset.minutes"
                               class="cursor-pointer"
                               @select="doSnooze(item, preset.minutes)"

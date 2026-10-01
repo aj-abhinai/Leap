@@ -55,8 +55,33 @@ export const snoozePresets: SnoozePreset[] = [
   { label: 'Tomorrow', minutes: 24 * 60 },
 ]
 
+// An all-day task keeps its day grid: its snooze presets move the nudge by
+// whole days, so the window (midnight to 23:59:59.999) survives the shift.
+export const allDaySnoozePresets: SnoozePreset[] = [
+  { label: 'Tomorrow', minutes: 24 * 60 },
+  { label: 'In 2 days', minutes: 2 * 24 * 60 },
+  { label: 'Next week', minutes: 7 * 24 * 60 },
+]
+
 export function snoozeRemindAt(minutes: number): string {
   return new Date(Date.now() + minutes * 60_000).toISOString()
+}
+
+// snoozeTarget resolves the new remind_at for a snooze tap. A timed task moves
+// to now + minutes. An all-day task keeps its day grid: the target is the
+// task's nudge time-of-day on the preset day from today, so the window shift
+// stays a whole number of days and the target is always in the future, even
+// when the task is overdue.
+export function snoozeTarget(r: ReminderLike, minutes: number): string {
+  if (r.remind_at && isAllDayRange(r.scheduled_at, r.scheduled_end_at)) {
+    const nudge = new Date(r.remind_at)
+    const days = Math.max(1, Math.round(minutes / (24 * 60)))
+    const target = new Date()
+    target.setDate(target.getDate() + days)
+    target.setHours(nudge.getHours(), nudge.getMinutes(), nudge.getSeconds(), nudge.getMilliseconds())
+    return target.toISOString()
+  }
+  return snoozeRemindAt(minutes)
 }
 
 // One-tap follow-up slots for "log attempt + next" quick replies (Busy,

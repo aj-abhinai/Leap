@@ -11,7 +11,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { MoreHorizontal, Trash2 } from '@lucide/vue'
-import { reminderIcon, snoozeRemindAt } from '@/utils/reminders'
+import { reminderIcon, snoozeTarget } from '@/utils/reminders'
 import { formatDateTime } from '@/utils/time'
 import { typeLabel, isOverdue as isActivityOverdue } from '@/utils/activity'
 import { Badge } from '@/components/ui/badge'
@@ -140,7 +140,7 @@ async function markDone(a: LeadActivity) {
 
 async function snooze(a: LeadActivity, minutes: number) {
   try {
-    await remindersStore.snoozeReminder(props.leadId, a.id, snoozeRemindAt(minutes))
+    await remindersStore.snoozeReminder(props.leadId, a.id, snoozeTarget(a, minutes))
     toast.success('Reminder snoozed')
     await fetchActivities()
     emit('tasksChanged')

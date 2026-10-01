@@ -4,7 +4,7 @@ import { useRemindersStore, type Reminder } from '@/stores/reminders'
 import ReminderCard from '@/components/leads/ReminderCard.vue'
 import PageState from '@/components/PageState.vue'
 import { BellOff } from '@lucide/vue'
-import { snoozeRemindAt } from '@/utils/reminders'
+import { snoozeTarget } from '@/utils/reminders'
 import { statusLabel } from '@/utils/activity'
 import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
@@ -25,7 +25,7 @@ const dismissed = computed(() => store.reminders.filter((r) => statusLabel(r) ==
 // and leave the card in place.
 async function snooze(reminder: Reminder, minutes: number) {
   try {
-    await store.snoozeReminder(reminder.lead_id, reminder.id, snoozeRemindAt(minutes))
+    await store.snoozeReminder(reminder.lead_id, reminder.id, snoozeTarget(reminder, minutes))
     toast.success('Reminder snoozed')
     await store.fetchReminders()
   } catch (e) {

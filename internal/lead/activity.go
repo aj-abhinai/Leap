@@ -35,7 +35,8 @@ var ErrQuickReplyErasure = errors.New("a recorded quick reply cannot be erased")
 
 // maxSnoozeHorizon bounds how far a snooze may push a reminder forward so a
 // misbehaving client cannot queue tasks years out. The frontend presets cap at
-// 24 hours; a year is far beyond any legitimate manual entry.
+// 24 hours for timed tasks and a week for all-day tasks; a year is far beyond
+// any legitimate manual entry.
 const maxSnoozeHorizon = 365 * 24 * time.Hour
 
 const activitySelect = `

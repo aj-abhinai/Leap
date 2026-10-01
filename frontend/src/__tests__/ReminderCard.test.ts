@@ -40,4 +40,26 @@ describe('ReminderCard', () => {
     })
     expect(wrapper.text()).toContain(`Scheduled: ${new Date(start).toLocaleDateString()} (all day)`)
   })
+
+  it('offers day presets for an all-day reminder and minute presets for a timed one', () => {
+    const dayStart = new Date(2026, 8, 30).toISOString()
+    const dayEnd = new Date(new Date(2026, 9, 1).getTime() - 1).toISOString()
+    const allDay = mount(ReminderCard, {
+      props: {
+        reminder: makeReminder({
+          scheduled_at: dayStart,
+          scheduled_end_at: dayEnd,
+          remind_at: new Date(2026, 8, 30, 9, 0).toISOString(),
+        }),
+      },
+    })
+    const allDayOptions = (allDay.vm as unknown as { snoozeOptions: { label: string }[] }).snoozeOptions
+    expect(allDayOptions.map((p) => p.label)).toEqual(['Tomorrow', 'In 2 days', 'Next week'])
+
+    const timed = mount(ReminderCard, {
+      props: { reminder: makeReminder({ remind_at: new Date().toISOString() }) },
+    })
+    const timedOptions = (timed.vm as unknown as { snoozeOptions: { label: string }[] }).snoozeOptions
+    expect(timedOptions.map((p) => p.label)).toEqual(['15 minutes', '1 hour', '3 hours', 'Tomorrow'])
+  })
 })

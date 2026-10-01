@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import LeadActivity from '@/components/leads/LeadActivity.vue'
+import { useRemindersStore } from '@/stores/reminders'
 import type { LeadActivity as Activity } from '@/api/leads'
 
 vi.mock('@/api/leads', () => ({
@@ -98,6 +99,38 @@ describe('LeadActivity section classification', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('Overdue')
+
+    wrapper.unmount()
+  })
+
+  it('snoozes an all-day task to a future day of its own grid', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const reminders = useRemindersStore()
+    const snoozeSpy = vi.fn().mockResolvedValue(undefined)
+    reminders.snoozeReminder = snoozeSpy
+
+    const wrapper = mount(LeadActivity, {
+      props: { leadId: 'l1' },
+      global: { plugins: [pinia] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const nudge = new Date(2020, 0, 1, 9, 0, 0)
+    const allDay = makeActivity({
+      id: 'a-allday',
+      scheduled_at: new Date(2020, 0, 1).toISOString(),
+      scheduled_end_at: new Date(new Date(2020, 0, 2).getTime() - 1).toISOString(),
+      remind_at: nudge.toISOString(),
+    })
+    const vm = wrapper.vm as unknown as { snooze: (a: Activity, m: number) => Promise<void> }
+    await vm.snooze(allDay, 24 * 60)
+
+    expect(snoozeSpy).toHaveBeenCalledTimes(1)
+    const target = new Date(snoozeSpy.mock.calls[0][2] as string)
+    expect(target.getTime()).toBeGreaterThan(Date.now())
+    expect(target.getHours()).toBe(nudge.getHours())
 
     wrapper.unmount()
   })

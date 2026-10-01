@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { formatReminderTime } from '@/utils/reminders'
+import { formatReminderTime, snoozeTarget } from '@/utils/reminders'
+import { allDayRange, isAllDayRange } from '@/utils/time'
 
 // formatReminderTime resolves the schedule window first: an all-day day, then a
 // range, then a point; the reminder-only fallback covers reply-only entries.
@@ -35,5 +36,70 @@ describe('formatReminderTime', () => {
 
   it('is empty without a schedule or reminder', () => {
     expect(formatReminderTime({ type: 'Call' })).toBe('')
+  })
+})
+
+// snoozeTarget resolves the new reminder moment. An all-day task moves by
+// whole days from its own nudge, so the window keeps the day shape.
+describe('snoozeTarget', () => {
+  it('moves a timed task to now + minutes', () => {
+    const before = Date.now()
+    const got = new Date(snoozeTarget({ type: 'Call' }, 15)).getTime()
+    expect(got).toBeGreaterThanOrEqual(before + 15 * 60_000 - 1_000)
+    expect(got).toBeLessThanOrEqual(Date.now() + 15 * 60_000 + 1_000)
+  })
+
+  it('lands an overdue all-day task on a future day of its own grid', () => {
+    // The task day is long past, so its stored nudge is in the past too. The
+    // target must still be in the future: the backend rejects a past snooze.
+    const day = allDayRange('2020-01-01')!
+    const got = new Date(
+      snoozeTarget(
+        { type: 'Call', scheduled_at: day.start, scheduled_end_at: day.end, remind_at: day.remind },
+        24 * 60,
+      ),
+    )
+    const nudge = new Date(day.remind)
+    expect(got.getTime()).toBeGreaterThan(Date.now())
+    expect(got.getHours()).toBe(nudge.getHours())
+    expect(got.getMinutes()).toBe(nudge.getMinutes())
+
+    const expectedDay = new Date()
+    expectedDay.setDate(expectedDay.getDate() + 1)
+    expect([got.getFullYear(), got.getMonth(), got.getDate()]).toEqual([
+      expectedDay.getFullYear(),
+      expectedDay.getMonth(),
+      expectedDay.getDate(),
+    ])
+
+    // The backend shifts the window by the same delta; whole days keep the
+    // shape.
+    const delta = got.getTime() - nudge.getTime()
+    const shiftedStart = new Date(new Date(day.start).getTime() + delta).toISOString()
+    const shiftedEnd = new Date(new Date(day.end).getTime() + delta).toISOString()
+    expect(isAllDayRange(shiftedStart, shiftedEnd)).toBe(true)
+  })
+
+  it('falls back to now + minutes for an all-day shape without a nudge', () => {
+    const day = allDayRange('2026-09-30')!
+    const before = Date.now()
+    const got = new Date(
+      snoozeTarget({ type: 'Call', scheduled_at: day.start, scheduled_end_at: day.end }, 15),
+    ).getTime()
+    expect(got).toBeGreaterThanOrEqual(before + 15 * 60_000 - 1_000)
+  })
+
+  it('maps each day preset to its own day count', () => {
+    const day = allDayRange('2020-01-01')!
+    const base = { type: 'Call', scheduled_at: day.start, scheduled_end_at: day.end, remind_at: day.remind }
+    const nudge = new Date(day.remind)
+    const expected = (days: number) => {
+      const d = new Date()
+      d.setDate(d.getDate() + days)
+      d.setHours(nudge.getHours(), nudge.getMinutes(), nudge.getSeconds(), nudge.getMilliseconds())
+      return d.toISOString()
+    }
+    expect(snoozeTarget(base, 2 * 24 * 60)).toBe(expected(2))
+    expect(snoozeTarget(base, 7 * 24 * 60)).toBe(expected(7))
   })
 })

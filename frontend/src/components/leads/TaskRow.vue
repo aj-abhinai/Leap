@@ -20,7 +20,7 @@ import {
 import {
   MoreHorizontal, Trash2, CheckCircle2, Pencil, AlarmClockPlus, CalendarClock, Check,
 } from '@lucide/vue'
-import { nextPresets, reminderIcon, snoozePresets, groupQuickReplies, findSelectedPreset, type NextPreset } from '@/utils/reminders'
+import { allDaySnoozePresets, nextPresets, reminderIcon, snoozePresets, groupQuickReplies, findSelectedPreset, type NextPreset } from '@/utils/reminders'
 import { formatDateTime, formatDate, toLocalDateInput, toLocalTimeInput, mergeDateTime, allDayRange, isAllDayRange } from '@/utils/time'
 import { typeLabel } from '@/utils/activity'
 import { Badge } from '@/components/ui/badge'
@@ -235,6 +235,9 @@ const selectedReschedulePreset = computed(() =>
 
 // An all-day task shows its date once; the day window itself is implied.
 const isAllDay = computed(() => isAllDayRange(props.activity.scheduled_at, props.activity.scheduled_end_at))
+
+// An all-day task gets day-based snooze presets so its window keeps the shape.
+const snoozeOptions = computed(() => (isAllDay.value ? allDaySnoozePresets : snoozePresets))
 </script>
 
 <template>
@@ -425,7 +428,7 @@ const isAllDay = computed(() => isAllDayRange(props.activity.scheduled_at, props
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 <DropdownMenuItem
-                  v-for="preset in snoozePresets"
+                  v-for="preset in snoozeOptions"
                   :key="preset.minutes"
                   class="cursor-pointer"
                   @select="emit('snooze', preset.minutes)"

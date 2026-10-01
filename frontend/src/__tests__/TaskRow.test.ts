@@ -66,4 +66,12 @@ describe('TaskRow', () => {
     expect(payload.scheduled_end_at).toBe(new Date(new Date(2026, 9, 4).getTime() - 1).toISOString())
     expect(payload.remind_at).toBe(new Date(2026, 9, 3, 9, 0, 0).toISOString())
   })
+
+  it('offers day snooze presets for an all-day task', () => {
+    const wrapper = mount(TaskRow, {
+      props: { leadId: 'l1', activity: allDayActivity(), quickReplies: [], activityTypes: [] },
+    })
+    const options = (wrapper.vm as unknown as { snoozeOptions: { label: string }[] }).snoozeOptions
+    expect(options.map((p) => p.label)).toEqual(['Tomorrow', 'In 2 days', 'Next week'])
+  })
 })

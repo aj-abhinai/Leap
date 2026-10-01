@@ -9,7 +9,7 @@ import {
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
 import { AlarmClockPlus, X, ChevronRight } from '@lucide/vue'
-import { formatReminderText, reminderIcon, snoozePresets } from '@/utils/reminders'
+import { allDaySnoozePresets, formatReminderText, reminderIcon, snoozePresets } from '@/utils/reminders'
 import { formatDate, formatDateTime, isAllDayRange } from '@/utils/time'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
@@ -36,6 +36,13 @@ const scheduledLabel = computed(() => {
 })
 const remindLabel = computed(() =>
   props.reminder.remind_at ? formatDateTime(props.reminder.remind_at) : '',
+)
+
+// An all-day task gets day-based snooze presets so its window keeps the shape.
+const snoozeOptions = computed(() =>
+  isAllDayRange(props.reminder.scheduled_at, props.reminder.scheduled_end_at)
+    ? allDaySnoozePresets
+    : snoozePresets,
 )
 const createdLabel = computed(() => formatDateTime(props.reminder.created_at))
 </script>
@@ -88,7 +95,7 @@ const createdLabel = computed(() => formatDateTime(props.reminder.created_at))
                 <DropdownMenuSubTrigger>Snooze</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
                   <DropdownMenuItem
-                    v-for="preset in snoozePresets"
+                    v-for="preset in snoozeOptions"
                     :key="preset.minutes"
                     class="cursor-pointer"
                     @select="emit('snooze', preset.minutes)"
