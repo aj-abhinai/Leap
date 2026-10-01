@@ -1935,6 +1935,282 @@ func TestUpdateActivityReplacesQuickReplyIntegration(t *testing.T) {
 	}
 }
 
+// A cancelled row that still carries a reply (the shape the backfill leaves
+// alone) must not return to open through un-cancel.
+func TestUpdateActivityRefusesUncancelToOpenWithReplyIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	// The service cannot produce this legacy shape; the backfill leaves it as
+	// it is, so seed it directly.
+	if _, err := db.Exec(
+		`UPDATE lead_activities SET quick_reply_id = $2, is_cancelled = true WHERE id = $1`,
+		act.ID, qrID,
+	); err != nil {
+		t.Fatalf("seed legacy cancelled reply row: %v", err)
+	}
+
+	no := false
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsCancelled: &no}); !errors.Is(err, ErrQuickReplyRecorded) {
+		t.Fatalf("un-cancel = %v, want ErrQuickReplyRecorded", err)
+	}
+
+	var isCancelled, isDone bool
+	var storedReply sql.NullString
+	if err := db.QueryRow(
+		`SELECT is_cancelled, is_done, quick_reply_id FROM lead_activities WHERE id = $1`, act.ID,
+	).Scan(&isCancelled, &isDone, &storedReply); err != nil {
+		t.Fatalf("load row: %v", err)
+	}
+	if !isCancelled || isDone || !storedReply.Valid || storedReply.String != qrID {
+		t.Errorf("row = cancelled %v / done %v / reply %q, want the refusal to leave it untouched", isCancelled, isDone, storedReply.String)
+	}
+}
+
+// Un-cancelling a task without a reply stays allowed.
+func TestUpdateActivityUncancelsWithoutReplyIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	yes := true
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsCancelled: &yes}); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	no := false
+	uncancelled, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsCancelled: &no})
+	if err != nil {
+		t.Fatalf("un-cancel: %v", err)
+	}
+	if uncancelled.IsCancelled || uncancelled.IsDone {
+		t.Errorf("row = cancelled %v / done %v, want a plain un-cancel", uncancelled.IsCancelled, uncancelled.IsDone)
+	}
+}
+
+// An erasure racing a concurrently recorded reply must not erase it: the
+// UPDATE's WHERE re-checks the refusal against the row it actually updates.
+func TestUpdateActivityEraseRacingReplyRecordIsRefusedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	// Hold a reply-recording write open so the erasure's UPDATE blocks on it
+	// and re-evaluates the WHERE against the row the holder commits.
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin holder: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
+		`UPDATE lead_activities SET quick_reply_id = $2, is_done = true WHERE id = $1`,
+		act.ID, qrID,
+	); err != nil {
+		t.Fatalf("hold reply write: %v", err)
+	}
+
+	empty := ""
+	ch := make(chan error, 1)
+	go func() {
+		_, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &empty})
+		ch <- err
+	}()
+
+	// Wait until the service's UPDATE waits on the held row lock. Filter to
+	// this database so parallel package tests cannot match.
+	blocked := false
+	for i := 0; i < 100; i++ {
+		var n int
+		if err := db.QueryRow(
+			`SELECT count(*) FROM pg_stat_activity
+			 WHERE datname = current_database()
+			   AND wait_event_type = 'Lock' AND query ILIKE '%UPDATE lead_activities%'`,
+		).Scan(&n); err != nil {
+			t.Fatalf("poll lock wait: %v", err)
+		}
+		if n > 0 {
+			blocked = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("service update never waited on the row lock; cannot assert the re-check")
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit holder: %v", err)
+	}
+
+	select {
+	case err := <-ch:
+		if !errors.Is(err, ErrQuickReplyErasure) {
+			t.Fatalf("erase racing reply = %v, want ErrQuickReplyErasure", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("erase call did not return after the holder committed")
+	}
+
+	var storedReply sql.NullString
+	var isDone bool
+	if err := db.QueryRow(
+		`SELECT quick_reply_id, is_done FROM lead_activities WHERE id = $1`, act.ID,
+	).Scan(&storedReply, &isDone); err != nil {
+		t.Fatalf("load row: %v", err)
+	}
+	if !storedReply.Valid || storedReply.String != qrID || !isDone {
+		t.Errorf("row = reply %q / done %v, want the concurrent reply intact", storedReply.String, isDone)
+	}
+}
+
+// A no-op clear on a row without a reply still passes through: only erasing a
+// recorded reply is refused.
+func TestUpdateActivityEraseQuickReplyWithoutReplyPassesIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	empty := ""
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{QuickReplyID: &empty}); err != nil {
+		t.Fatalf("no-op clear = %v, want success", err)
+	}
+
+	var storedReply sql.NullString
+	if err := db.QueryRow(`SELECT quick_reply_id FROM lead_activities WHERE id = $1`, act.ID).Scan(&storedReply); err != nil {
+		t.Fatalf("load stored quick reply: %v", err)
+	}
+	if storedReply.Valid {
+		t.Errorf("stored quick_reply_id = %q, want NULL", storedReply.String)
+	}
+}
+
+// Un-cancelling a completed reply-bearing row is not a reopen: it stays done,
+// so the update is allowed.
+func TestUpdateActivityUncancelsCompletedReplyRowIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call", QuickReplyID: &qrID})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	yes := true
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsCancelled: &yes}); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	no := false
+	uncancelled, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsCancelled: &no})
+	if err != nil {
+		t.Fatalf("un-cancel completed reply row: %v", err)
+	}
+	if uncancelled.IsCancelled || !uncancelled.IsDone || uncancelled.QuickReplyID != qrID {
+		t.Errorf("row = cancelled %v / done %v / reply %q, want the restored done row", uncancelled.IsCancelled, uncancelled.IsDone, uncancelled.QuickReplyID)
+	}
+}
+
+// An un-cancel that completes the legacy row in the same request ends
+// consistent and is allowed.
+func TestUpdateActivityUncancelCompletingLegacyRowIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Interested", "log")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+	// The legacy shape again: cancelled, open, reply carried.
+	if _, err := db.Exec(
+		`UPDATE lead_activities SET quick_reply_id = $2, is_cancelled = true WHERE id = $1`,
+		act.ID, qrID,
+	); err != nil {
+		t.Fatalf("seed legacy cancelled reply row: %v", err)
+	}
+
+	no := false
+	done := true
+	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{IsCancelled: &no, IsDone: &done})
+	if err != nil {
+		t.Fatalf("un-cancel + complete = %v, want success", err)
+	}
+	if updated.IsCancelled || !updated.IsDone || updated.QuickReplyID != qrID {
+		t.Errorf("row = cancelled %v / done %v / reply %q, want the completed row", updated.IsCancelled, updated.IsDone, updated.QuickReplyID)
+	}
+}
+
 func TestListAllActivitiesClampsHugePageIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

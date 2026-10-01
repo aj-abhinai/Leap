@@ -136,6 +136,9 @@ func TestMigration013RepairsCompletionState(t *testing.T) {
 		`INSERT INTO lead_activities (id, lead_id, stage_id, type, quick_reply_id, responded_at) VALUES ('00000000-0000-0000-0000-0000000000a6', '00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a2', 'Call', '00000000-0000-0000-0000-0000000000a5', now())`,
 		`INSERT INTO lead_activities (id, lead_id, stage_id, type, responded_at) VALUES ('00000000-0000-0000-0000-0000000000a7', '00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a2', 'Call', now())`,
 		`INSERT INTO lead_activities (id, lead_id, stage_id, type) VALUES ('00000000-0000-0000-0000-0000000000a8', '00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a2', 'Call')`,
+		// A cancelled row keeps its flags: the backfill leaves it alone (see
+		// the assertion below), so un-cancel is the one path back to open.
+		`INSERT INTO lead_activities (id, lead_id, stage_id, type, quick_reply_id, responded_at, is_cancelled) VALUES ('00000000-0000-0000-0000-0000000000a9', '00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a2', 'Call', '00000000-0000-0000-0000-0000000000a5', now(), true)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
@@ -173,6 +176,18 @@ func TestMigration013RepairsCompletionState(t *testing.T) {
 	}
 	if open {
 		t.Error("a plain open row must stay open")
+	}
+
+	// The backfill leaves cancelled rows alone: flipping them would surface
+	// them under the Done filter, which reads is_done alone.
+	var cancelledDone, cancelledFlag bool
+	if err := db.QueryRow(
+		`SELECT is_done, is_cancelled FROM lead_activities WHERE id = '00000000-0000-0000-0000-0000000000a9'`,
+	).Scan(&cancelledDone, &cancelledFlag); err != nil {
+		t.Fatalf("load cancelled reply row: %v", err)
+	}
+	if cancelledDone || !cancelledFlag {
+		t.Errorf("cancelled reply row = done %v / cancelled %v, want the carve-out to leave it alone", cancelledDone, cancelledFlag)
 	}
 
 	// The down file is comments only: a round trip proves the migrator executes

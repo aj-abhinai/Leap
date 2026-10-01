@@ -417,6 +417,14 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		return nil, ErrQuickReplyErasure
 	}
 
+	// Un-cancelling is the third way back to an open task. A legacy cancelled
+	// row can carry a reply the backfill left alone; refuse the reopen when the
+	// update would leave the row open with a recorded reply. A row that is
+	// already done stays done, so restoring it is not a reopen.
+	if req.IsCancelled != nil && !*req.IsCancelled && cur.IsCancelled && cur.QuickReplyID != "" && !cur.IsDone && !markDone {
+		return nil, ErrQuickReplyRecorded
+	}
+
 	// Stamp the response time when the activity gains a quick reply or is marked
 	// done for the first time. Only an un-complete clears it, in the UPDATE
 	// below.
@@ -453,6 +461,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 			updated_at = now()
 		WHERE id = $1 AND lead_id = $2
 			AND ($4 IS DISTINCT FROM false OR NOT is_done OR quick_reply_id IS NULL)
+			AND ($3::text IS NULL OR $3::text <> '' OR quick_reply_id IS NULL)
 		RETURNING id`,
 		activityID, leadID, req.QuickReplyID, done, respondedAt, req.Type, desc,
 		req.ScheduledAt.Set, req.ScheduledAt.Value, req.ScheduledEndAt.Set, req.ScheduledEndAt.Value,
@@ -460,10 +469,10 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		req.OccurredAt, req.IsCancelled,
 	).Scan(&updatedID)
 	if errors.Is(err, sql.ErrNoRows) {
-		// The WHERE clause re-checks the refusal against the row as the UPDATE
-		// sees it, so a reply recorded concurrently cannot slip past the guard's
-		// snapshot. A still-present row means the refusal; a missing row was
-		// deleted concurrently.
+		// The WHERE clause re-checks both refusals against the row as the
+		// UPDATE sees it, so a reply recorded concurrently cannot slip past the
+		// guard's snapshot. A still-present row means a refusal; a missing row
+		// was deleted concurrently.
 		var exists bool
 		if checkErr := tx.QueryRow(
 			`SELECT EXISTS(SELECT 1 FROM lead_activities WHERE id = $1 AND lead_id = $2)`,
@@ -472,6 +481,11 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 			return nil, fmt.Errorf("update activity: %w", checkErr)
 		}
 		if exists {
+			// The erasure re-check fails on a reply recorded concurrently; the
+			// un-complete re-check on a completion.
+			if req.QuickReplyID != nil && *req.QuickReplyID == "" {
+				return nil, ErrQuickReplyErasure
+			}
 			return nil, ErrQuickReplyRecorded
 		}
 		return nil, ErrNotFound
