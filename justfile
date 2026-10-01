@@ -95,7 +95,7 @@ build: build-ui build-backend
 # Build Go binary with stuffbin-packed frontend
 build-backend:
     @echo "Building backend..."
-    CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=dev' -X 'main.versionString=v0.1.0'" -o {{ bin }} ./cmd/server/
+    CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=dev'" -o {{ bin }} ./cmd/server/
     @echo "Packing frontend into binary..."
     MSYS_NO_PATHCONV=1 stuffbin -a stuff -in {{ bin }} -out {{ bin }}.stuffed frontend/dist:/frontend/dist migrations:/migrations
     mv {{ bin }}.stuffed {{ bin }}

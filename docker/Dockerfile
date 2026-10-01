@@ -11,7 +11,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /build/dist ./frontend/dist
-RUN CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=unknown' -X 'main.versionString=v0.1.2'" -o crm ./cmd/server/ \
+RUN CGO_ENABLED=0 go build -ldflags="-X 'main.buildString=unknown' -X 'main.versionString=v0.1.3'" -o crm ./cmd/server/ \
     && go install github.com/knadh/stuffbin/stuffbin@v1.3.0 \
     && "$(go env GOPATH)/bin/stuffbin" -a stuff -in crm -out crm.stuffed frontend/dist:/frontend/dist migrations:/migrations \
     && mv crm.stuffed crm
