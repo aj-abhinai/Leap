@@ -253,8 +253,8 @@ async function handleDelete() {
               </TableHead>
               <TableHead class="w-12" />
               <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
+              <TableHead>Email</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Tags</TableHead>
               <TableHead>Location</TableHead>
@@ -300,8 +300,8 @@ async function handleDelete() {
                 </div>
               </TableCell>
               <TableCell class="font-medium">{{ c.name }}</TableCell>
-              <TableCell class="text-muted-foreground">{{ c.email || '–' }}</TableCell>
               <TableCell class="text-muted-foreground">{{ c.phone || '–' }}</TableCell>
+              <TableCell class="text-muted-foreground">{{ c.email || '–' }}</TableCell>
               <TableCell>
                 <Badge v-if="c.status" variant="secondary">{{ c.status.name }}</Badge>
                 <span v-else class="text-muted-foreground">–</span>
