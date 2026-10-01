@@ -16,6 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { BookOpen, Plus } from '@lucide/vue'
 import { formatCurrency, formatContactDetail } from '@/utils/format'
 import LeadActivityForm from './LeadActivityForm.vue'
+import ScheduleTaskForm from './ScheduleTaskForm.vue'
 import LeadActivity from './LeadActivity.vue'
 import LeadStageHistory from './LeadStageHistory.vue'
 
@@ -146,7 +147,12 @@ function newLeadForContact() {
           @saved="handleSaved"
           @close-lost="handleCloseLost"
         />
-        <p v-else-if="rbac.can('lead:write') && isClosed()" class="text-xs text-muted-foreground">
+        <ScheduleTaskForm
+          v-if="rbac.can('lead:write') && !isClosed()"
+          :lead-id="lead.id!"
+          @saved="handleSaved"
+        />
+        <p v-if="rbac.can('lead:write') && isClosed()" class="text-xs text-muted-foreground">
           This deal is closed. Tasks are read-only.
         </p>
         <LeadActivity :lead-id="lead.id!" @close-lost="handleCloseLost" @tasks-changed="handleTasksChanged" />

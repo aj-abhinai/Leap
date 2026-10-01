@@ -72,8 +72,10 @@ async function fetchActivities() {
   }
 }
 
+// One switch answers "did it happen": is_done. Event stamps
+// (occurred_at/responded_at) are records of when, not the state.
 function isTouchpoint(a: LeadActivity): boolean {
-  return !!a.is_done || !!a.occurred_at || !!a.responded_at
+  return !!a.is_done
 }
 
 // Overdue uses the shared due-boundary rule so the timeline and the
@@ -86,14 +88,21 @@ function isUpcoming(a: LeadActivity): boolean {
   return !isTouchpoint(a) && !isOverdue(a)
 }
 
+// The quiet "planned for" trace shows only when the plan's day differs from
+// the day the task actually happened.
+function plannedDiffers(a: LeadActivity): boolean {
+  if (!a.occurred_at || !a.scheduled_at) return false
+  return new Date(a.occurred_at).toDateString() !== new Date(a.scheduled_at).toDateString()
+}
+
 // Upcoming sorted by soonest first; overdue sink to the top. Cancelled tasks
 // are history, not open work: they never belong to the actionable buckets.
 const openActivities = computed(() => {
   return activities.value
     .filter((a) => !isTouchpoint(a) && !a.is_cancelled)
     .sort((x, y) => {
-      const tx = new Date(x.scheduled_end_at || x.scheduled_at || x.remind_at || x.created_at).getTime()
-      const ty = new Date(y.scheduled_end_at || y.scheduled_at || y.remind_at || y.created_at).getTime()
+      const tx = new Date(x.scheduled_end_at || x.scheduled_at || x.remind_at || 0).getTime()
+      const ty = new Date(y.scheduled_end_at || y.scheduled_at || y.remind_at || 0).getTime()
       return tx - ty
     })
 })
@@ -206,6 +215,12 @@ defineExpose({ fetchActivities })
                     </span>
                     <span v-else class="text-xs text-muted-foreground/70 mt-1 block">
                       {{ formatDateTime(a.created_at) }} · {{ a.user_name || 'System' }}
+                    </span>
+                    <span
+                      v-if="a.occurred_at && a.scheduled_at && plannedDiffers(a)"
+                      class="text-xs text-muted-foreground/60 block"
+                    >
+                      planned for: {{ formatDateTime(a.scheduled_at) }}
                     </span>
                   </div>
                 </div>

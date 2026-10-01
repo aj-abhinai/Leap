@@ -18,15 +18,35 @@ describe('due', () => {
 })
 
 describe('dueLabel', () => {
-  it('is empty when there is no due boundary', () => {
-    expect(dueLabel({ created_at: '2026-10-01T00:00:00Z' })).toBe('')
+  it('is empty when an open row has no due boundary', () => {
+    expect(dueLabel({ is_done: false, created_at: '2026-10-01T00:00:00Z' })).toBe('')
   })
 
-  it('shows an all-day task as its date', () => {
+  it('shows an all-day open task as its date', () => {
     const start = new Date(2026, 8, 30).toISOString()
     const end = new Date(new Date(2026, 9, 1).getTime() - 1).toISOString()
-    expect(dueLabel({ scheduled_at: start, scheduled_end_at: end })).toBe(
+    expect(dueLabel({ is_done: false, scheduled_at: start, scheduled_end_at: end })).toBe(
       `${new Date(start).toLocaleDateString()} (all day)`,
     )
+  })
+
+  // History's clock is the happened stamp: a done row never displays the
+  // future date it was once scheduled for.
+  it('shows the happened time for a done row, not its old plan', () => {
+    const happened = new Date(2026, 9, 1, 12, 0).toISOString()
+    const plannedFuture = new Date(2026, 9, 15, 20, 0).toISOString()
+    expect(
+      dueLabel({
+        is_done: true,
+        occurred_at: happened,
+        scheduled_at: plannedFuture,
+        scheduled_end_at: plannedFuture,
+      }),
+    ).toBe(new Date(happened).toLocaleString())
+  })
+
+  it('falls back to responded_at for a done row without occurred_at', () => {
+    const responded = new Date(2026, 9, 1, 12, 0).toISOString()
+    expect(dueLabel({ is_done: true, responded_at: responded })).toBe(new Date(responded).toLocaleString())
   })
 })

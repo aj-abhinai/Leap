@@ -24,7 +24,7 @@ import { allDaySnoozePresets, nextPresets, reminderIcon, snoozePresets, groupQui
 import { formatDateTime, formatDate, toLocalDateInput, toLocalTimeInput, mergeDateTime, allDayRange, isAllDayRange } from '@/utils/time'
 import { typeLabel } from '@/utils/activity'
 import { Badge } from '@/components/ui/badge'
-import { updateLeadActivity, type LeadActivity } from '@/api/leads'
+import { updateLeadActivity, type LeadActivity, type ActivityMutationBody, type ActivityFollowUpBody } from '@/api/leads'
 import { errorMessage } from '@/utils/errors'
 
 export interface QuickReplyChip {
@@ -169,10 +169,10 @@ function cancelReschedule() {
   rescheduling.value = false
 }
 
-function pickrescheduleQuickReply(id: string) {
-  rescheduleQuickReply.value = id
-  rescheduleDate.value = ''
-  rescheduleTime.value = ''
+// A second tap un-picks the chip; the entered date survives, so picking a
+// chip never erases input.
+function pickRescheduleQuickReply(id: string) {
+  rescheduleQuickReply.value = rescheduleQuickReply.value === id ? '' : id
 }
 
 function pickReschedulePreset(preset: NextPreset) {
@@ -181,35 +181,44 @@ function pickReschedulePreset(preset: NextPreset) {
   rescheduleTime.value = toLocalTimeInput(at)
 }
 
-// One action: with a next time, the attempt is logged and the next task is
-// created; without one, the attempt is logged on its own.
+// One action: with a follow-up date, the attempt is logged and the follow-up
+// task is created; without one, the attempt is logged on its own. A date
+// without a time is the whole local day (start, end, and the 09:00 remind
+// travel together); a malformed date stops the save — input is never
+// discarded.
 async function saveReschedule() {
   const behavior = rescheduleBehavior.value
+
+  let followUp: ActivityFollowUpBody | undefined
+  if (behavior === 'next' && rescheduleDate.value) {
+    if (rescheduleTime.value) {
+      const start = mergeDateTime(rescheduleDate.value, rescheduleTime.value)
+      if (!start) {
+        toast.error('Enter a valid date')
+        return
+      }
+      followUp = { scheduled_at: start }
+    } else {
+      const day = allDayRange(rescheduleDate.value)
+      if (!day) {
+        toast.error('Enter a valid date')
+        return
+      }
+      followUp = { scheduled_at: day.start, scheduled_end_at: day.end, remind_at: day.remind }
+    }
+  }
+
   savingReschedule.value = true
   try {
-    if (behavior === 'next') {
-      // An empty value clears a quick reply recorded earlier on the task;
-      // null would keep it.
-      const body: Record<string, unknown> = {
-        is_done: true,
-        quick_reply_id: rescheduleQuickReply.value || '',
-      }
-      const next = mergeDateTime(rescheduleDate.value, rescheduleTime.value)
-      if (next) body.reschedule_at = next
-      await updateLeadActivity(props.leadId, props.activity.id, body)
-      toast.success(next ? 'Attempt logged, next task created' : 'Attempt logged')
-      cancelReschedule()
-      emit('changed')
-      return
-    }
-
-    // log / close_lost: complete without a next task. The empty value clears
-    // any quick reply recorded earlier on the task.
-    await updateLeadActivity(props.leadId, props.activity.id, {
+    // An empty value clears a quick reply recorded earlier on the task;
+    // null would keep it.
+    const body: ActivityMutationBody = {
       is_done: true,
       quick_reply_id: rescheduleQuickReply.value || '',
-    })
-    toast.success('Attempt logged')
+    }
+    if (followUp) body.follow_up = followUp
+    await updateLeadActivity(props.leadId, props.activity.id, body)
+    toast.success(followUp ? 'Attempt logged, follow-up created' : 'Attempt logged')
     cancelReschedule()
     emit('changed')
     if (behavior === 'close_lost') {
@@ -318,7 +327,7 @@ const snoozeOptions = computed(() => (isAllDay.value ? allDaySnoozePresets : sno
                   variant="outline"
                   class="h-7 gap-1 px-2.5 text-xs"
                   :class="statusChipClass(s.id)"
-                  @click="pickrescheduleQuickReply(s.id)"
+                  @click="pickRescheduleQuickReply(s.id)"
                 >
                   <Check v-if="rescheduleQuickReply === s.id" class="size-3" />
                   {{ s.name }}

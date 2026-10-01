@@ -10,6 +10,8 @@ export interface ActivityStatusLike {
   remind_at?: string
   scheduled_at?: string
   scheduled_end_at?: string
+  occurred_at?: string
+  responded_at?: string
   created_at?: string
 }
 
@@ -26,8 +28,8 @@ export function isOverdue(item: Pick<ActivityStatusLike, 'is_done' | 'is_cancell
   return !!boundary && new Date(boundary).getTime() < Date.now()
 }
 
-// due returns the effective due time: end (for a range), start, or reminder;
-// created_at is a record, never a due time.
+// due returns the effective due time for an open row: end (for a range),
+// start, or reminder; created_at is a record, never a due time.
 export function due(item: Pick<ActivityStatusLike, 'scheduled_end_at' | 'scheduled_at' | 'remind_at' | 'created_at'>): string {
   if (item.scheduled_end_at) return item.scheduled_end_at
   if (item.scheduled_at) return item.scheduled_at
@@ -35,7 +37,14 @@ export function due(item: Pick<ActivityStatusLike, 'scheduled_end_at' | 'schedul
   return ''
 }
 
-export function dueLabel(item: Pick<ActivityStatusLike, 'scheduled_end_at' | 'scheduled_at' | 'remind_at' | 'created_at'>): string {
+// dueLabel returns the date a row displays: the happened stamp for a done row
+// (history's clock), the due boundary for an open row. A done row never
+// displays its old planned date as the headline.
+export function dueLabel(item: Pick<ActivityStatusLike, 'is_done' | 'occurred_at' | 'responded_at' | 'scheduled_end_at' | 'scheduled_at' | 'remind_at' | 'created_at'>): string {
+  if (item.is_done) {
+    const t = item.occurred_at || item.responded_at
+    return t ? new Date(t).toLocaleString() : ''
+  }
   const t = due(item)
   if (!t) return ''
   if (isAllDayRange(item.scheduled_at, item.scheduled_end_at)) return `${formatDate(t)} (all day)`
