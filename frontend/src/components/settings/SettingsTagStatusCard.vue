@@ -52,9 +52,9 @@ const store = useSettingsStore()
 const newName = shallowRef('')
 const error = shallowRef('')
 const deletingId = shallowRef<string | null>(null)
-// Deep-reactive so v-model on nested fields (groupName/sortOrder/behavior)
+// Deep-reactive so v-model on nested fields (name/groupName/sortOrder/behavior)
 // updates the UI instead of mutating a shallow-ref payload silently.
-const editing = ref<{ id: string; groupName: string; sortOrder: number; behavior: string } | null>(null)
+const editing = ref<{ id: string; name: string; groupName: string; sortOrder: number; behavior: string } | null>(null)
 const editError = shallowRef('')
 const savingEdit = shallowRef(false)
 
@@ -141,6 +141,7 @@ function openEdit(id: string) {
   if (!item) return
   editing.value = {
     id,
+    name: item.name,
     groupName: item.group_name || '',
     sortOrder: item.sort_order,
     behavior: item.behavior,
@@ -150,15 +151,28 @@ function openEdit(id: string) {
 
 async function saveEdit() {
   if (!editing.value) return
+  const name = editing.value.name.trim()
+  if (!name) {
+    editError.value = 'Name is required'
+    return
+  }
+  // A cleared number box sends ''; decimals and out-of-range values fail the
+  // API's integer decode. Reject them here so the dialog shows a local message.
+  const sortOrder = Number(editing.value.sortOrder)
+  if (String(editing.value.sortOrder).trim() === '' || !Number.isSafeInteger(sortOrder)) {
+    editError.value = 'Sort order must be a whole number'
+    return
+  }
   savingEdit.value = true
   editError.value = ''
   try {
     await store.updateTag(editing.value.id, {
+      name,
       group_name: editing.value.groupName.trim(),
-      sort_order: editing.value.sortOrder,
+      sort_order: sortOrder,
       behavior: editing.value.behavior,
     })
-    toast.success('Status updated')
+    toast.success('Quick reply updated')
     editing.value = null
   } catch (e) {
     editError.value = errorMessage(e, 'Failed to update')
@@ -265,9 +279,13 @@ async function saveEdit() {
         <DialogContent class="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit quick reply</DialogTitle>
-            <DialogDescription>Configure the group and follow-up behavior.</DialogDescription>
+            <DialogDescription>Change the name, group, or follow-up behavior.</DialogDescription>
           </DialogHeader>
           <div v-if="editing" class="space-y-4 py-2">
+            <div class="space-y-2">
+              <Label class="text-xs">Name</Label>
+              <Input v-model="editing.name" :placeholder="placeholder" />
+            </div>
             <div class="space-y-2">
               <Label class="text-xs">Group</Label>
               <Input v-model="editing.groupName" placeholder="e.g. Connected, Not Connected, Heard Details" />
