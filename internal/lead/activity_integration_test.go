@@ -1457,6 +1457,72 @@ func TestListAllActivitiesDueSortDoneRowsKeyOnHappenedIntegration(t *testing.T) 
 	}
 }
 
+// A follow-up without a real start moment is refused: Go's zero time must
+// never become a task.
+func TestCreateActivityFollowUpRequiresStartIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type:     "Call",
+		FollowUp: &FollowUpRequest{},
+	}); !errors.Is(err, ErrInvalidRange) {
+		t.Errorf("create with a zero follow-up start = %v, want ErrInvalidRange", err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM lead_activities WHERE lead_id = $1`, created.ID).Scan(&count); err != nil {
+		t.Fatalf("count activities: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("rows after a refused follow-up = %d, want 0", count)
+	}
+}
+
+func TestUpdateActivityFollowUpRequiresStartIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	done := true
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
+		IsDone:   &done,
+		FollowUp: &FollowUpRequest{},
+	}); !errors.Is(err, ErrInvalidRange) {
+		t.Errorf("update with a zero follow-up start = %v, want ErrInvalidRange", err)
+	}
+
+	var isDone bool
+	if err := db.QueryRow(`SELECT is_done FROM lead_activities WHERE id = $1`, act.ID).Scan(&isDone); err != nil {
+		t.Fatalf("load activity: %v", err)
+	}
+	if isDone {
+		t.Error("the row must stay open after a refused follow-up")
+	}
+}
+
 func TestCreateActivityDoneWithOutcomeIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

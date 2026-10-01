@@ -143,4 +143,56 @@ describe('TaskRow', () => {
       scheduled_at: new Date(2026, 9, 8, 15, 30).toISOString(),
     })
   })
+
+  // No chip picked means no follow-up: the schedule fields stay hidden and
+  // the save records the attempt alone.
+  it('creates no follow-up when no outcome is picked', async () => {
+    const wrapper = mount(TaskRow, {
+      props: {
+        leadId: 'l1',
+        activity: allDayActivity(),
+        quickReplies: [{ id: 'q2', name: 'No Reply', group_name: 'NC', sort_order: 0, behavior: 'next' }],
+        activityTypes: [],
+      },
+    })
+    const vm = wrapper.vm as unknown as { startReschedule: () => void }
+    vm.startReschedule()
+    await nextTick()
+
+    expect(wrapper.find('input[type="date"]').exists()).toBe(false)
+
+    const save = wrapper.findAll('button').find((b) => b.text() === 'Save')
+    expect(save).toBeTruthy()
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    const payload = updateMock.mock.calls[0][2] as Record<string, unknown>
+    expect(payload.is_done).toBe(true)
+    expect(payload.follow_up).toBeUndefined()
+  })
+
+  // An all-day task prefills its date only: the time box stays empty so the
+  // save rebuilds the whole day instead of a midnight point.
+  it('prefills the date only for an all-day task', async () => {
+    const wrapper = mount(TaskRow, {
+      props: {
+        leadId: 'l1',
+        activity: allDayActivity(),
+        quickReplies: [{ id: 'q2', name: 'No Reply', group_name: 'NC', sort_order: 0, behavior: 'next' }],
+        activityTypes: [],
+      },
+    })
+    const vm = wrapper.vm as unknown as { startReschedule: () => void }
+    vm.startReschedule()
+    await nextTick()
+
+    const chip = wrapper.findAll('button').find((b) => b.text().includes('No Reply'))
+    expect(chip).toBeTruthy()
+    await chip!.trigger('click')
+    await nextTick()
+
+    expect((wrapper.find('input[type="date"]').element as HTMLInputElement).value).toBe('2026-09-30')
+    expect((wrapper.find('input[type="time"]').element as HTMLInputElement).value).toBe('')
+  })
 })

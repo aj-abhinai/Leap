@@ -109,6 +109,22 @@ func validateActivityFields(typeValue string) error {
 	return nil
 }
 
+// validateFollowUp enforces the follow-up contract on completing saves: a
+// real start moment is required — Go's zero time must never become a task —
+// and an optional day span must end after it starts.
+func validateFollowUp(fu *FollowUpRequest) error {
+	if fu == nil {
+		return nil
+	}
+	if fu.ScheduledAt.IsZero() {
+		return ErrInvalidRange
+	}
+	if fu.ScheduledEndAt != nil && !fu.ScheduledEndAt.After(fu.ScheduledAt) {
+		return ErrInvalidRange
+	}
+	return nil
+}
+
 // scanActivity scans one row produced by activitySelect into an Activity.
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -214,9 +230,8 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	if req.ScheduledEndAt != nil && (req.ScheduledAt == nil || !req.ScheduledEndAt.After(*req.ScheduledAt)) {
 		return nil, ErrInvalidRange
 	}
-	// A follow-up's span must end after it starts.
-	if req.FollowUp != nil && req.FollowUp.ScheduledEndAt != nil && !req.FollowUp.ScheduledEndAt.After(req.FollowUp.ScheduledAt) {
-		return nil, ErrInvalidRange
+	if err := validateFollowUp(req.FollowUp); err != nil {
+		return nil, err
 	}
 
 	tx, err := s.db.Begin()
@@ -335,6 +350,9 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		!req.ScheduledAt.Set && !req.ScheduledEndAt.Set && !req.RemindAt.Set && req.OccurredAt == nil &&
 		req.IsCancelled == nil && req.FollowUp == nil {
 		return nil, ErrNothingToUpdate
+	}
+	if err := validateFollowUp(req.FollowUp); err != nil {
+		return nil, err
 	}
 
 	tx, err := s.db.Begin()

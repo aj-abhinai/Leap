@@ -153,16 +153,26 @@ const selectedRescheduleChip = computed(() =>
   props.quickReplies.find((s) => s.id === rescheduleQuickReply.value),
 )
 
-const rescheduleBehavior = computed(() => selectedRescheduleChip.value?.behavior || 'next')
+// No chip picked behaves like the log outcome: the attempt is recorded on
+// its own — nothing to schedule, no follow-up.
+const rescheduleBehavior = computed(() => selectedRescheduleChip.value?.behavior || 'log')
 
 const showRescheduleNext = computed(() => rescheduleBehavior.value === 'next')
 const showRescheduleCloseNotice = computed(() => rescheduleBehavior.value === 'close_lost')
 
 function startReschedule() {
   rescheduling.value = true
-  rescheduleDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
-  rescheduleTime.value = props.activity.scheduled_at ? toLocalTimeInput(props.activity.scheduled_at) : ''
   rescheduleQuickReply.value = ''
+  // An all-day task prefills its date only: the day window is implied and is
+  // rebuilt on save from the date alone. Seeding 00:00 would turn the
+  // follow-up into a midnight point task with a previous-evening reminder.
+  if (isAllDayRange(props.activity.scheduled_at, props.activity.scheduled_end_at)) {
+    rescheduleDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
+    rescheduleTime.value = ''
+  } else {
+    rescheduleDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
+    rescheduleTime.value = props.activity.scheduled_at ? toLocalTimeInput(props.activity.scheduled_at) : ''
+  }
 }
 
 function cancelReschedule() {
@@ -426,10 +436,10 @@ const snoozeOptions = computed(() => (isAllDay.value ? allDaySnoozePresets : sno
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem class="cursor-pointer" @click="startEdit">
-              <Pencil class="size-3.5 mr-2" /> Edit
+              <Pencil class="size-3.5 mr-2" /> Edit / Move
             </DropdownMenuItem>
             <DropdownMenuItem class="cursor-pointer" @click="startReschedule">
-              <CalendarClock class="size-3.5 mr-2" /> Reschedule
+              <CalendarClock class="size-3.5 mr-2" /> Log outcome…
             </DropdownMenuItem>
             <DropdownMenuSub v-if="activity.remind_at">
               <DropdownMenuSubTrigger>
