@@ -178,6 +178,19 @@ type Activity struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// FollowUpRequest creates the next Open task when a completing save carries
+// it. ScheduledAt is required. ScheduledEndAt and RemindAt carry the all-day
+// span (00:00, end-of-day, 09:00) computed by the client from the user's
+// local clock; an explicit RemindAt wins over the nudge-lead default so it
+// never lands on the previous evening. Type defaults to the completed
+// task's type when empty.
+type FollowUpRequest struct {
+	Type           string     `json:"type,omitempty"`
+	ScheduledAt    time.Time  `json:"scheduled_at"`
+	ScheduledEndAt *time.Time `json:"scheduled_end_at,omitempty"`
+	RemindAt       *time.Time `json:"remind_at,omitempty"`
+}
+
 type CreateActivityRequest struct {
 	Type         string     `json:"type"`
 	Description  string     `json:"description"`
@@ -187,10 +200,10 @@ type CreateActivityRequest struct {
 	// ScheduledAt when present.
 	ScheduledEndAt *time.Time `json:"scheduled_end_at,omitempty"`
 	RemindAt       *time.Time `json:"remind_at,omitempty"`
-	// RescheduleAt, when set with a quick reply, logs the completed attempt and
-	// auto-creates the next occurrence of the same type at this time (the
-	// create-form equivalent of updateActivity's reschedule flow).
-	RescheduleAt *time.Time `json:"reschedule_at,omitempty"`
+	// FollowUp, when set, logs the completed attempt and creates the next
+	// Open task from these fields (the create-form equivalent of
+	// updateActivity's follow-up flow).
+	FollowUp *FollowUpRequest `json:"follow_up,omitempty"`
 	// IsDone, when true, creates the activity already completed (e.g. a
 	// close_lost quick reply logged from the create form). occurred_at is
 	// stamped.
@@ -212,9 +225,9 @@ type UpdateActivityRequest struct {
 	RemindAt       optionalTime `json:"remind_at,omitempty"`
 	OccurredAt     *time.Time   `json:"occurred_at,omitempty"`
 	IsCancelled    *bool        `json:"is_cancelled,omitempty"`
-	// RescheduleAt, when set with is_done=true, logs the completed attempt and
-	// auto-creates the next occurrence of the same type at this time.
-	RescheduleAt *time.Time `json:"reschedule_at,omitempty"`
+	// FollowUp, when set with a completion, logs the completed attempt and
+	// creates the next Open task from these fields.
+	FollowUp *FollowUpRequest `json:"follow_up,omitempty"`
 }
 
 // optionalTime decodes a nullable timestamp while recording whether the field

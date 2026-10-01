@@ -872,9 +872,9 @@ func TestListAllActivitiesQuickReplyRowsAreDoneIntegration(t *testing.T) {
 	}
 }
 
-// A quick reply that completes the task with a reschedule time spawns the next
-// occurrence: the completion comes from the reply, not from an explicit is_done.
-func TestUpdateActivityQuickReplyWithRescheduleSpawnsNextIntegration(t *testing.T) {
+// A quick reply that completes the task with a follow-up spawns the next
+// Open task: the completion comes from the reply, not from an explicit is_done.
+func TestUpdateActivityQuickReplyWithFollowUpSpawnsNextIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
@@ -896,10 +896,10 @@ func TestUpdateActivityQuickReplyWithRescheduleSpawnsNextIntegration(t *testing.
 	next := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
 	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
 		QuickReplyID: &qrID,
-		RescheduleAt: &next,
+		FollowUp:     &FollowUpRequest{ScheduledAt: next},
 	})
 	if err != nil {
-		t.Fatalf("reschedule with a quick reply: %v", err)
+		t.Fatalf("follow-up with a quick reply: %v", err)
 	}
 	if !updated.IsDone {
 		t.Error("the logged attempt should be done")
@@ -1132,7 +1132,7 @@ func TestUpdateActivityAbsentScheduleKeepsValueIntegration(t *testing.T) {
 	}
 }
 
-func TestUpdateActivityRescheduleSpawnsNextIntegration(t *testing.T) {
+func TestUpdateActivityFollowUpSpawnsNextIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
@@ -1153,11 +1153,11 @@ func TestUpdateActivityRescheduleSpawnsNextIntegration(t *testing.T) {
 	done := true
 	next := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
 	updated, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
-		IsDone:       &done,
-		RescheduleAt: &next,
+		IsDone:   &done,
+		FollowUp: &FollowUpRequest{ScheduledAt: next},
 	})
 	if err != nil {
-		t.Fatalf("reschedule update: %v", err)
+		t.Fatalf("follow-up update: %v", err)
 	}
 	if !updated.IsDone {
 		t.Error("original activity should be marked done")
@@ -1183,7 +1183,7 @@ func TestUpdateActivityRescheduleSpawnsNextIntegration(t *testing.T) {
 	}
 }
 
-func TestCreateActivityRescheduleSpawnsNextIntegration(t *testing.T) {
+func TestCreateActivityFollowUpSpawnsNextIntegration(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)
 
@@ -1199,17 +1199,17 @@ func TestCreateActivityRescheduleSpawnsNextIntegration(t *testing.T) {
 
 	next := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
 	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
-		Type:         "Call 1",
-		RescheduleAt: &next,
+		Type:     "Call 1",
+		FollowUp: &FollowUpRequest{ScheduledAt: next},
 	})
 	if err != nil {
-		t.Fatalf("create activity with reschedule: %v", err)
+		t.Fatalf("create activity with follow-up: %v", err)
 	}
 	if !act.IsDone {
 		t.Error("completed attempt should be marked done")
 	}
 	if act.RespondedAt == nil {
-		t.Error("responded_at should be stamped on a rescheduled attempt")
+		t.Error("responded_at should be stamped on a follow-up attempt")
 	}
 
 	var nextID string
@@ -1225,6 +1225,235 @@ func TestCreateActivityRescheduleSpawnsNextIntegration(t *testing.T) {
 	}
 	if nextScheduled == nil || !nextScheduled.Equal(next) {
 		t.Errorf("next scheduled_at = %v, want %v", nextScheduled, next)
+	}
+}
+
+// An all-day follow-up carries its whole span: the day start, the day end,
+// and an explicit 09:00 remind that must not be shifted by the nudge-lead
+// default — the default would land it on the previous evening.
+func TestUpdateActivityFollowUpAllDaySpanIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	qrID := seedQuickReplyTagBehavior(t, db, "Rescheduled", "next")
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	dayStart := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	dayEnd := dayStart.Add(24*time.Hour - time.Millisecond)
+	remindAt := dayStart.Add(9 * time.Hour)
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
+		QuickReplyID: &qrID,
+		FollowUp: &FollowUpRequest{
+			ScheduledAt:    dayStart,
+			ScheduledEndAt: &dayEnd,
+			RemindAt:       &remindAt,
+		},
+	}); err != nil {
+		t.Fatalf("all-day follow-up: %v", err)
+	}
+
+	var start, end, remind *time.Time
+	if err := db.QueryRow(
+		`SELECT scheduled_at, scheduled_end_at, remind_at FROM lead_activities WHERE lead_id = $1 AND is_done = false`,
+		created.ID,
+	).Scan(&start, &end, &remind); err != nil {
+		t.Fatalf("load follow-up: %v", err)
+	}
+	if start == nil || !start.Equal(dayStart) {
+		t.Errorf("follow-up scheduled_at = %v, want %v", start, dayStart)
+	}
+	if end == nil || !end.Equal(dayEnd) {
+		t.Errorf("follow-up scheduled_end_at = %v, want %v", end, dayEnd)
+	}
+	if remind == nil || !remind.Equal(remindAt) {
+		t.Errorf("follow-up remind_at = %v, want the explicit %v (not lead-shifted)", remind, remindAt)
+	}
+}
+
+// The create path round-trips the same all-day span.
+func TestCreateActivityFollowUpAllDaySpanIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	dayStart := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	dayEnd := dayStart.Add(24*time.Hour - time.Millisecond)
+	remindAt := dayStart.Add(9 * time.Hour)
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{
+		Type: "Call",
+		FollowUp: &FollowUpRequest{
+			ScheduledAt:    dayStart,
+			ScheduledEndAt: &dayEnd,
+			RemindAt:       &remindAt,
+		},
+	}); err != nil {
+		t.Fatalf("create with all-day follow-up: %v", err)
+	}
+
+	var start, end, remind *time.Time
+	if err := db.QueryRow(
+		`SELECT scheduled_at, scheduled_end_at, remind_at FROM lead_activities WHERE lead_id = $1 AND is_done = false`,
+		created.ID,
+	).Scan(&start, &end, &remind); err != nil {
+		t.Fatalf("load follow-up: %v", err)
+	}
+	if start == nil || !start.Equal(dayStart) {
+		t.Errorf("follow-up scheduled_at = %v, want %v", start, dayStart)
+	}
+	if end == nil || !end.Equal(dayEnd) {
+		t.Errorf("follow-up scheduled_end_at = %v, want %v", end, dayEnd)
+	}
+	if remind == nil || !remind.Equal(remindAt) {
+		t.Errorf("follow-up remind_at = %v, want the explicit %v (not lead-shifted)", remind, remindAt)
+	}
+}
+
+// A follow-up's type overrides the completed task's type when set.
+func TestUpdateActivityFollowUpTypeOverrideIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	done := true
+	next := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
+		IsDone:   &done,
+		FollowUp: &FollowUpRequest{Type: "Send Details", ScheduledAt: next},
+	}); err != nil {
+		t.Fatalf("typed follow-up: %v", err)
+	}
+
+	var nextType string
+	if err := db.QueryRow(
+		`SELECT type FROM lead_activities WHERE lead_id = $1 AND is_done = false`,
+		created.ID,
+	).Scan(&nextType); err != nil {
+		t.Fatalf("load follow-up: %v", err)
+	}
+	if nextType != "Send Details" {
+		t.Errorf("follow-up type = %q, want %q", nextType, "Send Details")
+	}
+}
+
+// A follow-up without an explicit remind takes the nudge-lead default before
+// its start.
+func TestUpdateActivityFollowUpDefaultNudgeIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+	act, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Call"})
+	if err != nil {
+		t.Fatalf("create activity: %v", err)
+	}
+
+	done := true
+	next := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{
+		IsDone:   &done,
+		FollowUp: &FollowUpRequest{ScheduledAt: next},
+	}); err != nil {
+		t.Fatalf("follow-up without explicit remind: %v", err)
+	}
+
+	var remind *time.Time
+	if err := db.QueryRow(
+		`SELECT remind_at FROM lead_activities WHERE lead_id = $1 AND is_done = false`,
+		created.ID,
+	).Scan(&remind); err != nil {
+		t.Fatalf("load follow-up: %v", err)
+	}
+	if remind == nil || !remind.Before(next) {
+		t.Errorf("follow-up remind_at = %v, want a nudge before %v", remind, next)
+	}
+}
+
+// A done row sorts by its happened stamp, not by the future date it was once
+// scheduled for.
+func TestListAllActivitiesDueSortDoneRowsKeyOnHappenedIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	pipelineID, stageID := seedPipelineAndStage(t, db)
+	created, err := svc.create(CreateRequest{
+		NewContact: &NewContact{Name: "Alice", Phone: "1234567890"},
+		PipelineID: pipelineID,
+		StageID:    stageID,
+	}, "")
+	if err != nil {
+		t.Fatalf("create lead: %v", err)
+	}
+
+	// The legacy ghost shape: scheduled far ahead, completed now.
+	future := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
+	ghost, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Ghost", ScheduledAt: &future})
+	if err != nil {
+		t.Fatalf("create ghost task: %v", err)
+	}
+	done := true
+	if _, err := svc.updateActivity(created.ID, ghost.ID, "", UpdateActivityRequest{IsDone: &done}); err != nil {
+		t.Fatalf("complete ghost task: %v", err)
+	}
+	// An open task due within the hour.
+	soon := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	if _, err := svc.createActivity(created.ID, stageID, "", CreateActivityRequest{Type: "Soon", ScheduledAt: &soon}); err != nil {
+		t.Fatalf("create soon task: %v", err)
+	}
+
+	items, _, err := svc.listAllActivities(ActivityListFilters{Sort: "due_at", Order: "asc", Page: 1, PerPage: 50})
+	if err != nil {
+		t.Fatalf("list due asc: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("due asc = %d rows, want 2", len(items))
+	}
+	if items[0].Type != "Ghost" {
+		t.Errorf("due asc [0] = %q, want %q (the happened-now row first, not its future schedule)", items[0].Type, "Ghost")
+	}
+	if items[1].Type != "Soon" {
+		t.Errorf("due asc [1] = %q, want %q", items[1].Type, "Soon")
 	}
 }
 
@@ -1262,7 +1491,7 @@ func TestCreateActivityDoneWithOutcomeIntegration(t *testing.T) {
 		t.Error("occurred_at should be stamped when created done")
 	}
 
-	// No spawn: is_done without reschedule_at is a plain completion.
+	// No spawn: is_done without a follow-up is a plain completion.
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM lead_activities WHERE lead_id = $1`, created.ID).Scan(&count); err != nil {
 		t.Fatalf("count activities: %v", err)
@@ -1723,8 +1952,8 @@ func TestUpdateActivityOnClosedLeadAllowsRecordFixesIntegration(t *testing.T) {
 	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{RemindAt: optTime(&future)}); !errors.Is(err, ErrLeadClosed) {
 		t.Errorf("new reminder on a closed lead = %v, want ErrLeadClosed", err)
 	}
-	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{RescheduleAt: &future}); !errors.Is(err, ErrLeadClosed) {
-		t.Errorf("reschedule on a closed lead = %v, want ErrLeadClosed", err)
+	if _, err := svc.updateActivity(created.ID, act.ID, "", UpdateActivityRequest{FollowUp: &FollowUpRequest{ScheduledAt: future}}); !errors.Is(err, ErrLeadClosed) {
+		t.Errorf("follow-up on a closed lead = %v, want ErrLeadClosed", err)
 	}
 }
 

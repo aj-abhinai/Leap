@@ -189,14 +189,29 @@ export function listLeadActivities(leadId: string): Promise<ApiResponse<LeadActi
   return apiClient.get(`/api/leads/${leadId}/activities`)
 }
 
-export function createLeadActivity(leadId: string, body: Record<string, unknown>): Promise<ApiResponse<LeadActivity>> {
+// ActivityFollowUpBody creates the next Open task on a completing save. A
+// date without a time travels as its whole local day (start, end, 09:00
+// remind), computed by the client from the user's clock. Type defaults to
+// the completed task's type when omitted.
+export interface ActivityFollowUpBody {
+  type?: string
+  scheduled_at: string
+  scheduled_end_at?: string
+  remind_at?: string
+}
+
+// ActivityMutationBody is a create/update activity payload. follow_up is the
+// typed part; the rest stays open until the request structs are typed whole.
+export type ActivityMutationBody = Record<string, unknown> & { follow_up?: ActivityFollowUpBody }
+
+export function createLeadActivity(leadId: string, body: ActivityMutationBody): Promise<ApiResponse<LeadActivity>> {
   return apiClient.post(`/api/leads/${leadId}/activities`, body)
 }
 
 export function updateLeadActivity(
   leadId: string,
   activityId: string,
-  body: Record<string, unknown>,
+  body: ActivityMutationBody,
 ): Promise<ApiResponse<LeadActivity>> {
   return apiClient.patch(`/api/leads/${leadId}/activities/${activityId}`, body)
 }

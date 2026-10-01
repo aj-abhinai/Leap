@@ -1750,8 +1750,8 @@ func TestRescheduleAfterStageDeletionUsesCurrentStageIntegration(t *testing.T) {
 
 	done := true
 	next := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
-	if _, err := svc.updateActivity(created.ID, task.ID, "", UpdateActivityRequest{IsDone: &done, RescheduleAt: &next}); err != nil {
-		t.Fatalf("reschedule after stage deletion: %v", err)
+	if _, err := svc.updateActivity(created.ID, task.ID, "", UpdateActivityRequest{IsDone: &done, FollowUp: &FollowUpRequest{ScheduledAt: next}}); err != nil {
+		t.Fatalf("follow-up after stage deletion: %v", err)
 	}
 
 	acts, _, err := svc.listActivities(created.ID, 1, 20)

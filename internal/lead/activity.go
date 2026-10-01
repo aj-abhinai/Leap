@@ -214,6 +214,10 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	if req.ScheduledEndAt != nil && (req.ScheduledAt == nil || !req.ScheduledEndAt.After(*req.ScheduledAt)) {
 		return nil, ErrInvalidRange
 	}
+	// A follow-up's span must end after it starts.
+	if req.FollowUp != nil && req.FollowUp.ScheduledEndAt != nil && !req.FollowUp.ScheduledEndAt.After(req.FollowUp.ScheduledAt) {
+		return nil, ErrInvalidRange
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -238,15 +242,15 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 	}
 
 	// A quick reply records what happened, so it completes the activity. A
-	// reschedule_at also implies the attempt happened. IsDone completes an
+	// follow-up also implies the attempt happened. IsDone completes an
 	// activity created in one shot (close_lost from the create form), stamping
 	// occurred_at so it survives the closing-stage move.
 	newQuickReply := req.QuickReplyID != nil && *req.QuickReplyID != ""
 	var respondedAt any
-	if newQuickReply || req.RescheduleAt != nil {
+	if newQuickReply || req.FollowUp != nil {
 		respondedAt = time.Now()
 	}
-	isDone := req.RescheduleAt != nil || (req.IsDone != nil && *req.IsDone) || newQuickReply
+	isDone := req.FollowUp != nil || (req.IsDone != nil && *req.IsDone) || newQuickReply
 	var occurredAt any
 	if isDone {
 		occurredAt = time.Now()
@@ -270,18 +274,28 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 		return nil, err
 	}
 
-	// "Log attempt + next": a created-and-completed activity with a reschedule
-	// time spawns the next occurrence of the same type at the new time, with
-	// its reminder set to the nudge lead time before the new schedule — the
-	// same default as a directly scheduled task. A close_lost reply never
+	// "Log attempt + next": a created-and-completed activity with a follow-up
+	// spawns the next Open task from the follow-up fields — the same shape as
+	// a directly scheduled task. The type defaults to the completed attempt's
+	// type, and an explicit remind wins: the nudge-lead default would land an
+	// all-day 09:00 remind on the previous evening. A close_lost reply never
 	// spawns a next task — the deal ends here.
-	if req.RescheduleAt != nil && behavior != closeLostBehavior {
-		lead, err := settings.NudgeLeadMinutes(tx)
-		if err != nil {
-			return nil, err
+	if req.FollowUp != nil && behavior != closeLostBehavior {
+		nextType := strings.TrimSpace(req.FollowUp.Type)
+		if nextType == "" {
+			nextType = req.Type
 		}
-		nextRemind := req.RescheduleAt.Add(-time.Duration(lead) * time.Minute)
-		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, req.Type, "", nil, req.RescheduleAt, nil, &nextRemind, nil, nil, false); err != nil {
+		nextRemind := req.FollowUp.RemindAt
+		if nextRemind == nil {
+			lead, err := settings.NudgeLeadMinutes(tx)
+			if err != nil {
+				return nil, err
+			}
+			t := req.FollowUp.ScheduledAt.Add(-time.Duration(lead) * time.Minute)
+			nextRemind = &t
+		}
+		nextStart := req.FollowUp.ScheduledAt
+		if _, err := s.insertActivityTx(tx, leadID, a.StageID, userID, nextType, "", nil, &nextStart, req.FollowUp.ScheduledEndAt, nextRemind, nil, nil, false); err != nil {
 			return nil, fmt.Errorf("create next activity: %w", err)
 		}
 	}
@@ -305,10 +319,10 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 // time; occurred_at is stamped on completion unless supplied explicitly.
 // Editing remind_at re-opens the reminder (is_reminded = false).
 //
-// The "log attempt + next" reschedule flow: when is_done=true and a
-// reschedule_at is supplied, the completed attempt is logged and a new task of
-// the same type is created for reschedule_at, with its reminder set to the
-// nudge lead time before the new schedule.
+// The "log attempt + next" follow-up flow: when a completion carries a
+// follow_up, the completed attempt is logged and the next Open task is created
+// from the follow-up fields; its type defaults to the completed task's type
+// and an explicit remind wins over the nudge-lead default.
 //
 // A quick reply whose behavior is close_lost also moves the lead to its
 // pipeline's lost closing stage in the same transaction, so the logged reply
@@ -319,7 +333,7 @@ func (s *Service) createActivity(leadID, stageID, userID string, req CreateActiv
 func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateActivityRequest) (*Activity, error) {
 	if req.QuickReplyID == nil && req.IsDone == nil && req.Type == nil && req.Description == nil &&
 		!req.ScheduledAt.Set && !req.ScheduledEndAt.Set && !req.RemindAt.Set && req.OccurredAt == nil &&
-		req.IsCancelled == nil && req.RescheduleAt == nil {
+		req.IsCancelled == nil && req.FollowUp == nil {
 		return nil, ErrNothingToUpdate
 	}
 
@@ -512,16 +526,23 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 	}
 
 	// "Log attempt + next": when this update completes the task and carries a
-	// reschedule time, the next occurrence of the same type is created at the
-	// new time. A close_lost reply never spawns a next task — the deal ends
-	// here. The next task's reminder defaults to the nudge lead time before the
-	// new schedule.
-	if req.RescheduleAt != nil && markDone && !a.IsCancelled && behavior != closeLostBehavior {
-		nextRemind := req.RescheduleAt
-		if lead, err := settings.NudgeLeadMinutes(tx); err != nil {
-			return nil, err
-		} else {
-			t := req.RescheduleAt.Add(-time.Duration(lead) * time.Minute)
+	// follow-up, the next Open task is created from the follow-up fields. The
+	// type defaults to the completed task's (merged) type; an explicit remind
+	// wins over the nudge-lead default, which would land an all-day 09:00
+	// remind on the previous evening. A close_lost reply never spawns a next
+	// task — the deal ends here.
+	if req.FollowUp != nil && markDone && !a.IsCancelled && behavior != closeLostBehavior {
+		nextType := strings.TrimSpace(req.FollowUp.Type)
+		if nextType == "" {
+			nextType = mergedType
+		}
+		nextRemind := req.FollowUp.RemindAt
+		if nextRemind == nil {
+			lead, err := settings.NudgeLeadMinutes(tx)
+			if err != nil {
+				return nil, err
+			}
+			t := req.FollowUp.ScheduledAt.Add(-time.Duration(lead) * time.Minute)
 			nextRemind = &t
 		}
 		// The next task belongs to where the lead is now: the completed row's
@@ -534,7 +555,8 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 		).Scan(&currentStageID); err != nil {
 			return nil, fmt.Errorf("create next activity: load lead stage: %w", err)
 		}
-		if _, err := s.insertActivityTx(tx, leadID, currentStageID, userID, mergedType, "", nil, req.RescheduleAt, nil, nextRemind, nil, nil, false); err != nil {
+		nextStart := req.FollowUp.ScheduledAt
+		if _, err := s.insertActivityTx(tx, leadID, currentStageID, userID, nextType, "", nil, &nextStart, req.FollowUp.ScheduledEndAt, nextRemind, nil, nil, false); err != nil {
 			return nil, fmt.Errorf("create next activity: %w", err)
 		}
 	}
@@ -554,7 +576,7 @@ func (s *Service) updateActivity(leadID, activityID, userID string, req UpdateAc
 // activityReactivationRequested reports whether an update would put a task
 // back into working state on a terminal lead: un-cancelling, un-completing,
 // moving a schedule or reminder to a new non-nil value, or the
-// log-attempt-plus-next reschedule. Record-only edits (type, description,
+// log-attempt-plus-next follow-up. Record-only edits (type, description,
 // quick reply, occurred time), completing a historical row, clearing a
 // timestamp, and resubmitting the stored value are not reactivation: a flag
 // that matches the stored row is a no-op, whichever way it points.
@@ -565,7 +587,7 @@ func activityReactivationRequested(req UpdateActivityRequest, cur Activity) bool
 	if req.IsDone != nil && !*req.IsDone && cur.IsDone {
 		return true
 	}
-	if req.RescheduleAt != nil {
+	if req.FollowUp != nil {
 		return true
 	}
 	return newTimestamp(req.ScheduledAt, cur.ScheduledAt) ||
@@ -847,16 +869,16 @@ func (s *Service) listAllActivities(f ActivityListFilters) ([]ActivityListItem, 
 		return nil, 0, fmt.Errorf("count all activities: %w", err)
 	}
 
+	// Done rows key on the happened stamp; open rows on the due boundary.
+	dueOrder := "CASE WHEN la.is_done THEN COALESCE(la.occurred_at, la.responded_at, la.created_at) ELSE COALESCE(la.scheduled_end_at, la.scheduled_at, la.remind_at, la.created_at) END"
 	var orderBy string
 	switch f.Sort {
 	case "type":
 		orderBy = "la.type"
 	case "created_at":
 		orderBy = "la.created_at"
-	case "due_at":
-		orderBy = "COALESCE(la.scheduled_end_at, la.scheduled_at, la.remind_at, la.created_at)"
 	default:
-		orderBy = "COALESCE(la.scheduled_end_at, la.scheduled_at, la.remind_at, la.created_at)"
+		orderBy = dueOrder
 	}
 	offset := util.Offset(f.Page, f.PerPage)
 

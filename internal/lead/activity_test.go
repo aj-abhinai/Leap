@@ -36,7 +36,7 @@ func TestActivityReactivationRequested(t *testing.T) {
 		{"resubmitted reminder is not reactivation", UpdateActivityRequest{RemindAt: optTime(&now)}, Activity{RemindAt: &now}, false},
 		{"cleared schedule is not reactivation", UpdateActivityRequest{ScheduledAt: optTime(nil)}, Activity{ScheduledAt: &now}, false},
 		{"cleared reminder is not reactivation", UpdateActivityRequest{RemindAt: optTime(nil)}, Activity{RemindAt: &now}, false},
-		{"reschedule is reactivation", UpdateActivityRequest{RescheduleAt: &later}, Activity{}, true},
+		{"follow-up is reactivation", UpdateActivityRequest{FollowUp: &FollowUpRequest{ScheduledAt: later}}, Activity{}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
