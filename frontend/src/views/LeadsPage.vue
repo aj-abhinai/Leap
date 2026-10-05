@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Input } from '@/components/ui/input'
@@ -27,7 +28,8 @@ import { useUsersStore } from '@/stores/users'
 import { toast } from 'vue-sonner'
 import { Plus, Layers, Search, X } from '@lucide/vue'
 import type { LeadSaveBody } from '@/components/leads/LeadForm.vue'
-import { useLeadPipeline } from '@/composables/useLeadPipeline'
+import { usePipelineStore } from '@/stores/pipeline'
+import { useLeadsBoardStore } from '@/stores/leadsBoard'
 import { useLeadDrawer } from '@/composables/useLeadDrawer'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 import { debounce } from '@/utils/debounce'
@@ -39,8 +41,10 @@ const router = useRouter()
 const rbac = useRBACStore()
 const users = useUsersStore()
 
+const pipelineStore = usePipelineStore()
+const board = useLeadsBoardStore()
+
 const {
-  pipelineStore,
   selectedPipelineId,
   selectedPipeline,
   kanbanColumns,
@@ -54,14 +58,17 @@ const {
   fromDate,
   toDate,
   activeFilterCount,
+} = storeToRefs(board)
+
+const {
   clearFilters,
   setDatePreset,
   setDateRange,
   syncPipelineSelection,
-  loadLeads,
+  load,
   moveStage,
   bulkMoveStage,
-} = useLeadPipeline()
+} = board
 
 const {
   drawerOpen,
@@ -75,7 +82,7 @@ const {
   handleSave,
   handleEnquiryLogged,
   deleteLead,
-} = useLeadDrawer(loadLeads)
+} = useLeadDrawer(load)
 
 const { openLeadDrawer } = useLeadDrawerGlobal()
 
@@ -89,9 +96,9 @@ const outcomeOptions = [
 ] as const
 
 // Debounce the text search; outcome/assignee/date filters apply immediately.
-const debouncedLoad = debounce(() => loadLeads(), 300)
+const debouncedLoad = debounce(() => load(), 300)
 watch(search, debouncedLoad)
-watch([outcomeFilter, assigneeFilter, datePreset, fromDate, toDate], () => loadLeads())
+watch([outcomeFilter, assigneeFilter, datePreset, fromDate, toDate], () => load())
 
 // Re-picking the active preset must still refresh: the window is resolved per
 // load, so a tab left open overnight re-reads "today" on the next pick. A
@@ -99,7 +106,7 @@ watch([outcomeFilter, assigneeFilter, datePreset, fromDate, toDate], () => loadL
 function onDatePreset(preset: DatePreset) {
   const unchanged = datePreset.value === preset && fromDate.value === '' && toDate.value === ''
   setDatePreset(preset)
-  if (unchanged) loadLeads()
+  if (unchanged) load()
 }
 
 // Press / anywhere (except inside an input or an open dialog) to jump to
@@ -157,7 +164,7 @@ onMounted(async () => {
   await pipelineStore.fetchPipelines()
   users.fetchOptions()
   syncPipelineSelection()
-  if (hadPipelines) loadLeads()
+  if (hadPipelines) load()
   const contactIdQuery = route.query.contact as string | undefined
   await handleContactPrefill(contactIdQuery || (route.query.contact_id as string | undefined))
 })
@@ -168,7 +175,7 @@ watch(
   () => pipelineStore.pipelines.map((p) => p.id).join(','),
   () => {
     syncPipelineSelection()
-    loadLeads()
+    load()
   },
 )
 
@@ -192,7 +199,7 @@ watch(
       </div>
 
       <div class="flex shrink-0 items-center gap-2">
-        <Select v-model="selectedPipelineId" @update:model-value="loadLeads()">
+        <Select v-model="selectedPipelineId" @update:model-value="load()">
           <SelectTrigger class="w-44" aria-label="Pipeline">
             <SelectValue placeholder="Select pipeline" />
           </SelectTrigger>
@@ -342,8 +349,8 @@ watch(
         @view-activities="(lead) => openLeadDrawer(lead.id!, lead)"
         @move-stage="moveStage"
         @bulk-move="bulkMoveStage"
-        @reload="loadLeads"
-        @stage-added="async () => { await pipelineStore.fetchPipelines(true); loadLeads() }"
+        @reload="load"
+        @stage-added="async () => { await pipelineStore.fetchPipelines(true); load() }"
       />
     </div>
   </div>
