@@ -1,0 +1,55 @@
+import { describe, it, expect } from 'vitest'
+import { createRequestGuard } from '@/composables/useRequestGuard'
+
+describe('request guard', () => {
+  it('keeps a token current until a newer request starts', () => {
+    const guard = createRequestGuard()
+
+    expect(guard.start().isCurrent()).toBe(true)
+  })
+
+  it('supersedes an earlier token when a newer request starts, even when the older resolves last', async () => {
+    const guard = createRequestGuard()
+    let resolveFirst!: () => void
+    const firstSettled = new Promise<void>((resolve) => {
+      resolveFirst = resolve
+    })
+
+    const first = guard.start()
+    const second = guard.start()
+
+    // The first request settles after the second started: its token is stale.
+    resolveFirst()
+    await firstSettled
+
+    expect(first.isCurrent()).toBe(false)
+    expect(second.isCurrent()).toBe(true)
+  })
+
+  it('adopts the latest request without invalidating an in-flight one', () => {
+    const guard = createRequestGuard()
+    const inFlight = guard.start()
+
+    const adopted = guard.current()
+
+    expect(inFlight.isCurrent()).toBe(true)
+    expect(adopted.isCurrent()).toBe(true)
+  })
+
+  it('makes an adopted token stale when a newer request starts', () => {
+    const guard = createRequestGuard()
+    const adopted = guard.current()
+
+    guard.start()
+
+    expect(adopted.isCurrent()).toBe(false)
+  })
+
+  it('keeps only the last of many starts current', () => {
+    const guard = createRequestGuard()
+
+    const tokens = [guard.start(), guard.start(), guard.start()]
+
+    expect(tokens.map((t) => t.isCurrent())).toEqual([false, false, true])
+  })
+})
