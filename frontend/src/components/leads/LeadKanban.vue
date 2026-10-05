@@ -819,7 +819,7 @@ function showAssignee(lead: Lead): boolean {
 /* Board entrance: columns rise in on a fresh load (first render or pipeline
    switch). Filter changes reuse the columns in place, so they don't replay. */
 .card-in {
-  animation: card-in 0.24s ease both;
+  animation: card-in 0.24s var(--ease-out) both;
 }
 
 @keyframes card-in {

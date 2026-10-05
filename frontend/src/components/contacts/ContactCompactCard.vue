@@ -30,7 +30,7 @@ function onKeydown(event: KeyboardEvent) {
     role="button"
     tabindex="0"
     :aria-label="`Open ${contact.name}`"
-    class="cursor-pointer hover:shadow-md hover:border-primary/20 transition-all active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-primary"
+    class="cursor-pointer hover:shadow-md hover:border-primary/20 transition-[box-shadow,border-color,transform] active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-primary"
     @click="emit('click')"
     @keydown="onKeydown"
   >

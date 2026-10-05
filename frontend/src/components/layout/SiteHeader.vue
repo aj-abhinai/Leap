@@ -59,8 +59,32 @@ const breadcrumbs = computed(() => {
       @click="theme.toggle()"
       :aria-label="theme.resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
     >
-      <Sun v-if="theme.resolvedTheme === 'dark'" class="size-4" />
-      <Moon v-else class="size-4" />
+      <Transition name="icon-swap" mode="out-in">
+        <span :key="theme.resolvedTheme" class="inline-flex">
+          <Sun v-if="theme.resolvedTheme === 'dark'" class="size-4" />
+          <Moon v-else class="size-4" />
+        </span>
+      </Transition>
     </Button>
   </header>
 </template>
+
+<style scoped>
+.icon-swap-enter-active {
+  transition: opacity 90ms var(--ease-out), transform 90ms var(--ease-out);
+}
+
+.icon-swap-leave-active {
+  transition: opacity 70ms var(--ease-out), transform 70ms var(--ease-out);
+}
+
+.icon-swap-enter-from {
+  opacity: 0;
+  transform: rotate(-45deg) scale(0.85);
+}
+
+.icon-swap-leave-to {
+  opacity: 0;
+  transform: rotate(45deg) scale(0.85);
+}
+</style>

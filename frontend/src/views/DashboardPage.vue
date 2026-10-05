@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, nextTick, onMounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useContactsStore } from '@/stores/contacts'
 import { useLeadsStore } from '@/stores/leads'
@@ -29,6 +29,10 @@ const loading = shallowRef(true)
 // stats carries the first pipeline's server-side aggregates; the health
 // bars render from it without loading lead rows.
 const stats = shallowRef<StageStat[]>([])
+
+// Bars render at zero and grow after the first paint, so the dashboard
+// reads as loading into place instead of snapping. Replays on remount.
+const barsIn = shallowRef(false)
 
 onMounted(async () => {
   // App.vue fetches permissions fire-and-forget, which races this mount on a
@@ -60,6 +64,10 @@ onMounted(async () => {
     // Best-effort dashboard: one failed fetch must not blank the rest.
   } finally {
     loading.value = false
+    // Two frames: the first paints the zero-width bars, the second flips
+    // them so the width transition actually runs.
+    await nextTick()
+    requestAnimationFrame(() => requestAnimationFrame(() => { barsIn.value = true }))
   }
 })
 
@@ -123,7 +131,7 @@ function goToActivities() {
           <Skeleton class="mt-2 h-3 w-20" />
         </CardContent>
       </Card>
-      <Card v-else class="relative overflow-hidden">
+      <Card v-else class="enter-rise relative overflow-hidden">
         <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-primary to-primary/60" />
         <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle class="text-sm font-medium">Total Contacts</CardTitle>
@@ -147,7 +155,7 @@ function goToActivities() {
           <Skeleton class="mt-2 h-3 w-24" />
         </CardContent>
       </Card>
-      <Card v-else class="relative overflow-hidden">
+      <Card v-else class="enter-rise relative overflow-hidden" style="animation-delay: 60ms">
         <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-primary to-primary/60" />
         <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle class="text-sm font-medium">Total Leads</CardTitle>
@@ -171,7 +179,7 @@ function goToActivities() {
           <Skeleton class="mt-2 h-3 w-24" />
         </CardContent>
       </Card>
-      <Card v-else class="relative overflow-hidden">
+      <Card v-else class="enter-rise relative overflow-hidden" style="animation-delay: 120ms">
         <div class="absolute inset-x-0 top-0 h-1 bg-linear-to-r from-primary to-primary/60" />
         <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle class="text-sm font-medium">Pending Reminders</CardTitle>
@@ -187,7 +195,7 @@ function goToActivities() {
     </div>
 
     <!-- Pipeline health -->
-    <Card>
+    <Card class="enter-rise" style="animation-delay: 160ms">
       <CardHeader class="flex flex-row items-center justify-between">
         <div class="flex items-center gap-2">
           <TrendingUp class="size-4 text-muted-foreground" />
@@ -218,8 +226,8 @@ function goToActivities() {
               </span>
               <div class="h-2 flex-1 overflow-hidden rounded-full bg-muted">
                 <div
-                  class="h-full rounded-full bg-primary/70 transition-all duration-500"
-                  :style="{ width: `${(row.count / stageMax) * 100}%` }"
+                  class="h-full rounded-full bg-primary/70 transition-[width] duration-500 ease-out"
+                  :style="{ width: barsIn ? `${(row.count / stageMax) * 100}%` : '0%' }"
                 ></div>
               </div>
               <span class="w-8 shrink-0 text-right text-sm tabular-nums font-medium">{{ row.count }}</span>
@@ -231,18 +239,18 @@ function goToActivities() {
           <div class="border-t pt-4">
             <div class="flex h-2 overflow-hidden rounded-full bg-muted">
               <div
-                class="h-full bg-primary transition-all duration-500"
-                :style="{ width: `${(openCount / totalCount) * 100}%` }"
+                class="h-full bg-primary transition-[width] duration-500 ease-out"
+                :style="{ width: barsIn ? `${(openCount / totalCount) * 100}%` : '0%' }"
                 title="Open"
               ></div>
               <div
-                class="h-full bg-success transition-all duration-500"
-                :style="{ width: `${(wonCount / totalCount) * 100}%` }"
+                class="h-full bg-success transition-[width] duration-500 ease-out"
+                :style="{ width: barsIn ? `${(wonCount / totalCount) * 100}%` : '0%' }"
                 title="Won"
               ></div>
               <div
-                class="h-full bg-destructive transition-all duration-500"
-                :style="{ width: `${(lostCount / totalCount) * 100}%` }"
+                class="h-full bg-destructive transition-[width] duration-500 ease-out"
+                :style="{ width: barsIn ? `${(lostCount / totalCount) * 100}%` : '0%' }"
                 title="Lost"
               ></div>
             </div>

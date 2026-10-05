@@ -17,13 +17,13 @@ defineProps<{ visible: boolean }>()
 
 <style scoped>
 .splash-enter-active {
-  transition: opacity 150ms ease-out;
+  transition: opacity 150ms var(--ease-out);
 }
 .splash-enter-from {
   opacity: 0;
 }
 .splash-leave-active {
-  transition: opacity 250ms ease-in;
+  transition: opacity 200ms var(--ease-out);
 }
 .splash-leave-to {
   opacity: 0;

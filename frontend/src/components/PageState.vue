@@ -31,12 +31,16 @@ withDefaults(
 const emit = defineEmits<{ retry: [] }>()
 </script>
 
+<!-- Error and empty states rise in on mount. Loading does not: it remounts
+     on every fetch, so an entrance there would replay on each filter and
+     page change. The content slot is not wrapped — call sites pass
+     multi-root content. -->
 <template>
   <div v-if="loading" class="space-y-3">
     <Skeleton v-for="i in skeletonCount" :key="i" class="w-full" :class="skeletonClass" />
   </div>
-  <ErrorAlert v-else-if="error" :error="error" title="Failed to load" @retry="emit('retry')" />
-  <div v-else-if="empty" class="flex flex-col items-center justify-center py-16 text-center">
+  <ErrorAlert v-else-if="error" class="enter-rise" :error="error" title="Failed to load" @retry="emit('retry')" />
+  <div v-else-if="empty" class="enter-rise flex flex-col items-center justify-center py-16 text-center">
     <slot name="empty-icon">
       <ClipboardList class="mb-3 size-10 text-muted-foreground/40" />
     </slot>

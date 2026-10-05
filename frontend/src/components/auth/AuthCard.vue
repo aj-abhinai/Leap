@@ -29,7 +29,8 @@ const emit = defineEmits<{
 
 <template>
   <div class="relative flex min-h-screen items-center justify-center p-4">
-    <Card class="relative w-full max-w-sm shadow-lg">
+    <!-- Delayed so the rise lands as the splash clears (useSplash). -->
+    <Card class="enter-rise relative w-full max-w-sm shadow-lg" style="animation-delay: 160ms">
       <CardHeader class="text-center pb-2">
         <slot name="emblem" />
         <CardTitle class="text-2xl">{{ title }}</CardTitle>

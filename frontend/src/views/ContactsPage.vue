@@ -218,8 +218,10 @@ async function handleDelete() {
       <Button size="sm" variant="ghost" @click="clearSelection()">Clear</Button>
     </div>
 
-    <template v-if="viewMode === 'table'">
-      <div class="w-full min-w-0 overflow-x-auto rounded-lg border">
+    <!-- Views cross-fade through an out-in swap so two layouts never overlap
+         in flow; keys let the Transition see the branch change. -->
+    <Transition name="view-fade" mode="out-in">
+      <div v-if="viewMode === 'table'" key="table" class="w-full min-w-0 overflow-x-auto rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow class="hover:bg-transparent">
@@ -326,37 +328,38 @@ async function handleDelete() {
           </TableBody>
         </Table>
       </div>
-    </template>
 
-    <div v-else-if="viewMode === 'compact'" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      <div v-if="store.loading">
-        <div v-for="i in 8" :key="i" class="rounded-lg border p-4 space-y-3">
-          <Skeleton class="h-5 w-3/4" />
-          <Skeleton class="h-4 w-1/2" />
-          <Skeleton class="h-4 w-full" />
+      <div v-else-if="viewMode === 'compact'" key="compact" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div v-if="store.loading">
+          <div v-for="i in 8" :key="i" class="rounded-lg border p-4 space-y-3">
+            <Skeleton class="h-5 w-3/4" />
+            <Skeleton class="h-4 w-1/2" />
+            <Skeleton class="h-4 w-full" />
+          </div>
         </div>
+        <div v-else-if="store.contacts.length === 0" class="col-span-full flex flex-col items-center justify-center py-12 text-center">
+          <Users class="size-10 text-muted-foreground/40 mb-3" />
+          <p class="text-sm font-medium text-muted-foreground">No contacts found</p>
+        </div>
+        <ContactCompactCard
+          v-for="c in store.contacts"
+          :key="c.id"
+          :contact="c"
+          @click="router.push({ name: 'ContactDetail', params: { id: c.id } })"
+        />
       </div>
-      <div v-else-if="store.contacts.length === 0" class="col-span-full flex flex-col items-center justify-center py-12 text-center">
-        <Users class="size-10 text-muted-foreground/40 mb-3" />
-        <p class="text-sm font-medium text-muted-foreground">No contacts found</p>
-      </div>
-      <ContactCompactCard
-        v-for="c in store.contacts"
-        :key="c.id"
-        :contact="c"
-        @click="router.push({ name: 'ContactDetail', params: { id: c.id } })"
-      />
-    </div>
 
-    <ContactSpreadsheet
-      v-else
-      :contacts="store.contacts"
-      :selected-ids="canLeadWrite ? selectedIds : undefined"
-      :check-state="canLeadWrite ? pageCheckState() : undefined"
-      @row-click="(id) => router.push({ name: 'ContactDetail', params: { id } })"
-      @toggle="toggleSelect"
-      @toggle-page="togglePage"
-    />
+      <ContactSpreadsheet
+        v-else
+        key="spreadsheet"
+        :contacts="store.contacts"
+        :selected-ids="canLeadWrite ? selectedIds : undefined"
+        :check-state="canLeadWrite ? pageCheckState() : undefined"
+        @row-click="(id) => router.push({ name: 'ContactDetail', params: { id } })"
+        @toggle="toggleSelect"
+        @toggle-page="togglePage"
+      />
+    </Transition>
 
     <Sheet v-model:open="drawerOpen">
       <SheetContent>
@@ -398,3 +401,18 @@ async function handleDelete() {
   />
   <CsvImport :open="importOpen" @close="importOpen = false; loadContacts()" />
 </template>
+
+<style scoped>
+.view-fade-enter-active {
+  transition: opacity 150ms var(--ease-out);
+}
+
+.view-fade-leave-active {
+  transition: opacity 100ms var(--ease-out);
+}
+
+.view-fade-enter-from,
+.view-fade-leave-to {
+  opacity: 0;
+}
+</style>

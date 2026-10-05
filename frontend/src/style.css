@@ -13,6 +13,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Motion tokens — two strong curves carry every UI transition. Defined in
+   @theme so the ease-out/ease-in-out utilities and tw-animate's --tw-ease
+   all resolve to these instead of Tailwind's weak defaults. */
+@theme {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -223,7 +231,7 @@
    stacking (no height jump). Default transition mode — out-in is avoided
    because it stalls with lazily-loaded route components. */
 .page-enter-active {
-  transition: opacity 0.22s ease;
+  transition: opacity 0.22s var(--ease-out);
 }
 
 .page-leave-active {
@@ -231,7 +239,7 @@
   left: 0;
   right: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.12s var(--ease-out);
 }
 
 .page-enter-from,
@@ -239,11 +247,26 @@
   opacity: 0;
 }
 
+/* One entrance rhythm for content that lands after data — dashboard cards,
+   page states, the auth card. Transform-only movement, so no layout shift;
+   fill both keeps a delayed element invisible until its delay elapses. */
+.enter-rise {
+  animation: enter-rise 240ms var(--ease-out) both;
+}
+
+@keyframes enter-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
