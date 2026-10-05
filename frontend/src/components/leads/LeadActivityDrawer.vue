@@ -5,9 +5,8 @@ import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
 import { useRBACStore } from '@/stores/rbac'
 import { usePipelineStore } from '@/stores/pipeline'
-import { useLeadPipeline } from '@/composables/useLeadPipeline'
+import { useLeadsBoardStore } from '@/stores/leadsBoard'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
-import { useLeadsStore } from '@/stores/leads'
 import { getLead, type Lead } from '@/api/leads'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
@@ -23,8 +22,7 @@ import LeadStageHistory from './LeadStageHistory.vue'
 const router = useRouter()
 const rbac = useRBACStore()
 const pipelineStore = usePipelineStore()
-const leadsStore = useLeadsStore()
-const pipeline = useLeadPipeline()
+const board = useLeadsBoardStore()
 const { drawerOpen, drawerLeadId, drawerLead, closeLeadDrawer } = useLeadDrawerGlobal()
 
 const lead = shallowRef<Lead | null>(null)
@@ -63,27 +61,25 @@ function isClosed() {
 
 // A close_lost quick reply is executed by the backend in the same transaction
 // as the activity save (log + stage move + task cancellation); the drawer
-// only needs to refresh so the kanban card lands in the lost column.
-async function handleCloseLost() {
-  pipeline.loadLeads()
-  if (!pipeline.selectedPipelineId.value && pipelineStore.pipelines.length > 0) {
-    await leadsStore.fetchAllLeads({ pipelineId: pipelineStore.pipelines[0].id })
-  }
+// only needs to refresh the shared board so the kanban card lands in the lost
+// column.
+function handleCloseLost() {
+  board.load()
   closeLeadDrawer()
 }
 
-// Saving a task closes the drawer and reloads the board so the kanban card's
-// next-task/last-touch preview reflects the new activity immediately.
+// Saving a task closes the drawer and reloads the shared board so the kanban
+// card's next-task/last-touch preview reflects the new activity immediately.
 function handleSaved() {
-  pipeline.loadLeads()
+  board.load()
   closeLeadDrawer()
 }
 
 // Inline task mutations (mark done, snooze, edit, delete) keep the drawer
-// open so the user can keep working, but the board must reload so the card's
-// next-task/last-touch preview is not stale.
+// open so the user can keep working, but the shared board must reload so the
+// card's next-task/last-touch preview is not stale.
 function handleTasksChanged() {
-  pipeline.loadLeads()
+  board.load()
 }
 
 // Repeat business: a closed contact may re-enquire any time (same day, next
