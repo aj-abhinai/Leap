@@ -1770,3 +1770,40 @@ func TestExactlyOnePrimaryEnforcedOnInsertIntegration(t *testing.T) {
 		t.Errorf("email primaries = %d, want 1", emailPrimaries)
 	}
 }
+
+// TestDuplicateRuleAgreesAcrossPoliciesIntegration pins the unified rule: for
+// one stored phone, every typed variant is rejected as a manual duplicate AND
+// skipped by bulk import with a duplicate reason. When the SQL matcher and
+// the import snapshot ever drift apart, one of the two arms fails.
+func TestDuplicateRuleAgreesAcrossPoliciesIntegration(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	if _, err := svc.create(CreateRequest{Name: "Existing", Phone: "+919876543210"}); err != nil {
+		t.Fatalf("seed existing contact: %v", err)
+	}
+
+	for _, variant := range []string{"+919876543210", "9876543210", "+91 98765 43210", "91 9876543210"} {
+		t.Run(variant, func(t *testing.T) {
+			_, err := svc.create(CreateRequest{Name: "Manual dup", Phone: variant})
+			var dupErr *DuplicateError
+			if !errors.As(err, &dupErr) {
+				t.Fatalf("manual create %q = %v, want DuplicateError", variant, err)
+			}
+
+			resp, err := svc.bulkCreate(BulkCreateRequest{Contacts: []BulkContact{
+				{Name: "Bulk dup", Phone: variant},
+			}})
+			if err != nil {
+				t.Fatalf("bulk create %q: %v", variant, err)
+			}
+			if resp.Imported != 0 || resp.Failed != 1 || len(resp.Errors) != 1 {
+				t.Fatalf("bulk %q = imported %d, failed %d, errors %+v, want one skipped row",
+					variant, resp.Imported, resp.Failed, resp.Errors)
+			}
+			if !strings.Contains(resp.Errors[0].Message, "matches an existing contact") {
+				t.Errorf("bulk %q reason = %q, want a duplicate reason", variant, resp.Errors[0].Message)
+			}
+		})
+	}
+}

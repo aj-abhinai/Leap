@@ -1,7 +1,6 @@
 package contact
 
 import (
-	"crm/internal/settings"
 	"crm/internal/util"
 	"fmt"
 	"strings"
@@ -30,92 +29,6 @@ type BulkRowError struct {
 	Message string `json:"message"`
 }
 
-type contactKeys struct {
-	// cc is the org's default country code, applied to every key so both
-	// storage generations (canonical country-coded, legacy national) collapse
-	// to one national-form key.
-	cc     string
-	phones map[string]bool
-	emails map[string]bool
-}
-
-func (s *Service) loadContactKeys() (contactKeys, error) {
-	cc, err := settings.DefaultCountryCode(s.db)
-	if err != nil {
-		return contactKeys{}, err
-	}
-	keys := contactKeys{cc: cc, phones: map[string]bool{}, emails: map[string]bool{}}
-	rows, err := s.db.Query(`
-		SELECT cp.value FROM contact_phones cp
-		JOIN contacts c ON c.id = cp.contact_id AND c.deleted_at IS NULL`)
-	if err != nil {
-		return keys, fmt.Errorf("load contact phones: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var phone string
-		if err := rows.Scan(&phone); err != nil {
-			return keys, fmt.Errorf("scan contact phone: %w", err)
-		}
-		if p := util.NormalizePhoneKey(phone, cc); p != "" {
-			keys.phones[p] = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return keys, fmt.Errorf("load contact phones: iterate: %w", err)
-	}
-	rows.Close()
-
-	rows, err = s.db.Query(`
-		SELECT ce.value FROM contact_emails ce
-		JOIN contacts c ON c.id = ce.contact_id AND c.deleted_at IS NULL`)
-	if err != nil {
-		return keys, fmt.Errorf("load contact emails: %w", err)
-	}
-	for rows.Next() {
-		var email string
-		if err := rows.Scan(&email); err != nil {
-			return keys, fmt.Errorf("scan contact email: %w", err)
-		}
-		if e := util.NormalizeEmail(email); e != "" {
-			keys.emails[e] = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return keys, fmt.Errorf("load contact emails: iterate: %w", err)
-	}
-	rows.Close()
-	return keys, nil
-}
-
-// recordMatch registers a successfully imported row so later rows in the same
-// file are caught as same-file duplicates.
-func (k *contactKeys) recordMatch(phone, email string) {
-	if p := util.NormalizePhoneKey(phone, k.cc); p != "" {
-		k.phones[p] = true
-	}
-	if e := util.NormalizeEmail(email); e != "" {
-		k.emails[e] = true
-	}
-}
-
-func (k contactKeys) duplicateReason(phone, email string) string {
-	p := util.NormalizePhoneKey(phone, k.cc)
-	e := util.NormalizeEmail(email)
-	phoneMatch := p != "" && k.phones[p]
-	emailMatch := e != "" && k.emails[e]
-	switch {
-	case phoneMatch && emailMatch:
-		return "phone and email match an existing contact"
-	case phoneMatch:
-		return "phone matches an existing contact"
-	case emailMatch:
-		return "email matches an existing contact"
-	default:
-		return ""
-	}
-}
-
 type pendingContact struct {
 	contact BulkContact
 	tagIDs  []string
@@ -129,7 +42,7 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 		return nil, fmt.Errorf("bulk create: load tag ids: %w", err)
 	}
 
-	keys, err := s.loadContactKeys()
+	snap, err := s.dups.snapshot()
 	if err != nil {
 		return nil, fmt.Errorf("bulk create: load duplicate keys: %w", err)
 	}
@@ -146,7 +59,7 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 			continue
 		}
 		rawPhone := c.Phone
-		c.Phone = util.CanonicalPhone(c.Phone, keys.cc)
+		c.Phone = util.CanonicalPhone(c.Phone, snap.cc)
 		if c.Phone == "" && strings.TrimSpace(rawPhone) != "" {
 			resp.Failed++
 			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "phone must contain at least one digit"})
@@ -170,7 +83,7 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: "invalid email address"})
 			continue
 		}
-		if reason := keys.duplicateReason(c.Phone, c.Email); reason != "" {
+		if reason := snap.reason(c.Phone, c.Email); reason != "" {
 			resp.Failed++
 			resp.Errors = append(resp.Errors, BulkRowError{Row: i + 1, Message: reason})
 			continue
@@ -194,7 +107,7 @@ func (s *Service) bulkCreate(req BulkCreateRequest) (*BulkCreateResponse, error)
 			continue
 		}
 		pending = append(pending, pendingContact{contact: c, tagIDs: tagIDsForContact})
-		keys.recordMatch(c.Phone, c.Email)
+		snap.record(c.Phone, c.Email)
 	}
 
 	if len(pending) == 0 {

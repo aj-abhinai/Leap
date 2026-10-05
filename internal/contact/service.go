@@ -34,20 +34,7 @@ var (
 	// ErrInvalidPhone marks a non-blank phone value that contains no digits, so
 	// it cannot canonicalize and must not be stored.
 	ErrInvalidPhone = errors.New("phone must contain at least one digit")
-	// ErrDuplicate marks a create whose primary phone or email collides with
-	// a live contact and the request did not confirm the duplicate. It wraps
-	// the matched contact(s) so the handler can return them in a 409.
-	ErrDuplicate = errors.New("duplicate contact")
 )
-
-// DuplicateError carries the live-contact matches for a rejected duplicate
-// create, so the handler can surface which contact already exists.
-type DuplicateError struct {
-	Matches []DuplicateMatch
-}
-
-func (e *DuplicateError) Error() string { return ErrDuplicate.Error() }
-func (e *DuplicateError) Unwrap() error { return ErrDuplicate }
 
 // Per-contact collection and value caps bound the work a single create/update
 // request can trigger: each element is inserted with its own Exec inside the
@@ -62,12 +49,13 @@ const (
 // Service provides database-backed contact operations: list/create/update/
 // delete, notes, bulk import, and phone resolution for lead entry.
 type Service struct {
-	db *sql.DB
+	db   *sql.DB
+	dups *duplicates
 }
 
 // NewService creates a contact Service backed by db.
 func NewService(db *sql.DB) *Service {
-	return &Service{db: db}
+	return &Service{db: db, dups: newDuplicates(db)}
 }
 
 func (s *Service) list(page, perPage int, search string) ([]Contact, int, error) {
@@ -509,7 +497,7 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 	if email == "" && len(req.Emails) > 0 {
 		email = primaryValue(req.Emails)
 	}
-	matches, err := s.duplicateMatches(s.db, phone, email, "")
+	matches, err := s.dups.check(s.db, phone, email, "")
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +509,7 @@ func (s *Service) create(req CreateRequest) (*Contact, error) {
 		return nil, err
 	}
 	if len(matches) > 0 {
-		created.Warnings = append(created.Warnings, "phone or email matches an existing contact")
+		created.Warnings = append(created.Warnings, dupConfirmedWarn)
 	}
 	return created, nil
 }
@@ -548,75 +536,6 @@ func primaryValue[T valueEntry](entries []T) string {
 		}
 	}
 	return entries[0].Val()
-}
-
-// duplicateMatches returns the live contacts whose primary phone or email
-// collides with the given phone/email after normalization, using targeted
-// indexed lookups rather than scanning the whole contact table. excludeID
-// skips one contact (the row being edited); an empty id excludes nothing.
-func (s *Service) duplicateMatches(q interface {
-	Query(query string, args ...any) (*sql.Rows, error)
-}, phone, email, excludeID string) ([]DuplicateMatch, error) {
-	e := util.NormalizeEmail(email)
-	// The phone is matched in both storage generations: canonical rows store
-	// country-coded digits, legacy rows store the national form.
-	phoneKey, codedKey := "", ""
-	if phone != "" {
-		defaultCC, err := settings.DefaultCountryCode(s.db)
-		if err != nil {
-			return nil, err
-		}
-		phoneKey, codedKey = util.PhoneLookupKeys(phone, defaultCC)
-	}
-	if phoneKey == "" && e == "" {
-		return nil, nil
-	}
-	// Match on the primary phone/email of existing live contacts, plus any
-	// phone/email value so a secondary value also surfaces as a duplicate.
-	rows, err := q.Query(
-		`SELECT DISTINCT c.id, c.name,
-			COALESCE(pcp.value, ''), COALESCE(ece.value, '')
-		FROM contacts c
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_phones WHERE contact_id = c.id AND is_primary LIMIT 1
-		) pcp ON true
-		LEFT JOIN LATERAL (
-			SELECT value FROM contact_emails WHERE contact_id = c.id AND is_primary LIMIT 1
-		) ece ON true
-		WHERE c.deleted_at IS NULL
-		  AND ($4 = '' OR c.id <> NULLIF($4, '')::uuid)
-		  AND (
-			($1 <> '' AND EXISTS (
-				SELECT 1 FROM contact_phones cp
-				WHERE cp.contact_id = c.id
-				  AND `+util.PhoneMatchCond("cp.value", "$1", "$2")+`
-			))
-			OR
-			($3 <> '' AND EXISTS (
-				SELECT 1 FROM contact_emails ce
-				WHERE ce.contact_id = c.id
-				  AND lower(trim(ce.value)) = $3
-			))
-		  )`,
-		phoneKey, codedKey, e,
-		excludeID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("find duplicate contacts: %w", err)
-	}
-	defer rows.Close()
-	matches := []DuplicateMatch{}
-	for rows.Next() {
-		var m DuplicateMatch
-		if err := rows.Scan(&m.ID, &m.Name, &m.Phone, &m.Email); err != nil {
-			return nil, fmt.Errorf("find duplicate contacts: scan: %w", err)
-		}
-		matches = append(matches, m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("find duplicate contacts: iterate: %w", err)
-	}
-	return matches, nil
 }
 
 // validateCollectionLimits enforces the per-contact caps on phones, emails,
@@ -982,7 +901,7 @@ func (s *Service) update(id string, req UpdateRequest, userID string) (*Contact,
 		// Only a change to the effective primary is a duplicate risk; the edit
 		// form resubmits unchanged details, which must not nag.
 		if primaryPhone != old.Phone || primaryEmail != old.Email {
-			matches, err = s.duplicateMatches(tx, primaryPhone, primaryEmail, id)
+			matches, err = s.dups.check(tx, primaryPhone, primaryEmail, id)
 			if err != nil {
 				return nil, err
 			}
