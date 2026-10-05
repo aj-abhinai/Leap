@@ -2,16 +2,17 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getMyPermissions } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 
 export const useRBACStore = defineStore('rbac', () => {
   const permissions = ref<string[]>([])
   // loaded marks a completed fetch for the current session; clear() resets it
   // on logout so the next login fetches again.
   const loaded = ref(false)
-  // inflight coalesces concurrent mounts into one request, and generation
-  // discards a response that lands after the session was cleared.
+  // inflight coalesces concurrent mounts into one request; the guard discards
+  // a response that lands after the session was cleared.
   let inflight: Promise<void> | null = null
-  let generation = 0
+  const guard = createRequestGuard()
 
   // fetchPermissions loads the signed-in user's permissions once. It is a
   // no-op while logged out (boot runs before any session exists) and shares
@@ -20,16 +21,16 @@ export const useRBACStore = defineStore('rbac', () => {
     const auth = useAuthStore()
     if (!auth.isAuthenticated || loaded.value) return
     if (inflight) return inflight
-    const requested = generation
+    const run = guard.current()
     const request = (async () => {
       try {
         const res = await getMyPermissions()
         // A response from a previous session must not repopulate state.
-        if (requested !== generation) return
+        if (!run.isCurrent()) return
         permissions.value = res.data
         loaded.value = true
       } catch {
-        if (requested === generation) permissions.value = []
+        if (run.isCurrent()) permissions.value = []
       }
     })()
     inflight = request
@@ -42,7 +43,7 @@ export const useRBACStore = defineStore('rbac', () => {
   }
 
   function clear() {
-    generation++
+    guard.start()
     inflight = null
     permissions.value = []
     loaded.value = false

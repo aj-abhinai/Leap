@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as authApi from '@/api/auth'
 import { useRBACStore } from '@/stores/rbac'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<authApi.AuthUser | null>(null)
@@ -40,11 +41,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   let refreshPromise: Promise<authApi.LoginResponse> | null = null
 
-  // Bumped on every login and logout. A refresh that started in a previous
-  // session must not resurrect it after logout completed: the server rotates
-  // the refresh cookie on every refresh, so a late response can otherwise
-  // re-arm a logged-out session and trap the UI on an authenticated page.
-  let sessionEpoch = 0
+  // Invalidated on every login and logout. A refresh that started in a
+  // previous session must not resurrect it after logout completed: the server
+  // rotates the refresh cookie on every refresh, so a late response can
+  // otherwise re-arm a logged-out session and trap the UI on an authenticated
+  // page.
+  const guard = createRequestGuard()
 
   async function refresh(): Promise<authApi.LoginResponse> {
     if (!refreshPromise) {
@@ -56,7 +58,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function doRefresh(): Promise<authApi.LoginResponse> {
-    const epochAtStart = sessionEpoch
+    const run = guard.current()
     let tokens: authApi.LoginResponse
     try {
       const res = await authApi.refresh()
@@ -65,7 +67,7 @@ export const useAuthStore = defineStore('auth', () => {
       clearSession()
       throw new Error('Session expired')
     }
-    if (epochAtStart !== sessionEpoch) {
+    if (!run.isCurrent()) {
       // The session this refresh belonged to is gone; discard the rotated
       // tokens instead of overwriting the current state.
       throw new Error('Session expired')
@@ -75,7 +77,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function login(email: string, password: string) {
-    sessionEpoch++
+    guard.start()
     const res = await authApi.login(email, password)
     setAccess(res.data)
     // The login response is the authoritative source: if /me fails below, a
@@ -89,7 +91,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function logout() {
-    sessionEpoch++
+    guard.start()
     // Clear synchronously so a late logout response cannot wipe a session a
     // fresh login created while the request was in flight; the server revokes
     // the refresh token carried by this request, not the new one.
