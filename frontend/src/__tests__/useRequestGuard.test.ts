@@ -8,21 +8,16 @@ describe('request guard', () => {
     expect(guard.start().isCurrent()).toBe(true)
   })
 
-  it('supersedes an earlier token when a newer request starts, even when the older resolves last', async () => {
+  it('discards the older token when its response lands after the newer request started', async () => {
     const guard = createRequestGuard()
-    let resolveFirst!: () => void
-    const firstSettled = new Promise<void>((resolve) => {
-      resolveFirst = resolve
-    })
-
     const first = guard.start()
+    const firstResponseLands = (async () => {
+      await Promise.resolve() // the first response arrives only now
+      return first.isCurrent()
+    })()
     const second = guard.start()
 
-    // The first request settles after the second started: its token is stale.
-    resolveFirst()
-    await firstSettled
-
-    expect(first.isCurrent()).toBe(false)
+    expect(await firstResponseLands).toBe(false)
     expect(second.isCurrent()).toBe(true)
   })
 
