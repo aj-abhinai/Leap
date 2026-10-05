@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 import * as api from '@/api/activities'
 import * as leadsApi from '@/api/leads'
 
@@ -13,20 +14,20 @@ export const useActivitiesStore = defineStore('activities', () => {
   const loading = ref(false)
   const recent = ref<api.ActivityListItem[]>([])
 
-  // fetchSeq discards out-of-order responses: only the latest request's
+  // The guard discards out-of-order responses: only the latest request's
   // result may land, so fast filter changes never show stale data.
-  let fetchSeq = 0
+  const guard = createRequestGuard()
 
   async function fetchItems(f: api.ActivityListFilters) {
-    const seq = ++fetchSeq
+    const run = guard.start()
     loading.value = true
     try {
       const res = await api.listActivities({ page: page.value, perPage: perPage.value, filters: f })
-      if (seq !== fetchSeq) return
+      if (!run.isCurrent()) return
       items.value = res.data
       total.value = res.meta?.total ?? 0
     } finally {
-      if (seq === fetchSeq) loading.value = false
+      if (run.isCurrent()) loading.value = false
     }
   }
 

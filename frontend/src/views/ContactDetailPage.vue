@@ -21,6 +21,7 @@ import { getAvatarColor, getInitials } from '@/utils/avatar'
 import { displayAge } from '@/utils/age'
 import { errorMessage } from '@/utils/errors'
 import { useContactSave, type SavedContact } from '@/composables/useContactSave'
+import { createRequestGuard, type RequestToken } from '@/composables/useRequestGuard'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,9 +34,12 @@ const loadError = shallowRef('')
 const drawerOpen = shallowRef(false)
 const ageLabel = computed(() => displayAge(contact.value?.date_of_birth, contact.value?.age))
 
+// The guard discards out-of-order responses and also gates the post-save
+// refetch below: a route change starts a new load and supersedes both.
+const guard = createRequestGuard()
+
 // Watch the route param: navigating detail-to-detail reuses this instance,
 // so onMounted-only loading would leave the previous contact on screen.
-let loadSeq = 0
 watch(
   () => route.params.id as string,
   (id) => loadContact(id),
@@ -45,7 +49,7 @@ watch(
 // loadContact fetches the contact for id; a newer request supersedes this
 // one, so out-of-order responses are discarded.
 async function loadContact(id: string) {
-  const seq = ++loadSeq
+  const run = guard.start()
   loading.value = true
   loadError.value = ''
   // Detail-to-detail navigation reuses this instance: any paused duplicate
@@ -53,15 +57,15 @@ async function loadContact(id: string) {
   reset()
   try {
     const loaded = await store.fetchContact(id)
-    if (seq !== loadSeq) return
+    if (!run.isCurrent()) return
     contact.value = loaded
   } catch (e) {
-    if (seq !== loadSeq) return
+    if (!run.isCurrent()) return
     contact.value = null
     if (errorMessage(e) === 'Contact not found') return
     loadError.value = errorMessage(e, 'Failed to load contact')
   } finally {
-    if (seq === loadSeq) loading.value = false
+    if (run.isCurrent()) loading.value = false
   }
 }
 
@@ -72,31 +76,31 @@ function goBack() {
 async function handleSave(body: ContactSaveBody) {
   const id = contact.value?.id
   if (!id) return
-  // Capture the seq before awaiting the save: navigating to another contact
-  // mid-save bumps loadSeq, and this save's refetch must then be discarded
-  // instead of overwriting the new contact.
-  const seq = loadSeq
-  finish(seq, await save(body, id))
+  // Adopt the current guard before awaiting the save: navigating to another
+  // contact mid-save starts a new load, and this save's refetch must then be
+  // discarded instead of overwriting the new contact.
+  const run = guard.current()
+  finish(run, await save(body, id))
 }
 
 async function onConfirmDuplicate(confirmed: boolean) {
-  const seq = loadSeq
-  finish(seq, await resolveDuplicates(confirmed))
+  const run = guard.current()
+  finish(run, await resolveDuplicates(confirmed))
 }
 
 // finish applies a successful save: toast, close the drawer, and refetch the
-// saved contact behind the same loadSeq gate as loadContact.
-function finish(seq: number, saved?: SavedContact | null) {
+// saved contact behind the same guard gate as loadContact.
+function finish(run: RequestToken, saved?: SavedContact | null) {
   if (!saved) return
   toast.success('Contact updated')
   drawerOpen.value = false
-  void refresh(seq, saved.id)
+  void refresh(run, saved.id)
 }
 
-async function refresh(seq: number, id: string) {
+async function refresh(run: RequestToken, id: string) {
   try {
     const loaded = await store.fetchContact(id)
-    if (seq === loadSeq) contact.value = loaded
+    if (run.isCurrent()) contact.value = loaded
   } catch {
     // Update succeeded; keep showing the previous data rather than blanking the page.
   }

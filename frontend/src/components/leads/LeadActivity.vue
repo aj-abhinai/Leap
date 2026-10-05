@@ -3,6 +3,7 @@ import { computed, onMounted, shallowRef, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useRemindersStore } from '@/stores/reminders'
 import { listLeadActivities, deleteLeadActivity, updateLeadActivity, type LeadActivity } from '@/api/leads'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 import { toast } from 'vue-sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import PageState from '@/components/PageState.vue'
@@ -45,7 +46,7 @@ const historyExpanded = shallowRef(false)
 
 // Watch the prop: the instance may be reused with a different lead id (the
 // drawer swaps activityLead without closing), so refetch when it changes.
-let fetchSeq = 0
+const guard = createRequestGuard()
 watch(
   () => props.leadId,
   () => {
@@ -56,19 +57,19 @@ watch(
 )
 
 async function fetchActivities() {
-  const seq = ++fetchSeq
+  const run = guard.start()
   loading.value = true
   loadError.value = ''
   try {
     const res = await listLeadActivities(props.leadId)
-    if (seq !== fetchSeq) return
+    if (!run.isCurrent()) return
     activities.value = res.data
   } catch (e) {
-    if (seq !== fetchSeq) return
+    if (!run.isCurrent()) return
     activities.value = []
     loadError.value = errorMessage(e, 'Failed to load activities')
   } finally {
-    if (seq === fetchSeq) loading.value = false
+    if (run.isCurrent()) loading.value = false
   }
 }
 

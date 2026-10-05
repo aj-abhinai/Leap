@@ -42,6 +42,7 @@ import { CheckCircle2, Trash2, MoreHorizontal, AlarmClockPlus, ClipboardList } f
 import { errorMessage } from '@/utils/errors'
 import { debounce } from '@/utils/debounce'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 
 const store = useActivitiesStore()
 const settings = useSettingsStore()
@@ -129,15 +130,15 @@ const viewFilter = computed<ActivityListFilters>(() => {
 
 const totalPages = computed(() => Math.max(1, Math.ceil(store.total / store.perPage)))
 
-let loadSeq = 0
+const guard = createRequestGuard()
 async function load() {
-  const seq = ++loadSeq
+  const run = guard.start()
   loadError.value = ''
   try {
     await store.fetchItems(viewFilter.value)
   } catch (e) {
     // A superseded request's failure must not hide a newer successful load.
-    if (seq === loadSeq) loadError.value = errorMessage(e, 'Failed to load tasks')
+    if (run.isCurrent()) loadError.value = errorMessage(e, 'Failed to load tasks')
   }
 }
 

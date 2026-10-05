@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 import { usePagination, totalOf } from '@/composables/usePagination'
 import * as api from '@/api/leads'
 
@@ -16,12 +17,12 @@ export const useLeadsStore = defineStore('leads', () => {
   // safety cap (MAX_PAGES) and flags `capped` when the result set is larger.
   const PAGE_SIZE = 200
   const MAX_PAGES = 10
-  // fetchSeq discards stale responses: overlapping calls (debounced search,
+  // The guard discards stale responses: overlapping calls (debounced search,
   // filter changes, pipeline switches) must not let an older request overwrite
   // a newer one.
-  let fetchSeq = 0
+  const guard = createRequestGuard()
   async function fetchAllLeads(f: api.LeadListQuery = {}) {
-    const seq = ++fetchSeq
+    const run = guard.start()
     const all: api.Lead[] = []
     let page = 1
     let serverTotal = 0
@@ -30,7 +31,7 @@ export const useLeadsStore = defineStore('leads', () => {
     try {
       for (;;) {
         const res = await api.listLeads({ page, perPage: PAGE_SIZE, query: f })
-        if (seq !== fetchSeq) return
+        if (!run.isCurrent()) return
         const items = res.data ?? []
         serverTotal = res.meta?.total ?? 0
         all.push(...items)
@@ -41,11 +42,11 @@ export const useLeadsStore = defineStore('leads', () => {
         }
         page++
       }
-      if (seq !== fetchSeq) return
+      if (!run.isCurrent()) return
       leads.value = all
       total.value = serverTotal
     } finally {
-      if (seq === fetchSeq) loading.value = false
+      if (run.isCurrent()) loading.value = false
     }
   }
 

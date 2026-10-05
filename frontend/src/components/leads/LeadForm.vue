@@ -8,6 +8,7 @@ import { useRBACStore } from '@/stores/rbac'
 import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 import {
   loadRememberedCreateValues,
   rememberCreateValues,
@@ -277,7 +278,7 @@ function viewBannerLead() {
 
 // searchContacts debounces the contact picker search (300ms) and discards
 // out-of-order responses so a slow reply can never overwrite a newer query.
-let searchSeq = 0
+const guard = createRequestGuard()
 const searchContacts = debounce(runContactSearch, 300)
 
 async function runContactSearch() {
@@ -286,17 +287,17 @@ async function runContactSearch() {
     contactResults.value = []
     return
   }
-  const seq = ++searchSeq
+  const run = guard.start()
   searchingContacts.value = true
   try {
     const res = await listContacts({ page: 1, perPage: 10, q })
-    if (seq !== searchSeq) return
+    if (!run.isCurrent()) return
     contactResults.value = res.data
   } catch {
-    if (seq !== searchSeq) return
+    if (!run.isCurrent()) return
     contactResults.value = []
   } finally {
-    if (seq === searchSeq) searchingContacts.value = false
+    if (run.isCurrent()) searchingContacts.value = false
   }
 }
 

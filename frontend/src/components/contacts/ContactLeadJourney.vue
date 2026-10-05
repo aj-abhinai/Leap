@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { shallowRef, watch } from 'vue'
 import { listLeadsByContact, type Lead } from '@/api/leads'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -21,23 +22,23 @@ const loadError = shallowRef('')
 
 // Watch the prop: the component instance is reused when the route param
 // changes, so onMounted-only fetching would leave stale leads behind.
-let fetchSeq = 0
+const guard = createRequestGuard()
 watch(() => props.contactId, () => fetchLeads(), { immediate: true })
 
 async function fetchLeads() {
-  const seq = ++fetchSeq
+  const run = guard.start()
   loading.value = true
   loadError.value = ''
   try {
     const res = await listLeadsByContact(props.contactId)
-    if (seq !== fetchSeq) return
+    if (!run.isCurrent()) return
     leads.value = res.data
   } catch (e) {
-    if (seq !== fetchSeq) return
+    if (!run.isCurrent()) return
     leads.value = []
     loadError.value = errorMessage(e, 'Failed to load leads')
   } finally {
-    if (seq === fetchSeq) loading.value = false
+    if (run.isCurrent()) loading.value = false
   }
 }
 </script>

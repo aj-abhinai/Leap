@@ -1,6 +1,7 @@
 import { computed, shallowRef, watch } from 'vue'
 import { usePipelineStore } from '@/stores/pipeline'
 import { fetchBoard, updateLead, type Lead, type BoardStage } from '@/api/leads'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 import { dateWindow, type DatePreset } from '@/utils/time'
 import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
@@ -32,12 +33,13 @@ const boardPipelineId = shallowRef('')
 export function useLeadPipeline() {
   const pipelineStore = usePipelineStore()
 
-  // Monotonic request sequence: only the newest load of this instance's board
-  // may write it. Guards filter changes (the pipeline guard alone cannot) —
-  // the same pattern as runContactSearch, fetchActivities, and fetchHistory.
-  // Per-instance, like boardStages: a load started by another consumer of this
-  // composable (the page vs. the activities drawer) must not cancel this one.
-  let boardLoadSeq = 0
+  // Per-instance request guard: only the newest load of this instance's board
+  // may write it. The pipeline-id check in loadLeads covers what a
+  // per-instance guard cannot see: another consumer of this composable (the
+  // page vs. the activities drawer) changing the shared pipeline selection.
+  // Like boardStages, the guard is per instance so a load started by another
+  // consumer does not cancel this one.
+  const guard = createRequestGuard()
 
   // Stage id → (capped window leads + true count) from the board endpoint.
   const boardStages = shallowRef<BoardStage[]>([])
@@ -115,7 +117,7 @@ export function useLeadPipeline() {
   async function loadLeads() {
     const pipelineId = selectedPipelineId.value
     if (!pipelineId) return
-    const seq = ++boardLoadSeq
+    const run = guard.start()
     // A pipeline switch means a different board: clear the old one so the
     // skeleton shows instead of stale cards from the previous pipeline, and
     // bump the revision so the fresh board animates in. Filter changes keep
@@ -141,12 +143,12 @@ export function useLeadPipeline() {
       // The user may have switched pipelines or changed a filter while this
       // request was in flight; a stale response must not overwrite the
       // current board.
-      if (seq !== boardLoadSeq || pipelineId !== selectedPipelineId.value) return
+      if (!run.isCurrent() || pipelineId !== selectedPipelineId.value) return
       boardStages.value = res.data?.stages ?? []
     } catch {
-      if (seq === boardLoadSeq && pipelineId === selectedPipelineId.value) toast.error('Failed to load leads')
+      if (run.isCurrent() && pipelineId === selectedPipelineId.value) toast.error('Failed to load leads')
     } finally {
-      if (seq === boardLoadSeq && pipelineId === selectedPipelineId.value) loading.value = false
+      if (run.isCurrent() && pipelineId === selectedPipelineId.value) loading.value = false
     }
   }
 
