@@ -26,28 +26,15 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Loader2, Plus, X, Star } from '@lucide/vue'
-import type { DuplicateMatch } from '@/api/contacts'
+import type { ContactSaveBody, DuplicateMatch } from '@/api/contacts'
+
+export type { ContactSaveBody } from '@/api/contacts'
 
 const props = defineProps<{
   editingContact: Contact | null
   saving?: boolean
   duplicateMatches?: DuplicateMatch[] | null
 }>()
-
-export interface ContactSaveBody {
-  name: string
-  nickname: string
-  location: string
-  age: number | null
-  date_of_birth: string
-  tag_ids: string[]
-  status_id: string
-  phones: { value: string; is_primary: boolean }[]
-  emails: { value: string; is_primary: boolean }[]
-  phone: string
-  email: string
-  confirm_duplicates?: boolean
-}
 
 const emit = defineEmits<{
   save: [body: ContactSaveBody]

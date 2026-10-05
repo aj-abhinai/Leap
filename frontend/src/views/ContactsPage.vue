@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from 'vue'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { useContactsStore, type Contact } from '@/stores/contacts'
@@ -24,8 +24,7 @@ import {
 } from '@/components/ui/sheet'
 import { FolderKanban, Pencil, Trash2, Users } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
-import { ApiError } from '@/composables/useApi'
-import type { DuplicateMatch } from '@/api/contacts'
+import { useContactSave, type SavedContact } from '@/composables/useContactSave'
 import ContactForm, { type ContactSaveBody } from '@/components/contacts/ContactForm.vue'
 import ContactCompactCard from '@/components/contacts/ContactCompactCard.vue'
 import ContactSpreadsheet from '@/components/contacts/ContactSpreadsheet.vue'
@@ -44,14 +43,13 @@ import { errorMessage } from '@/utils/errors'
 const store = useContactsStore()
 const router = useRouter()
 const rbac = useRBACStore()
+const { saving, duplicateMatches, save, resolveDuplicates, reset } = useContactSave()
 const search = shallowRef('')
 const page = shallowRef(1)
 const perPage = 20
 
 const drawerOpen = shallowRef(false)
 const editingContact = ref<Contact | null>(null)
-const saving = shallowRef(false)
-const duplicateMatches = shallowRef<DuplicateMatch[] | null>(null)
 
 const deletingId = shallowRef<string | null>(null)
 const deleteDialogOpen = shallowRef(false)
@@ -143,48 +141,31 @@ function openEdit(contact: Contact) {
   drawerOpen.value = true
 }
 
-// handleSave creates or updates the edited contact and closes the drawer;
-// a 409 duplicate surfaces the matched contact(s) in a confirm dialog.
+// handleSave creates or updates the edited contact; a 409 duplicate
+// surfaces in the composable's confirm dialog.
 async function handleSave(body: ContactSaveBody) {
-  saving.value = true
-  lastSaveBody.value = body
-  try {
-    if (editingContact.value) {
-      await store.update(editingContact.value.id, body)
-      toast.success('Contact updated')
-    } else {
-      const saved = await store.create(body)
-      toast.success('Contact created')
-      if (saved.warnings?.length) {
-        toast.warning(saved.warnings.join('; '))
-      }
-    }
-    drawerOpen.value = false
-    loadContacts()
-  } catch (e) {
-    if (e instanceof ApiError && e.code === 'DUPLICATE_CONTACT') {
-      duplicateMatches.value = e.payload?.duplicates ?? []
-      return
-    }
-    toast.error(errorMessage(e, 'Failed to save contact'))
-  } finally {
-    saving.value = false
-  }
+  finish(await save(body, editingContact.value?.id))
 }
 
-// lastSaveBody holds the create body that got a 409 so the confirm action can
-// re-submit it with confirm_duplicates set.
-const lastSaveBody = shallowRef<ContactSaveBody | null>(null)
-
-async function confirmDuplicate(confirmed: boolean) {
-  duplicateMatches.value = null
-  if (!confirmed) return
-  const body = lastSaveBody.value
-  lastSaveBody.value = null
-  if (body) {
-    await handleSave({ ...body, confirm_duplicates: true })
-  }
+async function onConfirmDuplicate(confirmed: boolean) {
+  finish(await resolveDuplicates(confirmed))
 }
+
+// finish applies a successful save: toast, close the drawer, reload the page.
+function finish(saved?: SavedContact | null) {
+  if (!saved) return
+  toast.success(editingContact.value ? 'Contact updated' : 'Contact created')
+  if (saved.warnings?.length) {
+    toast.warning(saved.warnings.join('; '))
+  }
+  drawerOpen.value = false
+  loadContacts()
+}
+
+// Closing the drawer drops any paused duplicate flow.
+watch(drawerOpen, (open) => {
+  if (!open) reset()
+})
 
 function confirmDelete(id: string) {
   deletingId.value = id
@@ -389,7 +370,7 @@ async function handleDelete() {
           :saving="saving"
           :duplicate-matches="duplicateMatches"
           @save="handleSave"
-          @confirm-duplicate="confirmDuplicate"
+          @confirm-duplicate="onConfirmDuplicate"
         />
       </SheetContent>
     </Sheet>

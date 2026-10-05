@@ -20,22 +20,17 @@ import { toast } from 'vue-sonner'
 import { getAvatarColor, getInitials } from '@/utils/avatar'
 import { displayAge } from '@/utils/age'
 import { errorMessage } from '@/utils/errors'
-import { ApiError } from '@/composables/useApi'
-import type { DuplicateMatch } from '@/api/contacts'
+import { useContactSave, type SavedContact } from '@/composables/useContactSave'
 
 const route = useRoute()
 const router = useRouter()
 const store = useContactsStore()
+const { saving, duplicateMatches, save, resolveDuplicates, reset } = useContactSave()
 
 const contact = ref<Contact | null>(null)
 const loading = shallowRef(true)
 const loadError = shallowRef('')
 const drawerOpen = shallowRef(false)
-const saving = shallowRef(false)
-// A 409 duplicate on edit surfaces here the same way as on the list page:
-// matched contacts in a dialog, confirm resubmits with the flag set.
-const duplicateMatches = shallowRef<DuplicateMatch[] | null>(null)
-const lastSaveBody = shallowRef<ContactSaveBody | null>(null)
 const ageLabel = computed(() => displayAge(contact.value?.date_of_birth, contact.value?.age))
 
 // Watch the route param: navigating detail-to-detail reuses this instance,
@@ -53,11 +48,9 @@ async function loadContact(id: string) {
   const seq = ++loadSeq
   loading.value = true
   loadError.value = ''
-  // Detail-to-detail navigation reuses this instance: duplicate state from
-  // the previous contact must not reopen its dialog over the new one, nor
-  // resubmit its pending body against the new contact.
-  duplicateMatches.value = null
-  lastSaveBody.value = null
+  // Detail-to-detail navigation reuses this instance: any paused duplicate
+  // flow from the previous contact must not resubmit against the new one.
+  reset()
   try {
     const loaded = await store.fetchContact(id)
     if (seq !== loadSeq) return
@@ -77,47 +70,35 @@ function goBack() {
 }
 
 async function handleSave(body: ContactSaveBody) {
-  const saved = contact.value
-  if (!saved) return
-  saving.value = true
-  lastSaveBody.value = body
-  // Capture the id and the seq before awaiting the patch: navigating to
-  // another contact mid-save bumps loadSeq, and this refetch of the saved
-  // contact must then be discarded instead of overwriting the new contact.
+  const id = contact.value?.id
+  if (!id) return
+  // Capture the seq before awaiting the save: navigating to another contact
+  // mid-save bumps loadSeq, and this save's refetch must then be discarded
+  // instead of overwriting the new contact.
   const seq = loadSeq
+  finish(seq, await save(body, id))
+}
+
+async function onConfirmDuplicate(confirmed: boolean) {
+  const seq = loadSeq
+  finish(seq, await resolveDuplicates(confirmed))
+}
+
+// finish applies a successful save: toast, close the drawer, and refetch the
+// saved contact behind the same loadSeq gate as loadContact.
+function finish(seq: number, saved?: SavedContact | null) {
+  if (!saved) return
+  toast.success('Contact updated')
+  drawerOpen.value = false
+  void refresh(seq, saved.id)
+}
+
+async function refresh(seq: number, id: string) {
   try {
-    await store.update(saved.id, body)
-    toast.success('Contact updated')
-    drawerOpen.value = false
-  } catch (e) {
-    if (e instanceof ApiError && e.code === 'DUPLICATE_CONTACT') {
-      duplicateMatches.value = e.payload?.duplicates ?? []
-      return
-    }
-    toast.error(errorMessage(e, 'Failed to update contact'))
-    return
-  } finally {
-    saving.value = false
-  }
-  // The refetch is gated on loadSeq like loadContact so a route change that
-  // starts a new load cannot be overwritten by this stale refresh.
-  try {
-    const loaded = await store.fetchContact(saved.id)
+    const loaded = await store.fetchContact(id)
     if (seq === loadSeq) contact.value = loaded
   } catch {
     // Update succeeded; keep showing the previous data rather than blanking the page.
-  }
-}
-
-// confirmDuplicate resubmits the edit that got a 409 with the duplicate flag
-// set; a cancelled dialog just closes it.
-async function confirmDuplicate(confirmed: boolean) {
-  duplicateMatches.value = null
-  if (!confirmed) return
-  const body = lastSaveBody.value
-  lastSaveBody.value = null
-  if (body && contact.value) {
-    await handleSave({ ...body, confirm_duplicates: true })
   }
 }
 </script>
@@ -221,7 +202,7 @@ async function confirmDuplicate(confirmed: boolean) {
               :saving="saving"
               :duplicate-matches="duplicateMatches"
               @save="handleSave"
-              @confirm-duplicate="confirmDuplicate"
+              @confirm-duplicate="onConfirmDuplicate"
             />
           </SheetContent>
         </Sheet>

@@ -49,7 +49,22 @@ export interface ContactNote {
   updated_at: string
 }
 
-export type ContactSaveBody = Record<string, any>
+// ContactSaveBody is the create/update payload the contact form emits. It
+// lives here so the store, the save composable, and the form share one shape.
+export interface ContactSaveBody {
+  name: string
+  nickname: string
+  location: string
+  age: number | null
+  date_of_birth: string
+  tag_ids: string[]
+  status_id: string
+  phones: { value: string; is_primary: boolean }[]
+  emails: { value: string; is_primary: boolean }[]
+  phone: string
+  email: string
+  confirm_duplicates?: boolean
+}
 
 // ResolveMatch is the compact contact result returned by the resolve
 // endpoint (lead entry phone lookup): id, name, primary phone/email, and the
