@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { shallowRef, watch } from 'vue'
 import { listLeadHistory, type StageHistoryEntry } from '@/api/leads'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Route } from '@lucide/vue'
 import { formatDateTime } from '@/utils/time'
@@ -12,25 +13,27 @@ const history = shallowRef<StageHistoryEntry[]>([])
 const loading = shallowRef(false)
 const loadError = shallowRef('')
 
+// A fast lead switch can land a response after a newer request; only the
+// newest request's history may render.
+const guard = createRequestGuard()
+
 // The drawer reuses this instance when it switches leads, so history must
 // refetch whenever the lead changes (not only on mount).
 watch(() => props.leadId, fetchHistory, { immediate: true })
 
 async function fetchHistory() {
-  const requested = props.leadId
+  const run = guard.start()
   loading.value = true
   loadError.value = ''
   try {
-    const res = await listLeadHistory(requested)
-    // A fast lead switch can land this response after a newer request; only
-    // the current lead's history may render.
-    if (requested !== props.leadId) return
+    const res = await listLeadHistory(props.leadId)
+    if (!run.isCurrent()) return
     history.value = res.data ?? []
   } catch (e) {
-    if (requested !== props.leadId) return
+    if (!run.isCurrent()) return
     loadError.value = errorMessage(e, 'Failed to load stage history')
   } finally {
-    if (requested === props.leadId) loading.value = false
+    if (run.isCurrent()) loading.value = false
   }
 }
 </script>

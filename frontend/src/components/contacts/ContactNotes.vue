@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useRBACStore } from '@/stores/rbac'
 import { toast } from 'vue-sonner'
 import { listNotes, addNote, deleteNote, type ContactNote } from '@/api/contacts'
+import { createRequestGuard } from '@/composables/useRequestGuard'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
@@ -40,40 +41,41 @@ const PAGE_SIZE = 50
 
 // Watch the prop: the component instance is reused when the route param
 // changes, so onMounted-only fetching would leave stale notes behind.
-let fetchSeq = 0
+const guard = createRequestGuard()
 watch(() => props.contactId, () => fetchNotes(), { immediate: true })
 
 async function fetchNotes() {
-  const seq = ++fetchSeq
+  const run = guard.start()
   loading.value = true
   page.value = 1
   try {
     const res = await listNotes(props.contactId, { page: 1, perPage: PAGE_SIZE })
-    if (seq !== fetchSeq) return
+    if (!run.isCurrent()) return
     notes.value = res.data
     total.value = res.meta?.total ?? res.data.length
   } catch (e) {
-    if (seq !== fetchSeq) return
+    if (!run.isCurrent()) return
     toast.error(errorMessage(e, 'Failed to load notes'))
   } finally {
-    if (seq === fetchSeq) loading.value = false
+    if (run.isCurrent()) loading.value = false
   }
 }
 
 // loadMore fetches the next page and appends it; the server caps each page at
-// 50 so the feed grows in bounded chunks.
+// 50 so the feed grows in bounded chunks. The append is discarded when a new
+// fetchNotes started meanwhile, without cancelling that fetch.
 async function loadMore() {
   if (loadingMore.value) return
   loadingMore.value = true
-  const seq = fetchSeq
+  const run = guard.current()
   try {
     const res = await listNotes(props.contactId, { page: page.value + 1, perPage: PAGE_SIZE })
-    if (seq !== fetchSeq) return
+    if (!run.isCurrent()) return
     notes.value = [...notes.value, ...res.data]
     total.value = res.meta?.total ?? total.value
     page.value++
   } catch (e) {
-    if (seq !== fetchSeq) return
+    if (!run.isCurrent()) return
     toast.error(errorMessage(e, 'Failed to load more notes'))
   } finally {
     loadingMore.value = false
