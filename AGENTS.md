@@ -9,5 +9,12 @@ A full-stack, single-tenant pipeline based CRM deployed as a single binary.
 
 ## Context
 
-- Before making implementation decisions, inspect `.agents/` and its subdirectories for the relevant documentation. Read only the files needed for the current task.
-- docs/ - folder is just the documentation of the project skip reading that 
+ Before making implementation decisions, inspect `.agents/` and its subdirectories for the relevant documentation. Read only the files needed for the current task. 
+- `docs/` - folder is just the documentation of the project skip reading that 
+
+## Required workflow
+
+- For every project implementation, review, or planning task, load the `convention` skill unless the user already supplied it.
+- Before writing or reviewing code comments, load the `commenting` skill.
+- Before deciding product behavior, feature scope, or UX, load the `product-philosophy` skill.
+ 
