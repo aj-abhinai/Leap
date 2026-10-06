@@ -401,6 +401,24 @@ func TestHandlerUpdateProfile(t *testing.T) {
 	if u.Name != "Alice Renamed" || u.Phone != "+911234567890" {
 		t.Errorf("expected updated profile, got name=%q phone=%q", u.Name, u.Phone)
 	}
+
+	// An explicit empty phone clears the stored value. The row is read back
+	// directly: the response JSON omits an empty phone (omitempty), so it
+	// cannot prove the clear.
+	rec, _ = doJSON(t, h.UpdateProfile, http.MethodPatch, "/api/auth/me", `{"phone":""}`,
+		func(r *http.Request) *http.Request {
+			return r.WithContext(ctxutil.WithUserID(r.Context(), id))
+		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear phone: status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var stored string
+	if err := db.QueryRow(`SELECT COALESCE(phone, '') FROM users WHERE id = $1`, id).Scan(&stored); err != nil {
+		t.Fatalf("read stored phone: %v", err)
+	}
+	if stored != "" {
+		t.Errorf("stored phone = %q, want empty after explicit clear", stored)
+	}
 }
 
 func TestHandlerUpdateProfileEmptyPatchSkipsWrite(t *testing.T) {
@@ -463,6 +481,7 @@ func TestHandlerUpdateProfileRejectsInvalidFields(t *testing.T) {
 		{name: "empty name", body: `{"name":"   "}`},
 		{name: "overlong name", body: `{"name":"` + strings.Repeat("x", 101) + `"}`},
 		{name: "overlong phone", body: `{"phone":"` + strings.Repeat("9", 21) + `"}`},
+		{name: "digitless phone", body: `{"phone":"abc"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

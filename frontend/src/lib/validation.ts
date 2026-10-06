@@ -18,7 +18,10 @@ export function isStrongPassword(password: string): boolean {
 
 export const profileSchema = z.object({
   name: z.string().min(1, 'Name is required'),
-  phone: z.string().optional(),
+  phone: z
+    .string()
+    .optional()
+    .refine((v) => !v || /\d/.test(v), { message: 'Phone must contain at least one digit' }),
 })
 
 // One address value, reused to validate every row of the multi-valued email

@@ -48,7 +48,8 @@ func Create(q Queryer, in NewUser) (*User, error) {
 // Update edits the provided identity fields and returns the stored row. Nil
 // fields are unchanged; an all-nil patch is a read. Name is trimmed and
 // bounded, the email is normalized and must not collide, and the phone is
-// canonicalized with the org default country code and bounded. Live rows
+// canonicalized with the org default country code and bounded; a non-blank
+// phone with no digits is refused, an empty phone clears the field. Live rows
 // only; a missing or soft-deleted user is ErrNotFound.
 func Update(q Queryer, id string, p Patch) (*User, error) {
 	if p.Name == nil && p.Email == nil && p.Phone == nil {
@@ -80,6 +81,12 @@ func Update(q Queryer, id string, p Patch) (*User, error) {
 			return nil, err
 		}
 		canonical := util.CanonicalPhone(*p.Phone, defaultCC)
+		// A non-blank input with no digits cannot canonicalize; storing the
+		// empty canonical would silently blank the phone. An explicit empty
+		// string still clears the field.
+		if canonical == "" && strings.TrimSpace(*p.Phone) != "" {
+			return nil, ErrPhoneInvalid
+		}
 		if len([]rune(canonical)) > 20 {
 			return nil, ErrPhoneTooLong
 		}

@@ -544,6 +544,20 @@ func TestUpdateUserRejectsOverlongName(t *testing.T) {
 	}
 }
 
+func TestUpdateUserRejectsDigitlessPhone(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	u, err := svc.createUser("Rep", "rep-phone@example.com", "Password-123", "", "")
+	if err != nil {
+		t.Fatalf("createUser: %v", err)
+	}
+	digitless := "abc"
+	if _, err := svc.updateUser(u.ID, UpdateUserRequest{Phone: &digitless}, ""); !errors.Is(err, user.ErrPhoneInvalid) {
+		t.Fatalf("updateUser(digitless phone) = %v, want user.ErrPhoneInvalid", err)
+	}
+}
+
 func TestCreateUserSuperadminRoleRestricted(t *testing.T) {
 	db := testdb.New(t)
 	svc := NewService(db)

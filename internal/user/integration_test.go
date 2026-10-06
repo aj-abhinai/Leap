@@ -80,6 +80,19 @@ func TestUpdateRules(t *testing.T) {
 		t.Errorf("expected ErrPhoneTooLong, got %v", err)
 	}
 
+	digitless := "abc"
+	if _, err := Update(db, u.ID, Patch{Phone: &digitless}); !errors.Is(err, ErrPhoneInvalid) {
+		t.Errorf("expected ErrPhoneInvalid, got %v", err)
+	}
+	cleared := ""
+	updated, err = Update(db, u.ID, Patch{Phone: &cleared})
+	if err != nil {
+		t.Fatalf("clear phone: %v", err)
+	}
+	if updated.Phone != "" {
+		t.Errorf("phone = %q, want empty after explicit clear", updated.Phone)
+	}
+
 	email := "  Bob@Example.COM "
 	updated, err = Update(db, u.ID, Patch{Email: &email})
 	if err != nil {

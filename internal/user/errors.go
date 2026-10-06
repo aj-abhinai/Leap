@@ -22,6 +22,11 @@ var (
 	ErrEmailRequired = &PolicyError{Code: "BAD_REQUEST", Message: "Email cannot be empty"}
 	ErrPhoneTooLong  = &PolicyError{Code: "BAD_REQUEST", Message: "Phone must be at most 20 characters"}
 
+	// ErrPhoneInvalid reports a non-blank phone with no digits; an explicit
+	// empty string still clears the phone. The lowercase message matches the
+	// contact and lead entry points.
+	ErrPhoneInvalid = &PolicyError{Code: "BAD_REQUEST", Message: "phone must contain at least one digit"}
+
 	ErrPasswordTooShort     = &PolicyError{Code: "BAD_REQUEST", Message: "Password must be at least 10 characters"}
 	ErrPasswordTooLong      = &PolicyError{Code: "BAD_REQUEST", Message: "Password must be at most 72 characters"}
 	ErrPasswordNeedsUpper   = &PolicyError{Code: "BAD_REQUEST", Message: "Password must include an uppercase letter"}
