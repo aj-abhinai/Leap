@@ -23,6 +23,8 @@ import {
 } from '@/components/ui/select'
 import SettingsTabExport from '@/components/settings/SettingsTabExport.vue'
 import SettingsSectionMenu from '@/components/settings/SettingsSectionMenu.vue'
+import ErrorAlert from '@/components/ErrorAlert.vue'
+import { errorMessage } from '@/utils/errors'
 import { RefreshCw, ScrollText } from '@lucide/vue'
 import { formatDateTime } from '@/utils/time'
 
@@ -40,6 +42,7 @@ const activityAction = shallowRef('')
 const activityResourceType = shallowRef('')
 const activityUserId = shallowRef('')
 const users = shallowRef<User[]>([])
+const activityLoadError = shallowRef('')
 
 const activityTotalPages = computed(() => Math.ceil(activity.total / activityPerPage) || 1)
 
@@ -69,12 +72,19 @@ async function loadUsers() {
   } catch {}
 }
 
-function loadActivity() {
-  activity.fetchActivity(activityPage.value, activityPerPage, {
-    action: activityAction.value,
-    resourceType: activityResourceType.value,
-    userId: activityUserId.value,
-  })
+// A failed load surfaces as a banner with retry; stale rows stay visible
+// rather than clearing the trail.
+async function loadActivity() {
+  activityLoadError.value = ''
+  try {
+    await activity.fetchActivity(activityPage.value, activityPerPage, {
+      action: activityAction.value,
+      resourceType: activityResourceType.value,
+      userId: activityUserId.value,
+    })
+  } catch (e) {
+    activityLoadError.value = errorMessage(e, 'Failed to load the audit log')
+  }
 }
 
 function applyActivityFilters() {
@@ -137,6 +147,12 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
           </Button>
         </CardHeader>
         <CardContent>
+          <ErrorAlert
+            v-if="activityLoadError"
+            :error="activityLoadError"
+            title="Failed to load the audit log"
+            @retry="loadActivity()"
+          />
           <div class="mb-4 flex flex-wrap gap-2">
             <Select
               :model-value="activityUserId || ALL"
@@ -192,7 +208,7 @@ function resourceBadgeVariant(type: string): BadgeVariants['variant'] {
               </SelectContent>
             </Select>
           </div>
-          <div v-if="activity.entries.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
+          <div v-if="activity.entries.length === 0 && !activityLoadError" class="flex flex-col items-center justify-center py-12 text-center">
             <ScrollText class="size-10 text-muted-foreground/40 mb-3" />
             <p class="text-sm font-medium text-muted-foreground">No activity logged yet</p>
             <p class="text-xs text-muted-foreground/60 mt-1">Mutations in Leap will appear here</p>

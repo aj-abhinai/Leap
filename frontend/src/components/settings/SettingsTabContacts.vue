@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import SettingsTagStatusCard from '@/components/settings/SettingsTagStatusCard.vue'
 import SettingsSectionMenu from '@/components/settings/SettingsSectionMenu.vue'
+import ErrorAlert from '@/components/ErrorAlert.vue'
 
 // Contacts tab: the two lists the contact workflow reads. Without
 // settings:manage the cards render read-only. The section menu starts at
@@ -22,6 +23,12 @@ onMounted(() => {
 </script>
 
 <template>
+  <ErrorAlert
+    v-if="store.loadError"
+    :error="store.loadError"
+    title="Failed to load settings"
+    @retry="store.fetchTags()"
+  />
   <SettingsSectionMenu :sections="sections">
     <template #tags>
       <SettingsTagStatusCard kind="tag" title="Tags" placeholder="Tag name" :readonly="readonly" />

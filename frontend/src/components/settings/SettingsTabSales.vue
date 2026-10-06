@@ -5,6 +5,7 @@ import SettingsTagStatusCard from '@/components/settings/SettingsTagStatusCard.v
 import SettingsTabPipelines from '@/components/settings/SettingsTabPipelines.vue'
 import SettingsTabPrograms from '@/components/settings/SettingsTabPrograms.vue'
 import SettingsSectionMenu from '@/components/settings/SettingsSectionMenu.vue'
+import ErrorAlert from '@/components/ErrorAlert.vue'
 
 // Sales tab: the lead workflow's configuration — pipelines and stages,
 // programs, and the three quick-reply/task/loss word lists. Without
@@ -28,6 +29,12 @@ onMounted(() => {
 </script>
 
 <template>
+  <ErrorAlert
+    v-if="store.loadError"
+    :error="store.loadError"
+    title="Failed to load settings"
+    @retry="store.fetchTags()"
+  />
   <SettingsSectionMenu :sections="sections">
     <template #pipelines>
       <SettingsTabPipelines :readonly="readonly" />

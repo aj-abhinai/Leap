@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import ErrorAlert from '@/components/ErrorAlert.vue'
 import { toast } from 'vue-sonner'
 import { getNudgeLeadMinutes, setNudgeLeadMinutes, getDefaultCountryCode, setDefaultCountryCode } from '@/api/settings'
 import { errorMessage } from '@/utils/errors'
@@ -11,17 +12,22 @@ import { Clock, Phone } from '@lucide/vue'
 
 const nudgeMinutes = shallowRef(5)
 const nudgeLoading = shallowRef(false)
+const nudgeLoadFailed = shallowRef(false)
 
 const countryCode = shallowRef('+91')
 const countryCodeLoading = shallowRef(false)
+const countryCodeLoadFailed = shallowRef(false)
 
 // The nudge lead time: how many minutes before a task's start time its
 // reminder fires. One org-wide value, default 5.
 async function loadNudge() {
+  nudgeLoadFailed.value = false
   try {
     const res = await getNudgeLeadMinutes()
     nudgeMinutes.value = res.data.minutes
-  } catch {}
+  } catch {
+    nudgeLoadFailed.value = true
+  }
 }
 
 async function saveNudge() {
@@ -44,10 +50,13 @@ async function saveNudge() {
 // The org's default country code: bare phone numbers get it when staff do not
 // type an international form. One org-wide value, default +91.
 async function loadCountryCode() {
+  countryCodeLoadFailed.value = false
   try {
     const res = await getDefaultCountryCode()
     countryCode.value = res.data.country_code
-  } catch {}
+  } catch {
+    countryCodeLoadFailed.value = true
+  }
 }
 
 async function saveCountryCode() {
@@ -83,12 +92,18 @@ onMounted(() => {
         </CardTitle>
       </CardHeader>
       <CardContent>
+        <ErrorAlert
+          v-if="nudgeLoadFailed"
+          error="The stored reminder lead time could not be loaded"
+          title="Failed to load settings"
+          @retry="loadNudge()"
+        />
         <div class="flex items-end gap-3">
           <div class="space-y-1.5">
             <Label for="nudge-lead">Remind before tasks start (minutes)</Label>
             <Input id="nudge-lead" v-model.number="nudgeMinutes" type="number" min="0" class="w-32" />
           </div>
-          <Button :disabled="nudgeLoading" @click="saveNudge">Save</Button>
+          <Button :disabled="nudgeLoading || nudgeLoadFailed" @click="saveNudge">Save</Button>
         </div>
         <p class="mt-2 text-xs text-muted-foreground">
           Tasks scheduled without an explicit reminder get one this many minutes before the start time.
@@ -102,12 +117,18 @@ onMounted(() => {
         </CardTitle>
       </CardHeader>
       <CardContent>
+        <ErrorAlert
+          v-if="countryCodeLoadFailed"
+          error="The stored country code could not be loaded"
+          title="Failed to load settings"
+          @retry="loadCountryCode()"
+        />
         <div class="flex items-end gap-3">
           <div class="space-y-1.5">
             <Label for="country-code">Country code</Label>
             <Input id="country-code" v-model="countryCode" placeholder="+91" class="w-32" />
           </div>
-          <Button :disabled="countryCodeLoading" @click="saveCountryCode">Save</Button>
+          <Button :disabled="countryCodeLoading || countryCodeLoadFailed" @click="saveCountryCode">Save</Button>
         </div>
         <p class="mt-2 text-xs text-muted-foreground">
           Phone numbers typed without an international prefix get this country code. Use the form +91 or +971.

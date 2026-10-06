@@ -12,24 +12,36 @@ export const useSettingsStore = defineStore('settings', () => {
   const lossReasons = ref<api.Tag[]>([])
   const loading = ref(false)
 
+  // loadError names the word lists whose last load failed; empty when the
+  // last fetch settled all five.
+  const loadError = ref('')
+
   async function fetchTags() {
     loading.value = true
-    try {
-      const [tagsRes, statusesRes, quickRepliesRes, activityTypesRes, lossReasonsRes] = await Promise.all([
-        api.listTags('tag'),
-        api.listTags('status'),
-        api.listTags('quick_reply'),
-        api.listTags('activity_type'),
-        api.listTags('loss_reason'),
-      ])
-      tags.value = tagsRes.data
-      statuses.value = statusesRes.data
-      quickReplies.value = quickRepliesRes.data
-      activityTypes.value = activityTypesRes.data
-      lossReasons.value = lossReasonsRes.data
-    } finally {
-      loading.value = false
+    loadError.value = ''
+    const results = await Promise.allSettled([
+      api.listTags('tag'),
+      api.listTags('status'),
+      api.listTags('quick_reply'),
+      api.listTags('activity_type'),
+      api.listTags('loss_reason'),
+    ])
+    const lists = [
+      ['tags', results[0], tags],
+      ['statuses', results[1], statuses],
+      ['quick replies', results[2], quickReplies],
+      ['task types', results[3], activityTypes],
+      ['loss reasons', results[4], lossReasons],
+    ] as const
+    const failed: string[] = []
+    for (const [label, result, target] of lists) {
+      if (result.status === 'fulfilled') target.value = result.value.data
+      else failed.push(label)
     }
+    if (failed.length > 0) {
+      loadError.value = `Failed to load: ${failed.join(', ')}`
+    }
+    loading.value = false
   }
 
   async function createTag(name: string, type: string) {
@@ -50,5 +62,5 @@ export const useSettingsStore = defineStore('settings', () => {
     await fetchTags()
   }
 
-  return { tags, statuses, quickReplies, activityTypes, lossReasons, loading, fetchTags, createTag, updateTag, deleteTag }
+  return { tags, statuses, quickReplies, activityTypes, lossReasons, loading, loadError, fetchTags, createTag, updateTag, deleteTag }
 })
