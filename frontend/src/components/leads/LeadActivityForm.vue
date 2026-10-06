@@ -197,7 +197,7 @@ async function handleSave() {
     : null
 
   const built = buildAttempt(
-    { quickReplyId: quickReplyId.value, behavior: selectedBehavior.value, followUp },
+    { quickReplyId: quickReplyId.value || null, behavior: selectedBehavior.value, followUp },
     tasks.env,
   )
   if (!built.ok) {

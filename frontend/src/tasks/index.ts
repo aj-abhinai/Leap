@@ -408,14 +408,16 @@ export interface FollowUpDraft {
 
 // buildAttempt builds the "What happened?" payload: the completed attempt
 // plus, only when the picked behavior schedules one, the follow-up task.
+// quickReplyId is passed through verbatim: '' clears a recorded reply, null
+// keeps it, a value replaces it.
 export function buildAttempt(
-  draft: { quickReplyId: string; behavior: string; followUp: FollowUpDraft | null },
+  draft: { quickReplyId: string | null; behavior: string; followUp: FollowUpDraft | null },
   _env: TaskEnv,
   behaviors: BehaviorMap = defaultBehaviors,
 ): Built<ActivityMutationBody> {
   const spec = behaviorOf(behaviors, draft.behavior)
   const body: ActivityMutationBody = {
-    quick_reply_id: draft.quickReplyId || null,
+    quick_reply_id: draft.quickReplyId,
     is_done: true,
   }
   if (!spec.enablesFollowUp || !draft.followUp || draft.followUp.when.kind === 'none') {

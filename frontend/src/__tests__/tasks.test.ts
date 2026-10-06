@@ -209,9 +209,12 @@ describe('buildAttempt', () => {
     if (lost.ok) expect(lost.body.follow_up).toBeUndefined()
   })
 
-  it('records completion and clears an empty reply', () => {
-    const built = buildAttempt({ quickReplyId: '', behavior: 'log', followUp: null }, env)
-    if (built.ok) expect(built.body).toEqual({ quick_reply_id: null, is_done: true })
+  it('passes the reply through verbatim', () => {
+    const cleared = buildAttempt({ quickReplyId: '', behavior: 'log', followUp: null }, env)
+    if (cleared.ok) expect(cleared.body).toEqual({ quick_reply_id: '', is_done: true })
+
+    const kept = buildAttempt({ quickReplyId: null, behavior: 'log', followUp: null }, env)
+    if (kept.ok) expect(kept.body).toEqual({ quick_reply_id: null, is_done: true })
   })
 
   it('falls back to record-only for an unknown behavior', () => {

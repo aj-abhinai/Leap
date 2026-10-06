@@ -20,11 +20,27 @@ import {
 import {
   MoreHorizontal, Trash2, CheckCircle2, Pencil, AlarmClockPlus, CalendarClock, Check,
 } from '@lucide/vue'
-import { allDaySnoozePresets, nextPresets, reminderIcon, snoozePresets, groupQuickReplies, findSelectedPreset, type NextPreset } from '@/utils/reminders'
-import { formatDateTime, formatDate, toLocalDateInput, toLocalTimeInput, mergeDateTime, allDayRange, isAllDayRange } from '@/utils/time'
-import { typeLabel } from '@/utils/activity'
+import { groupQuickReplies } from '@/utils/quickReplies'
+import {
+  allDaySnoozePresets,
+  behaviorOf,
+  buildAttempt,
+  defaultBehaviors,
+  editDraftFrom,
+  findSelectedPreset,
+  iconFor,
+  nextPresets,
+  present,
+  resolveTask,
+  snoozePresets,
+  whenFromInputs,
+  type NextPreset,
+  type ReminderChoice,
+} from '@/tasks'
+import { useTasks } from '@/tasks/vue'
+import { formatDateTime, toLocalDateInput, toLocalTimeInput } from '@/utils/time'
 import { Badge } from '@/components/ui/badge'
-import { updateLeadActivity, type LeadActivity, type ActivityMutationBody, type ActivityFollowUpBody } from '@/api/leads'
+import { updateLeadActivity, type LeadActivity } from '@/api/leads'
 import { errorMessage } from '@/utils/errors'
 
 export interface QuickReplyChip {
@@ -56,6 +72,12 @@ const emit = defineEmits<{
   closeLost: []
 }>()
 
+const tasks = useTasks()
+
+// One resolved view drives the read row: status, schedule, and reminder lines.
+const resolved = computed(() => resolveTask(props.activity, tasks.env))
+const view = computed(() => present(resolved.value, 'full', tasks.env))
+
 // --- local edit state ---
 const editing = shallowRef(false)
 const editType = shallowRef('')
@@ -66,27 +88,23 @@ const editEndDate = shallowRef('')
 const editEndTime = shallowRef('')
 const editRemindDate = shallowRef('')
 const editRemindTime = shallowRef('')
+// remindTouched: true once the user edits a reminder input, which makes the
+// explicit value win over the reminder-follows policy on save.
+const remindTouched = shallowRef(false)
 const savingEdit = shallowRef(false)
 
 function startEdit() {
+  const draft = editDraftFrom(props.activity, tasks.env)
   editing.value = true
-  editType.value = props.activity.type
-  editDescription.value = props.activity.description
-  // An all-day task prefills its date only: the day window is implied and
-  // rebuilt on save from the date alone.
-  if (isAllDayRange(props.activity.scheduled_at, props.activity.scheduled_end_at)) {
-    editScheduledDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
-    editScheduledTime.value = ''
-    editEndDate.value = ''
-    editEndTime.value = ''
-  } else {
-    editScheduledDate.value = props.activity.scheduled_at ? toLocalDateInput(props.activity.scheduled_at) : ''
-    editScheduledTime.value = props.activity.scheduled_at ? toLocalTimeInput(props.activity.scheduled_at) : ''
-    editEndDate.value = props.activity.scheduled_end_at ? toLocalDateInput(props.activity.scheduled_end_at) : ''
-    editEndTime.value = props.activity.scheduled_end_at ? toLocalTimeInput(props.activity.scheduled_end_at) : ''
-  }
-  editRemindDate.value = props.activity.remind_at ? toLocalDateInput(props.activity.remind_at) : ''
-  editRemindTime.value = props.activity.remind_at ? toLocalTimeInput(props.activity.remind_at) : ''
+  editType.value = draft.type
+  editDescription.value = draft.description
+  editScheduledDate.value = draft.day
+  editScheduledTime.value = draft.time
+  editEndDate.value = draft.endDay
+  editEndTime.value = draft.endTime
+  editRemindDate.value = draft.remindDay
+  editRemindTime.value = draft.remindTime
+  remindTouched.value = false
 }
 
 // The default all-day nudge sits on the start day. When the day moves, a
@@ -102,32 +120,26 @@ function cancelEdit() {
 }
 
 async function saveEdit() {
-  if (!editType.value) {
-    toast.error('Type is required')
+  const draft = editDraftFrom(props.activity, tasks.env)
+  draft.type = editType.value
+  draft.description = editDescription.value
+  draft.day = editScheduledDate.value
+  draft.time = editScheduledTime.value
+  draft.endDay = editEndDate.value
+  draft.endTime = editEndTime.value
+  draft.remindDay = editRemindDate.value
+  draft.remindTime = editRemindTime.value
+  draft.remindTouched = remindTouched.value
+
+  const built = draft.build()
+  if (!built.ok) {
+    toast.error(built.issues[0].message)
     return
   }
+
   savingEdit.value = true
   try {
-    // A date without a time is an all-day task; an empty date clears both ends.
-    let scheduledAt: string | null = null
-    let scheduledEnd: string | null = null
-    if (editScheduledDate.value && !editScheduledTime.value) {
-      const day = allDayRange(editScheduledDate.value)
-      if (day) {
-        scheduledAt = day.start
-        scheduledEnd = day.end
-      }
-    } else if (editScheduledDate.value && editScheduledTime.value) {
-      scheduledAt = mergeDateTime(editScheduledDate.value, editScheduledTime.value)
-      scheduledEnd = mergeDateTime(editEndDate.value, editEndTime.value)
-    }
-    await updateLeadActivity(props.leadId, props.activity.id, {
-      type: editType.value,
-      description: editDescription.value.trim(),
-      scheduled_at: scheduledAt,
-      scheduled_end_at: scheduledEnd,
-      remind_at: mergeDateTime(editRemindDate.value, editRemindTime.value),
-    })
+    await updateLeadActivity(props.leadId, props.activity.id, built.body)
     toast.success('Task updated')
     cancelEdit()
     emit('changed')
@@ -193,40 +205,29 @@ function pickReschedulePreset(preset: NextPreset) {
 // discarded.
 async function saveReschedule() {
   const behavior = rescheduleBehavior.value
+  const followUp = behavior === 'next' && rescheduleDate.value
+    ? {
+        when: whenFromInputs({ day: rescheduleDate.value, time: rescheduleTime.value })!,
+        reminder: { kind: 'orgDefault' } as ReminderChoice,
+      }
+    : null
 
-  let followUp: ActivityFollowUpBody | undefined
-  if (behavior === 'next' && rescheduleDate.value) {
-    if (rescheduleTime.value) {
-      const start = mergeDateTime(rescheduleDate.value, rescheduleTime.value)
-      if (!start) {
-        toast.error('Enter a valid date')
-        return
-      }
-      followUp = { scheduled_at: start }
-    } else {
-      const day = allDayRange(rescheduleDate.value)
-      if (!day) {
-        toast.error('Enter a valid date')
-        return
-      }
-      followUp = { scheduled_at: day.start, scheduled_end_at: day.end, remind_at: day.remind }
-    }
+  const built = buildAttempt(
+    { quickReplyId: rescheduleQuickReply.value || '', behavior, followUp },
+    tasks.env,
+  )
+  if (!built.ok) {
+    toast.error(built.issues[0].message)
+    return
   }
 
   savingReschedule.value = true
   try {
-    // An empty value clears a quick reply recorded earlier on the task;
-    // null would keep it.
-    const body: ActivityMutationBody = {
-      is_done: true,
-      quick_reply_id: rescheduleQuickReply.value || '',
-    }
-    if (followUp) body.follow_up = followUp
-    await updateLeadActivity(props.leadId, props.activity.id, body)
+    await updateLeadActivity(props.leadId, props.activity.id, built.body)
     toast.success(followUp ? 'Attempt logged, follow-up created' : 'Attempt logged')
     cancelReschedule()
     emit('changed')
-    if (behavior === 'close_lost') {
+    if (behaviorOf(defaultBehaviors, behavior).closesLead) {
       emit('closeLost')
     }
   } catch (e) {
@@ -248,7 +249,10 @@ const selectedReschedulePreset = computed(() =>
 )
 
 // An all-day task shows its date once; the day window itself is implied.
-const isAllDay = computed(() => isAllDayRange(props.activity.scheduled_at, props.activity.scheduled_end_at))
+const isAllDay = computed(() => {
+  const state = resolved.value.state
+  return state.kind === 'open' && state.shape.kind === 'allDay'
+})
 
 // An all-day task gets day-based snooze presets so its window keeps the shape.
 const snoozeOptions = computed(() => (isAllDay.value ? allDaySnoozePresets : snoozePresets))
@@ -299,11 +303,11 @@ const snoozeOptions = computed(() => (isAllDay.value ? allDaySnoozePresets : sno
         <div class="grid grid-cols-2 gap-2">
           <div class="space-y-1.5">
             <Label class="text-xs">Remind date</Label>
-            <Input v-model="editRemindDate" type="date" />
+            <Input v-model="editRemindDate" type="date" @input="remindTouched = true" />
           </div>
           <div class="space-y-1.5">
             <Label class="text-xs">Remind time</Label>
-            <Input v-model="editRemindTime" type="time" />
+            <Input v-model="editRemindTime" type="time" @input="remindTouched = true" />
           </div>
         </div>
         <div class="flex justify-end gap-2">
@@ -393,10 +397,10 @@ const snoozeOptions = computed(() => (isAllDay.value ? allDaySnoozePresets : sno
       <!-- Read view -->
       <div v-else class="flex items-start justify-between gap-2">
         <div class="flex items-start gap-2 min-w-0">
-          <component :is="reminderIcon(activity.type)" class="size-4 mt-0.5 text-muted-foreground shrink-0" />
+          <component :is="iconFor(activity.type)" class="size-4 mt-0.5 text-muted-foreground shrink-0" />
           <div class="min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-xs font-medium">{{ typeLabel(activity.type) }}</span>
+              <span class="text-xs font-medium">{{ view.title.text }}</span>
               <span v-if="activity.quick_reply_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
                 {{ activity.quick_reply_name }}
               </span>
@@ -405,17 +409,11 @@ const snoozeOptions = computed(() => (isAllDay.value ? allDaySnoozePresets : sno
             </div>
             <p v-if="activity.description" class="text-sm mt-0.5">{{ activity.description }}</p>
             <div class="flex flex-wrap gap-2 mt-1">
-              <span v-if="isAllDay" class="text-xs text-muted-foreground">
-                Scheduled: {{ formatDate(activity.scheduled_at!) }} (all day)
+              <span v-if="view.schedule" class="text-xs text-muted-foreground">
+                Scheduled: {{ view.schedule.text }}
               </span>
-              <span v-else-if="activity.scheduled_at && activity.scheduled_end_at" class="text-xs text-muted-foreground">
-                Scheduled: {{ formatDateTime(activity.scheduled_at) }} – {{ formatDateTime(activity.scheduled_end_at) }}
-              </span>
-              <span v-else-if="activity.scheduled_at" class="text-xs text-muted-foreground">
-                Scheduled: {{ formatDateTime(activity.scheduled_at) }}
-              </span>
-              <span v-if="activity.remind_at" class="text-xs" :class="overdue ? 'text-warning' : 'text-muted-foreground'">
-                Reminder: {{ formatDateTime(activity.remind_at) }}
+              <span v-if="view.reminder" class="text-xs" :class="overdue ? 'text-warning' : 'text-muted-foreground'">
+                Reminder: {{ view.reminder.text }}
               </span>
             </div>
             <span class="text-xs text-muted-foreground/70 mt-0.5 block">
