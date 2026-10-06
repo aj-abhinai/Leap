@@ -1,61 +1,23 @@
-import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { createRequestGuard } from '@/composables/useRequestGuard'
-import { usePagination, totalOf } from '@/composables/usePagination'
+import { defineStore } from 'pinia'
+import { totalOf } from '@/composables/usePagination'
 import * as api from '@/api/leads'
 
 export type { Lead, LeadListQuery } from '@/api/leads'
 
+// useLeadsStore owns only the total lead count for the dashboard; the kanban
+// reads the board store and list screens own their own fetch state.
 export const useLeadsStore = defineStore('leads', () => {
-  const { items: leads, total, loading, setTotal } = usePagination<api.Lead>()
-  // capped is true when fetchAllLeads stopped early at the safety cap instead
-  // of loading the full result set.
-  const capped = ref(false)
+  const total = ref(0)
 
-  // fetchAllLeads loads every matching lead across pages (200/page) so the
-  // kanban never silently drops leads beyond the first page. It stops at a
-  // safety cap (MAX_PAGES) and flags `capped` when the result set is larger.
-  const PAGE_SIZE = 200
-  const MAX_PAGES = 10
-  // The guard discards stale responses: overlapping calls (debounced search,
-  // filter changes, pipeline switches) must not let an older request overwrite
-  // a newer one.
-  const guard = createRequestGuard()
-  async function fetchAllLeads(f: api.LeadListQuery = {}) {
-    const run = guard.start()
-    const all: api.Lead[] = []
-    let page = 1
-    let serverTotal = 0
-    capped.value = false
-    loading.value = true
-    try {
-      for (;;) {
-        const res = await api.listLeads({ page, perPage: PAGE_SIZE, query: f })
-        if (!run.isCurrent()) return
-        const items = res.data ?? []
-        serverTotal = res.meta?.total ?? 0
-        all.push(...items)
-        if (items.length < PAGE_SIZE || all.length >= serverTotal) break
-        if (page >= MAX_PAGES) {
-          capped.value = true
-          break
-        }
-        page++
-      }
-      if (!run.isCurrent()) return
-      leads.value = all
-      total.value = serverTotal
-    } finally {
-      if (run.isCurrent()) loading.value = false
-    }
-  }
-
+  // fetchTotal reads the count for the dashboard card. A failure leaves the
+  // previous value in place.
   async function fetchTotal() {
     try {
       const res = await api.listLeads({ page: 1, perPage: 1 })
-      setTotal(totalOf(res))
+      total.value = totalOf(res)
     } catch {}
   }
 
-  return { leads, total, loading, capped, fetchAllLeads, fetchTotal }
+  return { total, fetchTotal }
 })
