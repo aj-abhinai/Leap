@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
-import { createLeadActivity, type ActivityMutationBody } from '@/api/leads'
+import { createLeadActivity } from '@/api/leads'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -14,7 +14,9 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { CalendarPlus } from '@lucide/vue'
-import { mergeDateTime, allDayRange } from '@/utils/time'
+import { buildTaskBody, whenFromInputs, type ReminderChoice } from '@/tasks'
+import { useTasks } from '@/tasks/vue'
+import { mergeDateTime } from '@/utils/time'
 import { errorMessage } from '@/utils/errors'
 
 // Schedule task creates an open task with nothing behind it: the first task
@@ -25,6 +27,7 @@ const props = defineProps<{ leadId: string }>()
 const emit = defineEmits<{ saved: [] }>()
 
 const settings = useSettingsStore()
+const tasks = useTasks()
 
 // Reka Select cannot carry an empty string as an item value, so the system
 // reminder travels as a sentinel.
@@ -87,44 +90,19 @@ function clearForm() {
 // the save with an error — input is never discarded.
 async function handleSave() {
   error.value = ''
-  if (!taskType.value) {
-    error.value = 'Type is required'
+  const when = whenFromInputs({ day: schedDate.value, time: schedTime.value })
+  const reminder: ReminderChoice = remindChoice.value === SYSTEM_REMIND
+    ? { kind: 'orgDefault' }
+    : { kind: 'offsetMinutes', minutes: Number(remindChoice.value) }
+  const built = buildTaskBody({ type: taskType.value, when: when ?? { kind: 'none' }, reminder }, tasks.env)
+  if (!built.ok) {
+    error.value = built.issues[0].message
     return
-  }
-  if (!schedDate.value) {
-    error.value = 'Date is required'
-    return
-  }
-
-  let payload: ActivityMutationBody
-  if (!schedTime.value) {
-    const day = allDayRange(schedDate.value)
-    if (!day) {
-      error.value = 'Enter a valid date'
-      return
-    }
-    payload = {
-      type: taskType.value,
-      scheduled_at: day.start,
-      scheduled_end_at: day.end,
-      remind_at: day.remind,
-    }
-  } else {
-    const start = mergeDateTime(schedDate.value, schedTime.value)
-    if (!start) {
-      error.value = 'Enter a valid date'
-      return
-    }
-    payload = { type: taskType.value, scheduled_at: start }
-    if (remindChoice.value !== SYSTEM_REMIND) {
-      const offset = Number(remindChoice.value)
-      payload.remind_at = new Date(new Date(start).getTime() - offset * 60_000).toISOString()
-    }
   }
 
   saving.value = true
   try {
-    await createLeadActivity(props.leadId, payload)
+    await createLeadActivity(props.leadId, built.body)
     toast.success('Task scheduled')
     clearForm()
     emit('saved')

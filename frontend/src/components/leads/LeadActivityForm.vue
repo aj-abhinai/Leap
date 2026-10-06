@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { useSettingsStore } from '@/stores/settings'
-import { createLeadActivity, type ActivityFollowUpBody, type ActivityMutationBody } from '@/api/leads'
+import { createLeadActivity } from '@/api/leads'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -16,8 +16,17 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { ChevronDown, ChevronUp, Check } from '@lucide/vue'
-import { nextPresets, groupQuickReplies, findSelectedPreset, type NextPreset } from '@/utils/reminders'
-import { toLocalDateInput, toLocalTimeInput, mergeDateTime, allDayRange } from '@/utils/time'
+import { groupQuickReplies } from '@/utils/quickReplies'
+import {
+  buildAttempt,
+  findSelectedPreset,
+  nextPresets,
+  whenFromInputs,
+  type NextPreset,
+  type ReminderChoice,
+} from '@/tasks'
+import { useTasks } from '@/tasks/vue'
+import { toLocalDateInput, toLocalTimeInput, mergeDateTime } from '@/utils/time'
 import { errorMessage } from '@/utils/errors'
 
 const props = defineProps<{ leadId: string }>()
@@ -28,6 +37,7 @@ const emit = defineEmits<{
 }>()
 
 const settings = useSettingsStore()
+const tasks = useTasks()
 
 // Reka Select cannot carry an empty string as an item value, so "same type"
 // and "system reminder" travel as sentinels and map back at save time.
@@ -92,38 +102,6 @@ const effectiveFollowType = computed(() => {
   const picked = followType.value === SAME_TYPE ? '' : followType.value
   return (picked || activityType.value).trim()
 })
-
-// INVALID marks input the form refuses to send: the payload is never built
-// from a malformed date, and the user sees an error instead of a silent drop.
-const INVALID = Symbol('invalid follow-up')
-
-// makeFollowUp builds the follow-up payload from the entered date. No date
-// means no follow-up (null). A date without a time is the whole local day:
-// start, end, and the 09:00 remind travel together so the shape survives the
-// round trip. A timed follow-up sends only the start; the reminder travels
-// only as a relative override.
-function makeFollowUp(): ActivityFollowUpBody | null | typeof INVALID {
-  if (!followDate.value) return null
-  if (followTime.value) {
-    const start = mergeDateTime(followDate.value, followTime.value)
-    if (!start) return INVALID
-    const fu: ActivityFollowUpBody = { scheduled_at: start }
-    if (remindChoice.value !== SYSTEM_REMIND) {
-      const offset = Number(remindChoice.value)
-      fu.remind_at = new Date(new Date(start).getTime() - offset * 60_000).toISOString()
-    }
-    return withType(fu)
-  }
-  const day = allDayRange(followDate.value)
-  if (!day) return INVALID
-  return withType({ scheduled_at: day.start, scheduled_end_at: day.end, remind_at: day.remind })
-}
-
-function withType(fu: ActivityFollowUpBody): ActivityFollowUpBody {
-  const t = effectiveFollowType.value
-  if (t && t !== activityType.value.trim()) fu.type = t
-  return fu
-}
 
 // The preview states exactly what the save will do, before it happens.
 const preview = computed(() => {
@@ -205,25 +183,36 @@ async function handleSave() {
     error.value = 'Type is required'
     return
   }
-  const fu = showNextFields.value ? makeFollowUp() : null
-  if (fu === INVALID) {
-    error.value = 'Enter a valid date'
+
+  const reminder: ReminderChoice = remindChoice.value === SYSTEM_REMIND
+    ? { kind: 'orgDefault' }
+    : { kind: 'offsetMinutes', minutes: Number(remindChoice.value) }
+  const followUpType = effectiveFollowType.value
+  const followUp = showNextFields.value && followDate.value
+    ? {
+        type: followUpType === activityType.value.trim() ? '' : followUpType,
+        when: whenFromInputs({ day: followDate.value, time: followTime.value })!,
+        reminder,
+      }
+    : null
+
+  const built = buildAttempt(
+    { quickReplyId: quickReplyId.value, behavior: selectedBehavior.value, followUp },
+    tasks.env,
+  )
+  if (!built.ok) {
+    error.value = built.issues[0].message
     return
   }
-
-  const payload: ActivityMutationBody = {
-    type: activityType.value,
-    description: description.value.trim(),
-    quick_reply_id: quickReplyId.value || null,
-    is_done: true,
-  }
-  if (fu) payload.follow_up = fu
+  const payload = built.body
+  payload.type = activityType.value
+  payload.description = description.value.trim()
   const wasCloseLost = showCloseNotice.value
 
   saving.value = true
   try {
     await createLeadActivity(props.leadId, payload)
-    toast.success(fu ? 'Attempt logged, follow-up created' : 'Attempt logged')
+    toast.success(followUp ? 'Attempt logged, follow-up created' : 'Attempt logged')
     lastActivityType.value = activityType.value
     clearForm()
     // A close_lost save emits only closeLost: the drawer's handleCloseLost
