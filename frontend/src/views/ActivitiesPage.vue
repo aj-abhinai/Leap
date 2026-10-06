@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
-import { useActivitiesStore, type ActivityListFilters } from '@/stores/activities'
+import { useActivitiesStore, type ActivityListFilters, type ActivityListItem } from '@/stores/activities'
 import { useSettingsStore } from '@/stores/settings'
 import { useRemindersStore } from '@/stores/reminders'
 import { Button } from '@/components/ui/button'
@@ -34,9 +34,18 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
-import { allDaySnoozePresets, reminderIcon, snoozePresets, snoozeTarget, type ReminderLike } from '@/utils/reminders'
-import { isOverdue, statusLabel, statusVariant, dueLabel, typeLabel } from '@/utils/activity'
-import { isAllDayRange } from '@/utils/time'
+import {
+  allDaySnoozePresets,
+  behaviorOf,
+  defaultBehaviors,
+  iconFor,
+  present,
+  resolveTask,
+  snoozePresets,
+  snoozeTarget,
+} from '@/tasks'
+import { useTasks } from '@/tasks/vue'
+import { useLeadsBoardStore } from '@/stores/leadsBoard'
 import { toast } from 'vue-sonner'
 import { CheckCircle2, Trash2, MoreHorizontal, AlarmClockPlus, ClipboardList } from '@lucide/vue'
 import { errorMessage } from '@/utils/errors'
@@ -48,6 +57,8 @@ const store = useActivitiesStore()
 const settings = useSettingsStore()
 const remindersStore = useRemindersStore()
 const { openLeadDrawer } = useLeadDrawerGlobal()
+const tasks = useTasks()
+const board = useLeadsBoardStore()
 
 const search = shallowRef('')
 // Reka Select cannot carry an empty string as an item value, so "All types"
@@ -229,10 +240,23 @@ async function doDelete() {
   }
 }
 
-async function doMarkDone(item: { id: string; lead_id: string }) {
+async function doMarkDone(item: ActivityListItem) {
   try {
     await store.markDone(item.lead_id, item.id)
-    toast.success('Task completed')
+    // The server applies the stored quick reply's behavior on completion, so
+    // a close_lost reply closes the lead: say so and refresh the shared board.
+    let spec = behaviorOf(defaultBehaviors, null)
+    if (item.quick_reply_id) {
+      if (settings.quickReplies.length === 0) await settings.fetchTags()
+      const qr = settings.quickReplies.find((s) => s.id === item.quick_reply_id)
+      spec = behaviorOf(defaultBehaviors, qr?.behavior)
+    }
+    if (spec.closesLead) {
+      toast.success('Lead closed')
+      board.load()
+    } else {
+      toast.success('Task completed')
+    }
     load()
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to complete'))
@@ -240,13 +264,26 @@ async function doMarkDone(item: { id: string; lead_id: string }) {
 }
 
 // An all-day task gets day-based snooze presets so its window keeps the shape.
-function snoozeOptions(item: ReminderLike) {
-  return isAllDayRange(item.scheduled_at, item.scheduled_end_at) ? allDaySnoozePresets : snoozePresets
+function snoozeOptions(item: ActivityListItem) {
+  const state = resolveTask(item, tasks.env).state
+  return state.kind === 'open' && state.shape.kind === 'allDay' ? allDaySnoozePresets : snoozePresets
 }
 
-async function doSnooze(item: ReminderLike & { id: string; lead_id: string }, minutes: number) {
+// rowOf resolves one row once: the table reads the shared status and due
+// answers.
+function rowOf(item: ActivityListItem) {
+  const resolved = resolveTask(item, tasks.env)
+  return { resolved, view: present(resolved, 'table', tasks.env) }
+}
+
+function rowOverdue(item: ActivityListItem): boolean {
+  const state = resolveTask(item, tasks.env).state
+  return state.kind === 'open' && state.overdue
+}
+
+async function doSnooze(item: ActivityListItem, minutes: number) {
   try {
-    await remindersStore.snoozeReminder(item.lead_id, item.id, snoozeTarget(item, minutes))
+    await remindersStore.snoozeReminder(item.lead_id, item.id, snoozeTarget(item, minutes, tasks.env))
     toast.success('Reminder snoozed')
     load()
   } catch (e) {
@@ -416,16 +453,16 @@ function prevPage() {
                   </TableCell>
                   <TableCell>
                     <span class="inline-flex items-center gap-1.5 text-sm">
-                      <component :is="reminderIcon(item.type)" class="size-4 text-muted-foreground" />
-                      {{ typeLabel(item.type) }}
+                      <component :is="iconFor(item.type)" class="size-4 text-muted-foreground" />
+                      {{ rowOf(item).resolved.typeName }}
                     </span>
                   </TableCell>
-                  <TableCell class="text-xs" :class="isOverdue(item) ? 'text-destructive' : 'text-muted-foreground'">
-                    {{ dueLabel(item) || '—' }}
+                  <TableCell class="text-xs" :class="rowOverdue(item) ? 'text-destructive' : 'text-muted-foreground'">
+                    {{ rowOf(item).view.due?.text || '—' }}
                   </TableCell>
                   <TableCell>
-                    <Badge :variant="statusVariant(statusLabel(item))" class="text-xs">
-                      {{ statusLabel(item) }}
+                    <Badge :variant="rowOf(item).view.status.variant" class="text-xs">
+                      {{ rowOf(item).view.status.label }}
                     </Badge>
                   </TableCell>
                   <TableCell>

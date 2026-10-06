@@ -5,6 +5,16 @@ import ActivitiesPage from '@/views/ActivitiesPage.vue'
 import { useActivitiesStore } from '@/stores/activities'
 import { useSettingsStore } from '@/stores/settings'
 import { useRemindersStore } from '@/stores/reminders'
+import { useLeadsBoardStore } from '@/stores/leadsBoard'
+
+vi.mock('@/api/leads', () => ({ fetchBoard: vi.fn() }))
+
+const { toast } = vi.hoisted(() => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('vue-sonner', () => ({ toast }))
+
+import { fetchBoard } from '@/api/leads'
+
+const fetchBoardMock = vi.mocked(fetchBoard)
 
 describe('ActivitiesPage', () => {
   afterEach(() => {
@@ -111,5 +121,42 @@ describe('ActivitiesPage', () => {
     const target = new Date(snoozeSpy.mock.calls[0][2] as string)
     expect(target.getTime()).toBeGreaterThan(Date.now())
     expect(target.getHours()).toBe(nudge.getHours())
+  })
+
+  it('announces a lead close and refreshes the shared board', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useActivitiesStore()
+    store.fetchItems = vi.fn().mockResolvedValue(undefined)
+    store.markDone = vi.fn().mockResolvedValue(undefined)
+    const settings = useSettingsStore()
+    settings.fetchTags = vi.fn().mockResolvedValue(undefined)
+    settings.quickReplies = [
+      { id: 'q1', name: 'Closed Lost', type: 'quick_reply', sort_order: 0, behavior: 'close_lost', created_at: '' },
+    ]
+
+    const board = useLeadsBoardStore()
+    board.selectedPipelineId = 'p1'
+    fetchBoardMock.mockReset()
+    fetchBoardMock.mockResolvedValue({ data: { stages: [] } })
+
+    const wrapper = mount(ActivitiesPage, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { doMarkDone: (i: unknown) => Promise<void> }
+    await vm.doMarkDone({
+      id: 'a1',
+      lead_id: 'l1',
+      type: 'Call',
+      quick_reply_id: 'q1',
+      is_done: false,
+      is_cancelled: false,
+      is_reminded: false,
+      created_at: '',
+    })
+    await flushPromises()
+
+    expect(toast.success).toHaveBeenCalledWith('Lead closed')
+    expect(fetchBoardMock).toHaveBeenCalledTimes(1)
   })
 })
