@@ -4,11 +4,12 @@ import { nextTick } from 'vue'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import LeadActivityDrawer from '@/components/leads/LeadActivityDrawer.vue'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
-import { getLead, type Lead } from '@/api/leads'
+import { useLeadsBoardStore } from '@/stores/leadsBoard'
+import { getLead, fetchBoard, type Lead } from '@/api/leads'
 
 vi.mock('@/api/leads', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/leads')>()
-  return { ...actual, getLead: vi.fn() }
+  return { ...actual, getLead: vi.fn(), fetchBoard: vi.fn() }
 })
 
 vi.mock('@/stores/rbac', () => ({
@@ -37,13 +38,14 @@ function makeLead(overrides: Partial<Lead> = {}): Lead {
   }
 }
 
-describe('LeadActivityDrawer closed-lead gate', () => {
+describe('LeadActivityDrawer', () => {
   let pinia: Pinia
 
   beforeEach(() => {
     pinia = createPinia()
     setActivePinia(pinia)
     vi.mocked(getLead).mockReset()
+    vi.mocked(fetchBoard).mockReset()
     const { drawerOpen, drawerLeadId, drawerLead } = useLeadDrawerGlobal()
     drawerOpen.value = false
     drawerLeadId.value = ''
@@ -56,7 +58,9 @@ describe('LeadActivityDrawer closed-lead gate', () => {
       global: {
         plugins: [pinia],
         stubs: {
-          LeadActivityForm: { template: '<div data-testid="activity-form" />' },
+          LeadActivityForm: {
+            template: '<button data-testid="activity-form" @click="$emit(\'saved\')" />',
+          },
           LeadActivity: true,
           LeadStageHistory: true,
         },
@@ -91,6 +95,27 @@ describe('LeadActivityDrawer closed-lead gate', () => {
 
     expect(document.body.querySelector('[data-testid="activity-form"]')).not.toBeNull()
     expect(document.body.textContent).not.toContain('This deal is closed. Tasks are read-only.')
+    wrapper.unmount()
+  })
+
+  // The drawer and the page share one board store; a save must refresh the
+  // board the page renders, not a private copy.
+  it('refreshes the shared board after a task save', async () => {
+    openDrawerWith(makeLead())
+    const wrapper = mountDrawer()
+    await flushPromises()
+    await nextTick()
+
+    const board = useLeadsBoardStore()
+    board.selectedPipelineId = 'p1'
+    vi.mocked(fetchBoard).mockResolvedValue({ data: { stages: [] } })
+
+    const form = document.body.querySelector<HTMLButtonElement>('[data-testid="activity-form"]')
+    expect(form).not.toBeNull()
+    form!.click()
+    await flushPromises()
+
+    expect(fetchBoard).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 })
