@@ -346,3 +346,68 @@ describe('findSelectedPreset', () => {
     expect(findSelectedPreset('', '', list)).toBe('')
   })
 })
+
+// The due column and the happened fallback.
+describe('present table (ported)', () => {
+  it('is empty when an open row has no due boundary', () => {
+    const p = present(resolveTask({ is_done: false, created_at: '2026-10-01T00:00:00Z' }, env), 'table', env)
+    expect(p.due?.text).toBe('')
+  })
+
+  it('falls back to responded_at for a done row without occurred_at', () => {
+    const responded = timed('2026-10-01', '12:00')
+    const p = present(resolveTask({ is_done: true, responded_at: responded }, env), 'table', env)
+    expect(p.due?.text).toBe(new Date(responded).toLocaleString())
+  })
+})
+
+// The notification phrasing and the snooze grid.
+describe('present compact (ported)', () => {
+  const start = timed('2026-09-30', '13:00')
+  const end = timed('2026-09-30', '17:00')
+
+  it('shows a range with the Scheduled-for phrasing', () => {
+    const p = present(resolveTask({ type: 'Call', scheduled_at: start, scheduled_end_at: end }, env), 'compact', env)
+    expect(p.schedule?.text).toBe(
+      `Scheduled for ${new Date(start).toLocaleString()} – ${new Date(end).toLocaleString()}`,
+    )
+  })
+
+  it('shows a point task and a reply-only reminder', () => {
+    const point = present(resolveTask({ type: 'Call', scheduled_at: start }, env), 'compact', env)
+    expect(point.schedule?.text).toBe(`Scheduled for ${new Date(start).toLocaleString()}`)
+
+    const replyOnly = present(resolveTask({ type: 'Call', remind_at: start }, env), 'compact', env)
+    expect(replyOnly.reminder?.text).toBe(`Reminder at ${new Date(start).toLocaleString()}`)
+  })
+
+  it('is empty without a schedule or reminder', () => {
+    const p = present(resolveTask({ type: 'Call' }, env), 'compact', env)
+    expect(p.schedule).toBeNull()
+    expect(p.reminder).toBeNull()
+  })
+})
+
+describe('snoozeTarget (ported)', () => {
+  it('falls back to now + minutes for an all-day shape without a nudge', () => {
+    const day = allDayRange('2026-09-30')!
+    const got = new Date(
+      snoozeTarget({ type: 'Call', scheduled_at: day.start, scheduled_end_at: day.end }, 15, env),
+    ).getTime()
+    expect(got).toBe(Date.parse(NOW) + 15 * 60_000)
+  })
+
+  it('maps each day preset to its own day count', () => {
+    const day = allDayRange('2020-01-01')!
+    const base = { type: 'Call', scheduled_at: day.start, scheduled_end_at: day.end, remind_at: day.remind }
+    const nudge = new Date(day.remind)
+    const expected = (days: number) => {
+      const d = new Date(NOW)
+      d.setDate(d.getDate() + days)
+      d.setHours(nudge.getHours(), nudge.getMinutes(), nudge.getSeconds(), nudge.getMilliseconds())
+      return d.toISOString()
+    }
+    expect(snoozeTarget(base, 2 * 24 * 60, env)).toBe(expected(2))
+    expect(snoozeTarget(base, 7 * 24 * 60, env)).toBe(expected(7))
+  })
+})

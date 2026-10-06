@@ -1,8 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '@/api/reminders'
+import { localEnv, resolveTask } from '@/tasks'
 
 export type { Reminder } from '@/api/reminders'
+
+const tasksEnv = localEnv()
 
 export const useRemindersStore = defineStore('reminders', () => {
   const reminders = ref<api.Reminder[]>([])
@@ -23,8 +26,9 @@ export const useRemindersStore = defineStore('reminders', () => {
     // The badge is the day-start digest: all tasks due today — overdue plus
     // upcoming today — so the first open of the day reads "N tasks today".
     return openReminders.value.filter((r) => {
-      const due = new Date(r.scheduled_end_at ?? r.scheduled_at ?? r.remind_at ?? r.created_at).getTime()
-      return due <= endOfToday.getTime() && !Number.isNaN(due)
+      const state = resolveTask(r, tasksEnv).state
+      if (state.kind !== 'open' || !state.dueAt) return false
+      return new Date(state.dueAt).getTime() <= endOfToday.getTime()
     }).length
   })
 
