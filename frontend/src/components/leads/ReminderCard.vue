@@ -36,7 +36,7 @@ const reminderText = computed(() =>
     : resolved.value.typeName,
 )
 const icon = computed(() => iconFor(props.reminder.type))
-const scheduledLabel = computed(() => view.value.schedule?.text ?? '')
+const scheduleText = computed(() => view.value.schedule?.text ?? '')
 const remindLabel = computed(() => view.value.reminder?.text ?? '')
 
 // An all-day task gets day-based snooze presets so its window keeps the shape.
@@ -75,7 +75,7 @@ const createdLabel = computed(() => formatDateTime(props.reminder.created_at))
               <p v-if="reminder.description" class="text-xs text-muted-foreground mt-0.5">{{ reminder.description }}</p>
               <p v-if="reminder.stage_name" class="text-xs text-muted-foreground/70 mt-0.5">{{ reminder.stage_name }}</p>
               <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-                <span v-if="scheduledLabel">Scheduled: {{ scheduledLabel }}</span>
+                <span v-if="scheduleText">Scheduled: {{ scheduleText }}</span>
                 <span v-if="remindLabel" :class="overdue ? 'text-warning' : ''">
                   Reminder: {{ remindLabel }}
                 </span>
