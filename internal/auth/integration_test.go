@@ -4,6 +4,7 @@ import (
 	"crm/internal/activity"
 	"crm/internal/config"
 	"crm/internal/testdb"
+	"crm/internal/user"
 	"database/sql"
 	"errors"
 	"testing"
@@ -350,7 +351,7 @@ func TestChangePasswordTooShortIntegration(t *testing.T) {
 	svc := NewService(db, authTestConfig())
 
 	_, err := svc.changePassword(id, "correct-horse", "short")
-	if !errors.Is(err, ErrPasswordTooShort) {
+	if !errors.Is(err, user.ErrPasswordTooShort) {
 		t.Errorf("expected ErrPasswordTooShort, got %v", err)
 	}
 }
@@ -432,42 +433,6 @@ func TestLoginKnownUserRunsPasswordComparison(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("expected 1 password comparison for a known account, got %d", calls)
-	}
-}
-
-func TestMustChangePasswordIntegration(t *testing.T) {
-	db := testdb.New(t)
-	flagID := seedUserWithFlag(t, db, "grace@example.com", "correct-horse", true)
-	clearID := seedUserWithFlag(t, db, "henry@example.com", "correct-horse", false)
-	svc := NewService(db, authTestConfig())
-
-	must, err := svc.MustChangePassword(flagID)
-	if err != nil {
-		t.Fatalf("MustChangePassword(flagged): %v", err)
-	}
-	if !must {
-		t.Error("expected true for a flagged user")
-	}
-
-	must, err = svc.MustChangePassword(clearID)
-	if err != nil {
-		t.Fatalf("MustChangePassword(clear): %v", err)
-	}
-	if must {
-		t.Error("expected false for a user who already changed their password")
-	}
-
-	// A soft-deleted user is not flagged, preserving the documented behavior
-	// that existing access tokens stay valid until their short TTL expires.
-	if _, err := db.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1`, flagID); err != nil {
-		t.Fatalf("soft-delete user: %v", err)
-	}
-	must, err = svc.MustChangePassword(flagID)
-	if err != nil {
-		t.Fatalf("MustChangePassword(deleted): %v", err)
-	}
-	if must {
-		t.Error("expected false for a soft-deleted user")
 	}
 }
 
@@ -555,7 +520,7 @@ func TestLoginLogoutAuditIntegration(t *testing.T) {
 
 func seedUser(t *testing.T, db *sql.DB, email, password string) string {
 	t.Helper()
-	hash, err := HashPassword(password, bcrypt.MinCost)
+	hash, err := user.HashPassword(password, bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
@@ -572,7 +537,7 @@ func seedUser(t *testing.T, db *sql.DB, email, password string) string {
 
 func seedUserWithFlag(t *testing.T, db *sql.DB, email, password string, mustChange bool) string {
 	t.Helper()
-	hash, err := HashPassword(password, bcrypt.MinCost)
+	hash, err := user.HashPassword(password, bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}

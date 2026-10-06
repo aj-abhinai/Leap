@@ -4,8 +4,7 @@ import (
 	"crm/internal/audit"
 	"crm/internal/auth"
 	"crm/internal/respond"
-	"crm/internal/settings"
-	"crm/internal/util"
+	"crm/internal/user"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -51,7 +50,7 @@ var (
 	// and permissions stay editable.
 	ErrSystemRoleProtected = errors.New("system roles are permanent and cannot be renamed or deleted")
 
-// ErrSelfReactivate is returned when an actor targets their own account for
+	// ErrSelfReactivate is returned when an actor targets their own account for
 	// reactivation; a deactivated user must not undo their own deactivation.
 	ErrSelfReactivate = errors.New("a user cannot reactivate their own account")
 
@@ -301,11 +300,8 @@ func (s *Service) deleteRole(id, actorID string) error {
 		return ErrSystemRoleProtected
 	}
 
-	var assigned int
-	if err := tx.QueryRow(
-		`SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND role_id = $1`,
-		id,
-	).Scan(&assigned); err != nil {
+	assigned, err := user.CountByRoles(tx, []string{id}, "")
+	if err != nil {
 		return fmt.Errorf("delete role: %w", err)
 	}
 	if assigned > 0 {
@@ -658,11 +654,23 @@ func (s *Service) setRolePermissions(roleID string, permissionIDs []string, acto
 }
 
 func (s *Service) GetUserPermissions(userID string) ([]string, error) {
+	// The row is read including soft-deleted users: an access token stays
+	// valid until its short TTL expires.
+	u, err := user.GetIncludingDeleted(s.db, userID)
+	if errors.Is(err, user.ErrNotFound) {
+		return []string{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user permissions: %w", err)
+	}
+	if u.RoleID == nil {
+		return []string{}, nil
+	}
 	rows, err := s.db.Query(`
 		SELECT DISTINCT p.name FROM permissions p
 		JOIN role_permissions rp ON p.id = rp.permission_id
-		WHERE rp.role_id = (SELECT role_id FROM users WHERE id = $1)
-	`, userID)
+		WHERE rp.role_id = $1
+	`, *u.RoleID)
 	if err != nil {
 		return nil, fmt.Errorf("get user permissions: %w", err)
 	}
@@ -746,34 +754,22 @@ func (s *Service) setUserRole(userID, roleID, actorID string) error {
 		return fmt.Errorf("set user role: %w", err)
 	}
 
-	var exists bool
-	if roleID != "" {
-		if err := tx.QueryRow(
-			`SELECT EXISTS(SELECT 1 FROM roles WHERE id = $1)`,
-			roleID,
-		).Scan(&exists); err != nil {
-			return fmt.Errorf("set user role: %w", err)
-		}
-		if !exists {
-			return ErrNotFound
-		}
+	target, err := user.Get(tx, userID)
+	if errors.Is(err, user.ErrNotFound) {
+		return ErrNotFound
 	}
-	var userName string
-	if err := tx.QueryRow(
-		`SELECT name FROM users WHERE id = $1 AND deleted_at IS NULL`,
-		userID,
-	).Scan(&userName); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
+	if err != nil {
 		return fmt.Errorf("set user role: %w", err)
 	}
 
-	cur, err := userRoleStatus(tx, userID)
+	cur, err := roleStatusForID(tx, userRoleID(target))
 	if err != nil {
 		return fmt.Errorf("set user role: %w", err)
 	}
 	next, err := roleStatusForID(tx, roleID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("set user role: %w", err)
 	}
@@ -817,16 +813,7 @@ func (s *Service) setUserRole(userID, roleID, actorID string) error {
 		return nil
 	}
 
-	// Clearing passes NULL, not an empty string, so the role_id column is
-	// actually cleared instead of raising a 22P02 uuid error.
-	var roleArg any
-	if roleID != "" {
-		roleArg = roleID
-	}
-	if _, err := tx.Exec(
-		`UPDATE users SET role_id = $2, updated_at = now() WHERE id = $1`,
-		userID, roleArg,
-	); err != nil {
+	if err := user.SetRole(tx, userID, roleID); err != nil {
 		return fmt.Errorf("set user role: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -835,7 +822,7 @@ func (s *Service) setUserRole(userID, roleID, actorID string) error {
 	changes, _ := json.Marshal(map[string]any{
 		"role": map[string]any{"old": nullName(cur.name), "new": nullName(next.name)},
 	})
-	s.auditChange(fmt.Sprintf("Changed role for %q from %q to %q", userName, cur.name, next.name), "user", userID, "update", string(changes), actorID)
+	s.auditChange(fmt.Sprintf("Changed role for %q from %q to %q", target.Name, cur.name, next.name), "user", userID, "update", string(changes), actorID)
 	return nil
 }
 
@@ -856,77 +843,96 @@ func (s *Service) UserCan(userID, permission string) (bool, error) {
 }
 
 func (s *Service) listUsers() ([]UserInfo, error) {
-	rows, err := s.db.Query(
-		`SELECT u.id, u.name, u.email, COALESCE(u.phone, ''), COALESCE(u.avatar_url, ''), u.created_at,
-			u.deleted_at IS NULL AS active,
-			r.id, r.name, COALESCE(r.description, ''), r.is_system, r.created_at, r.updated_at
-		FROM users u
-		LEFT JOIN roles r ON r.id = u.role_id
-		ORDER BY u.deleted_at IS NOT NULL, u.name`,
-	)
+	users, err := user.List(s.db)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
-	defer rows.Close()
-	users := []UserInfo{}
-	for rows.Next() {
-		var u UserInfo
-		var roleID, roleName, roleDesc sql.NullString
-		var roleIsSystem sql.NullBool
-		var roleCreatedAt, roleUpdatedAt sql.NullTime
-		if err := rows.Scan(
-			&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt, &u.Active,
-			&roleID, &roleName, &roleDesc, &roleIsSystem, &roleCreatedAt, &roleUpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("list users: scan: %w", err)
-		}
-		if roleID.Valid {
-			u.Role = &Role{
-				ID:          roleID.String,
-				Name:        roleName.String,
-				Description: roleDesc.String,
-				IsSystem:    roleIsSystem.Bool,
-				CreatedAt:   roleCreatedAt.Time,
-				UpdatedAt:   roleUpdatedAt.Time,
-			}
-		}
-		users = append(users, u)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list users: iterate: %w", err)
+	roles, err := s.rolesByID()
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
 	}
 	totalSuperadmins, err := s.countSuperadminsAll()
 	if err != nil {
 		return nil, fmt.Errorf("list users: count superadmins: %w", err)
 	}
-	for i := range users {
-		users[i].Protected = totalSuperadmins == 1 && users[i].Role != nil && users[i].Role.Name == "superadmin"
+	out := make([]UserInfo, 0, len(users))
+	for _, u := range users {
+		info := userInfo(u)
+		if u.RoleID != nil {
+			info.Role = roles[*u.RoleID]
+		}
+		info.Protected = totalSuperadmins == 1 && info.Role != nil && info.Role.Name == "superadmin"
+		out = append(out, info)
 	}
-	return users, nil
+	return out, nil
+}
+
+// userInfo maps a user row to the Team listing shape; role data is merged by
+// the caller.
+func userInfo(u user.User) UserInfo {
+	info := UserInfo{
+		ID:        u.ID,
+		Name:      u.Name,
+		Email:     u.Email,
+		Phone:     u.Phone,
+		Active:    u.DeletedAt == nil,
+		CreatedAt: u.CreatedAt,
+	}
+	if u.AvatarURL != nil {
+		info.AvatarURL = *u.AvatarURL
+	}
+	return info
+}
+
+// userAvatar returns the row's avatar URL, empty when unset.
+func userAvatar(u *user.User) string {
+	if u.AvatarURL == nil {
+		return ""
+	}
+	return *u.AvatarURL
+}
+
+// rolesByID loads every role keyed by id. The user package never reads the
+// roles table, so listings merge role data here.
+func (s *Service) rolesByID() (map[string]*Role, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, COALESCE(description, ''), is_system, created_at, updated_at FROM roles`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load roles: %w", err)
+	}
+	defer rows.Close()
+	roles := map[string]*Role{}
+	for rows.Next() {
+		var r Role
+		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.IsSystem, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("load roles: scan: %w", err)
+		}
+		role := r
+		roles[r.ID] = &role
+	}
+	return roles, rows.Err()
 }
 
 // listAssigneeOptions returns the id+name of every live user for lead
 // assignment pickers. It exposes no email/role/avatar so a lead:read caller
 // can power the dropdown without admin user details.
 func (s *Service) listAssigneeOptions() ([]AssigneeOption, error) {
-	rows, err := s.db.Query(
-		`SELECT id, name FROM users WHERE deleted_at IS NULL ORDER BY name`,
-	)
+	users, err := user.ListActive(s.db)
 	if err != nil {
 		return nil, fmt.Errorf("list assignee options: %w", err)
 	}
-	defer rows.Close()
-	options := []AssigneeOption{}
-	for rows.Next() {
-		var o AssigneeOption
-		if err := rows.Scan(&o.ID, &o.Name); err != nil {
-			return nil, fmt.Errorf("list assignee options: scan: %w", err)
-		}
-		options = append(options, o)
+	options := make([]AssigneeOption, 0, len(users))
+	for _, u := range users {
+		options = append(options, AssigneeOption{ID: u.ID, Name: u.Name})
 	}
-	return options, rows.Err()
+	return options, nil
 }
 
+// createUser creates a user with an optional role, forced to change the
+// password at first login. Assigning a wildcard-carrying role (the superadmin
+// role) requires the actor to already hold the wildcard — the same guard as
+// setUserRole. The insert and role assignment commit in one transaction.
 // createUser creates a user with an optional role, forced to change the
 // password at first login. Assigning a wildcard-carrying role (the superadmin
 // role) requires the actor to already hold the wildcard — the same guard as
@@ -935,14 +941,13 @@ func (s *Service) createUser(name, email, password, roleID, actorID string) (*Us
 	if roleID != "" && !validUUID(roleID) {
 		return nil, ErrNotFound
 	}
-	if err := auth.ValidatePassword(password); err != nil {
+	if err := user.ValidatePassword(password); err != nil {
 		return nil, err
 	}
-	hash, err := auth.HashPassword(password, s.bcryptCost)
+	hash, err := user.HashPassword(password, s.bcryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
-	email = util.NormalizeEmail(email)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
@@ -953,8 +958,6 @@ func (s *Service) createUser(name, email, password, roleID, actorID string) (*Us
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	var u UserInfo
-	var roleArg any
 	var roleName string
 	if roleID != "" {
 		next, err := roleStatusForID(tx, roleID)
@@ -973,18 +976,17 @@ func (s *Service) createUser(name, email, password, roleID, actorID string) (*Us
 				return nil, ErrSuperadminAssignmentRestricted
 			}
 		}
-		roleArg = roleID
 		roleName = next.name
 	}
 
-	err = tx.QueryRow(
-		`INSERT INTO users (name, email, password_hash, role_id, must_change_password)
-		VALUES ($1, $2, $3, $4, true)
-		RETURNING id, name, email, COALESCE(avatar_url, ''), created_at`,
-		name, email, hash, roleArg,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.AvatarURL, &u.CreatedAt)
+	created, err := user.Create(tx, user.NewUser{
+		Name:         name,
+		Email:        email,
+		PasswordHash: hash,
+		RoleID:       roleID,
+	})
 	if err != nil {
-		if respond.IsDuplicate(err) {
+		if errors.Is(err, user.ErrEmailTaken) {
 			return nil, ErrDuplicate
 		}
 		return nil, fmt.Errorf("create user: %w", err)
@@ -992,30 +994,38 @@ func (s *Service) createUser(name, email, password, roleID, actorID string) (*Us
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
+
+	out := UserInfo{
+		ID:        created.ID,
+		Name:      created.Name,
+		Email:     created.Email,
+		AvatarURL: userAvatar(created),
+		CreatedAt: created.CreatedAt,
+	}
 	if roleID != "" {
 		// The response role mirrors listUsers' shape (is_system + timestamps),
 		// not the minimal guard read. A role deleted concurrently after the
 		// commit is reported as the id+name known to this call, so the user is
 		// created either way (the 201 must not 500 after the commit).
-		u.Role = &Role{ID: roleID, Name: roleName}
+		out.Role = &Role{ID: roleID, Name: roleName}
 		err := s.db.QueryRow(
 			`SELECT id, name, COALESCE(description, ''), is_system, created_at, updated_at FROM roles WHERE id = $1`,
 			roleID,
-		).Scan(&u.Role.ID, &u.Role.Name, &u.Role.Description, &u.Role.IsSystem, &u.Role.CreatedAt, &u.Role.UpdatedAt)
+		).Scan(&out.Role.ID, &out.Role.Name, &out.Role.Description, &out.Role.IsSystem, &out.Role.CreatedAt, &out.Role.UpdatedAt)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("create user: load role: %w", err)
 		}
 	}
-	changes, _ := json.Marshal(map[string]any{"name": name, "email": email})
+	changes, _ := json.Marshal(map[string]any{"name": created.Name, "email": created.Email})
 	if roleName != "" {
 		changes, _ = json.Marshal(map[string]any{
-			"name":  name,
-			"email": email,
+			"name":  created.Name,
+			"email": created.Email,
 			"role":  map[string]string{"new": roleName},
 		})
 	}
-	s.auditChange(fmt.Sprintf("Created user %q", u.Name), "user", u.ID, "create", string(changes), actorID)
-	return &u, nil
+	s.auditChange(fmt.Sprintf("Created user %q", created.Name), "user", created.ID, "create", string(changes), actorID)
+	return &out, nil
 }
 
 func (s *Service) deleteUser(id, actorID string) error {
@@ -1035,22 +1045,19 @@ func (s *Service) deleteUser(id, actorID string) error {
 		return fmt.Errorf("delete user: %w", err)
 	}
 
-	var targetName string
-	if err := tx.QueryRow(
-		`SELECT name FROM users WHERE id = $1 AND deleted_at IS NULL`,
-		id,
-	).Scan(&targetName); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		return fmt.Errorf("delete user: %w", err)
+	target, err := user.Get(tx, id)
+	if errors.Is(err, user.ErrNotFound) {
+		return ErrNotFound
 	}
-
-	protected, err := userHasRole(tx, id, "superadmin")
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
-	if protected {
+	st, err := roleStatusForID(tx, userRoleID(target))
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+
+	if st.isSuperadmin {
 		others, err := countSuperadmins(tx, id)
 		if err != nil {
 			return fmt.Errorf("delete user: %w", err)
@@ -1059,12 +1066,7 @@ func (s *Service) deleteUser(id, actorID string) error {
 			return ErrLastSuperadminProtected
 		}
 	}
-
-	canManage, err := userCanManageRBAC(tx, id)
-	if err != nil {
-		return fmt.Errorf("delete user: %w", err)
-	}
-	if canManage {
+	if st.canManage {
 		others, err := countOtherRBACManagers(tx, id)
 		if err != nil {
 			return fmt.Errorf("delete user: %w", err)
@@ -1074,47 +1076,26 @@ func (s *Service) deleteUser(id, actorID string) error {
 		}
 	}
 
-	if _, err := tx.Exec(`UPDATE users SET deleted_at = now() WHERE id = $1`, id); err != nil {
+	if err := user.Deactivate(tx, id); err != nil {
 		return fmt.Errorf("soft-delete user: %w", err)
 	}
-	if _, err := tx.Exec(
-		`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND NOT revoked`,
-		id,
-	); err != nil {
+	if err := auth.RevokeUserSessions(tx, id); err != nil {
 		return fmt.Errorf("revoke sessions: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
-	s.auditChange(fmt.Sprintf("Deactivated user %q", targetName), "user", id, "delete", `{"action":"deleted"}`, actorID)
+	s.auditChange(fmt.Sprintf("Deactivated user %q", target.Name), "user", id, "delete", `{"action":"deleted"}`, actorID)
 	return nil
 }
 
-// updateUser edits a live user's name, email, or phone. The email is
-// normalized and must stay unique; the phone is canonicalized like every
-// other entry point. An empty provided name or email is rejected in the
-// handler, so the service only writes non-empty values.
+// updateUser edits a live user's name, email, or phone. The field rules live
+// in internal/user, so the admin path applies the same trimming, bounds, and
+// canonicalization as the self-service path.
 func (s *Service) updateUser(id string, req UpdateUserRequest, actorID string) (*UserInfo, error) {
 	if !validUUID(id) {
 		return nil, ErrNotFound
 	}
-	if req.Email != nil {
-		normalized := util.NormalizeEmail(*req.Email)
-		req.Email = &normalized
-	}
-	if req.Phone != nil {
-		defaultCC, err := settings.DefaultCountryCode(s.db)
-		if err != nil {
-			return nil, err
-		}
-		canonical := util.CanonicalPhone(*req.Phone, defaultCC)
-		// The stored value is bounded like the self-service profile path.
-		if len([]rune(canonical)) > 20 {
-			return nil, auth.ErrPhoneTooLong
-		}
-		req.Phone = &canonical
-	}
-
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
@@ -1125,21 +1106,18 @@ func (s *Service) updateUser(id string, req UpdateUserRequest, actorID string) (
 		return nil, fmt.Errorf("update user: %w", err)
 	}
 
-	var currentName, currentEmail, currentPhone string
-	if err := tx.QueryRow(
-		`SELECT name, email, COALESCE(phone, '') FROM users WHERE id = $1 AND deleted_at IS NULL`,
-		id,
-	).Scan(&currentName, &currentEmail, &currentPhone); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
+	before, err := user.Get(tx, id)
+	if errors.Is(err, user.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
 
 	// A wildcard-carrying account is governed by the same rule as role
 	// assignment: only a wildcard holder may touch it, so settings:manage
 	// alone cannot seize or tamper with the owner account.
-	target, err := userRoleStatus(tx, id)
+	target, err := roleStatusForID(tx, userRoleID(before))
 	if err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
@@ -1153,46 +1131,36 @@ func (s *Service) updateUser(id string, req UpdateUserRequest, actorID string) (
 		}
 	}
 
-	var u UserInfo
-	err = tx.QueryRow(
-		`UPDATE users SET
-			name = COALESCE($2, name),
-			email = COALESCE($3, email),
-			phone = COALESCE($4, phone),
-			updated_at = now()
-		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at`,
-		id, req.Name, req.Email, req.Phone,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt)
+	after, err := user.Update(tx, id, user.Patch{Name: req.Name, Email: req.Email, Phone: req.Phone})
 	if err != nil {
-		if respond.IsDuplicate(err) {
+		if errors.Is(err, user.ErrEmailTaken) {
 			return nil, ErrDuplicate
 		}
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, user.ErrNotFound) {
 			return nil, ErrNotFound
 		}
-		return nil, fmt.Errorf("update user: %w", err)
+		return nil, err
 	}
-	u.Active = true
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
 	changes := map[string]any{}
-	if currentName != u.Name {
-		changes["name"] = map[string]string{"old": currentName, "new": u.Name}
+	if before.Name != after.Name {
+		changes["name"] = map[string]string{"old": before.Name, "new": after.Name}
 	}
-	if currentEmail != u.Email {
-		changes["email"] = map[string]string{"old": currentEmail, "new": u.Email}
+	if before.Email != after.Email {
+		changes["email"] = map[string]string{"old": before.Email, "new": after.Email}
 	}
-	if currentPhone != u.Phone {
-		changes["phone"] = map[string]string{"old": currentPhone, "new": u.Phone}
+	if before.Phone != after.Phone {
+		changes["phone"] = map[string]string{"old": before.Phone, "new": after.Phone}
 	}
 	if len(changes) > 0 {
 		if b, err := json.Marshal(changes); err == nil {
-			s.auditChange(fmt.Sprintf("Updated user %q", u.Name), "user", id, "update", string(b), actorID)
+			s.auditChange(fmt.Sprintf("Updated user %q", after.Name), "user", id, "update", string(b), actorID)
 		}
 	}
-	return &u, nil
+	out := userInfo(*after)
+	return &out, nil
 }
 
 // resetPassword sets a temporary password for a user and forces a change at
@@ -1202,7 +1170,7 @@ func (s *Service) resetPassword(id, password, actorID string) error {
 	if !validUUID(id) {
 		return ErrNotFound
 	}
-	if err := auth.ValidatePassword(password); err != nil {
+	if err := user.ValidatePassword(password); err != nil {
 		return err
 	}
 	tx, err := s.db.Begin()
@@ -1215,24 +1183,21 @@ func (s *Service) resetPassword(id, password, actorID string) error {
 		return fmt.Errorf("reset password: %w", err)
 	}
 
-	var targetName string
-	if err := tx.QueryRow(
-		`SELECT name FROM users WHERE id = $1 AND deleted_at IS NULL`,
-		id,
-	).Scan(&targetName); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
+	target, err := user.Get(tx, id)
+	if errors.Is(err, user.ErrNotFound) {
+		return ErrNotFound
+	}
+	if err != nil {
 		return fmt.Errorf("reset password: %w", err)
 	}
 
 	// Same rule as role assignment and user edits: only a wildcard holder may
 	// reset a wildcard-carrying account.
-	target, err := userRoleStatus(tx, id)
+	st, err := roleStatusForID(tx, userRoleID(target))
 	if err != nil {
 		return fmt.Errorf("reset password: %w", err)
 	}
-	if target.hasWildcard {
+	if st.hasWildcard {
 		actorIsSuper, err := userHoldsWildcard(tx, actorID)
 		if err != nil {
 			return fmt.Errorf("reset password: %w", err)
@@ -1244,32 +1209,20 @@ func (s *Service) resetPassword(id, password, actorID string) error {
 
 	// The hash is computed after the guards so a refused reset costs no
 	// bcrypt work.
-	hash, err := auth.HashPassword(password, s.bcryptCost)
+	hash, err := user.HashPassword(password, s.bcryptCost)
 	if err != nil {
 		return fmt.Errorf("hash reset password: %w", err)
 	}
-
-	var updated bool
-	if err := tx.QueryRow(
-		`UPDATE users SET password_hash = $2, must_change_password = true, updated_at = now()
-		WHERE id = $1 AND deleted_at IS NULL RETURNING true`,
-		id, hash,
-	).Scan(&updated); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
+	if err := user.ResetPassword(tx, id, hash); err != nil {
 		return fmt.Errorf("reset password: %w", err)
 	}
-	if _, err := tx.Exec(
-		`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND NOT revoked`,
-		id,
-	); err != nil {
+	if err := auth.RevokeUserSessions(tx, id); err != nil {
 		return fmt.Errorf("reset password: revoke sessions: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("reset password: %w", err)
 	}
-	s.auditChange(fmt.Sprintf("Reset password for user %q", targetName), "user", id, "reset_password", `{"password":"reset"}`, actorID)
+	s.auditChange(fmt.Sprintf("Reset password for user %q", target.Name), "user", id, "reset_password", `{"password":"reset"}`, actorID)
 	return nil
 }
 
@@ -1295,42 +1248,29 @@ func (s *Service) reactivateUser(id, actorID string) (*UserInfo, error) {
 	defer tx.Rollback()
 
 	if actorID != "" {
-		var actorLive bool
-		if err := tx.QueryRow(
-			`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)`,
-			actorID,
-		).Scan(&actorLive); err != nil {
-			return nil, fmt.Errorf("reactivate user: %w", err)
-		}
-		if !actorLive {
+		if _, err := user.Get(tx, actorID); errors.Is(err, user.ErrNotFound) {
 			return nil, ErrDeactivatedActor
+		} else if err != nil {
+			return nil, fmt.Errorf("reactivate user: %w", err)
 		}
 	}
 
-	var isDeleted bool
-	if err := tx.QueryRow(
-		`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NOT NULL)`,
-		id,
-	).Scan(&isDeleted); err != nil {
+	target, err := user.GetIncludingDeleted(tx, id)
+	if errors.Is(err, user.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
 		return nil, fmt.Errorf("reactivate user: %w", err)
 	}
-	if !isDeleted {
+	if target.DeletedAt == nil {
 		return nil, ErrNotFound
 	}
 
-	var targetIsSuper bool
-	if err := tx.QueryRow(
-		`SELECT EXISTS(
-			SELECT 1 FROM role_permissions rp
-			JOIN permissions p ON p.id = rp.permission_id
-			WHERE rp.role_id = (SELECT role_id FROM users WHERE id = $1)
-			  AND p.name = '*'
-		)`,
-		id,
-	).Scan(&targetIsSuper); err != nil {
+	st, err := roleStatusForID(tx, userRoleID(target))
+	if err != nil {
 		return nil, fmt.Errorf("reactivate user: %w", err)
 	}
-	if targetIsSuper {
+	if st.hasWildcard {
 		actorIsSuper, err := userHoldsWildcard(tx, actorID)
 		if err != nil {
 			return nil, fmt.Errorf("reactivate user: %w", err)
@@ -1340,25 +1280,16 @@ func (s *Service) reactivateUser(id, actorID string) (*UserInfo, error) {
 		}
 	}
 
-	var u UserInfo
-	err = tx.QueryRow(
-		`UPDATE users SET deleted_at = NULL, updated_at = now()
-		WHERE id = $1 AND deleted_at IS NOT NULL
-		RETURNING id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), created_at`,
-		id,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Phone, &u.AvatarURL, &u.CreatedAt)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
+	if err := user.Reactivate(tx, id); err != nil {
 		return nil, fmt.Errorf("reactivate user: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("reactivate user: %w", err)
 	}
-	u.Active = true
-	s.auditChange(fmt.Sprintf("Reactivated user %q", u.Name), "user", id, "reactivate", `{"action":"reactivated"}`, actorID)
-	return &u, nil
+	out := userInfo(*target)
+	out.Active = true
+	s.auditChange(fmt.Sprintf("Reactivated user %q", out.Name), "user", id, "reactivate", `{"action":"reactivated"}`, actorID)
+	return &out, nil
 }
 
 // lockRBACMutations serializes mutations that can remove the last RBAC
@@ -1369,20 +1300,6 @@ func lockRBACMutations(tx *sql.Tx) error {
 		return fmt.Errorf("acquire rbac mutation lock: %w", err)
 	}
 	return nil
-}
-
-// userHasRole reports whether the user holds a role with the given name.
-func userHasRole(tx *sql.Tx, userID, roleName string) (bool, error) {
-	var exists bool
-	err := tx.QueryRow(
-		`SELECT EXISTS(
-			SELECT 1 FROM roles r
-			WHERE r.id = (SELECT role_id FROM users WHERE id = $1)
-			  AND r.name = $2
-		)`,
-		userID, roleName,
-	).Scan(&exists)
-	return exists, err
 }
 
 // validUUID reports whether s parses as a UUID, so malformed identifiers fail
@@ -1427,128 +1344,114 @@ func roleStatusForID(tx *sql.Tx, roleID string) (roleStatus, error) {
 	return st, err
 }
 
-// userRoleStatus reports the status of the role the user currently holds.
-func userRoleStatus(tx *sql.Tx, userID string) (roleStatus, error) {
-	var st roleStatus
-	var name sql.NullString
-	err := tx.QueryRow(
-		`SELECT r.name,
-			COALESCE(r.name = 'superadmin', false),
-			EXISTS(
-				SELECT 1 FROM role_permissions rp
-				JOIN permissions p ON p.id = rp.permission_id
-				WHERE rp.role_id = r.id AND p.name = '*'
-			),
-			EXISTS(
-				SELECT 1 FROM role_permissions rp
-				JOIN permissions p ON p.id = rp.permission_id
-				WHERE rp.role_id = r.id AND p.name IN ('settings:manage', '*')
-			)
-		FROM users u
-		LEFT JOIN roles r ON r.id = u.role_id
-		WHERE u.id = $1`,
-		userID,
-	).Scan(&name, &st.isSuperadmin, &st.hasWildcard, &st.canManage)
-	st.name = name.String
-	return st, err
-}
-
 // userHoldsWildcard reports whether the user's role carries the wildcard
 // permission. An empty userID (no authenticated actor) reports false.
 func userHoldsWildcard(tx *sql.Tx, userID string) (bool, error) {
 	if userID == "" {
 		return false, nil
 	}
-	var holds bool
-	err := tx.QueryRow(
-		`SELECT EXISTS(
-			SELECT 1 FROM role_permissions rp
-			JOIN permissions p ON p.id = rp.permission_id
-			WHERE rp.role_id = (SELECT role_id FROM users WHERE id = $1)
-			  AND p.name = '*'
-		)`,
-		userID,
-	).Scan(&holds)
-	return holds, err
+	u, err := user.GetIncludingDeleted(tx, userID)
+	if errors.Is(err, user.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	st, err := roleStatusForID(tx, userRoleID(u))
+	if err != nil {
+		return false, fmt.Errorf("load role status: %w", err)
+	}
+	return st.hasWildcard, nil
 }
 
-// userCanManageRBAC reports whether the user could manage roles and users,
-// either through settings:manage or the wildcard.
-func userCanManageRBAC(tx *sql.Tx, userID string) (bool, error) {
-	var can bool
-	err := tx.QueryRow(
-		`SELECT EXISTS(
-			SELECT 1 FROM role_permissions rp
-			JOIN permissions p ON p.id = rp.permission_id
-			WHERE rp.role_id = (SELECT role_id FROM users WHERE id = $1)
-			  AND p.name IN ('settings:manage', '*')
-		)`,
-		userID,
-	).Scan(&can)
-	return can, err
+// userRoleID returns the user row's role id, or "" when none is set.
+func userRoleID(u *user.User) string {
+	if u.RoleID == nil {
+		return ""
+	}
+	return *u.RoleID
+}
+
+// roleIDsByName returns the ids of the named roles.
+func roleIDsByName(q rolePermissionQuerier, names ...string) ([]string, error) {
+	rows, err := q.Query(`SELECT id FROM roles WHERE name = ANY($1)`, names)
+	if err != nil {
+		return nil, fmt.Errorf("load roles by name: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("load roles by name: scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// roleIDsWithPermission returns the ids of roles carrying any of the given
+// permission names.
+func roleIDsWithPermission(q rolePermissionQuerier, names ...string) ([]string, error) {
+	rows, err := q.Query(
+		`SELECT DISTINCT r.id FROM roles r
+		JOIN role_permissions rp ON rp.role_id = r.id
+		JOIN permissions p ON p.id = rp.permission_id
+		WHERE p.name = ANY($1)`,
+		names,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load roles by permission: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("load roles by permission: scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // countOtherRBACManagers counts users other than the excluded one who could
 // manage roles and users.
 func countOtherRBACManagers(tx *sql.Tx, excludeID string) (int, error) {
-	var count int
-	err := tx.QueryRow(
-		`SELECT COUNT(DISTINCT u.id) FROM users u
-		WHERE u.deleted_at IS NULL AND u.id <> $1
-		  AND EXISTS(
-			SELECT 1 FROM role_permissions rp
-			JOIN permissions p ON p.id = rp.permission_id
-			WHERE rp.role_id = u.role_id AND p.name IN ('settings:manage', '*')
-		  )`,
-		excludeID,
-	).Scan(&count)
-	return count, err
+	roleIDs, err := roleIDsWithPermission(tx, "settings:manage", "*")
+	if err != nil {
+		return 0, err
+	}
+	return user.CountByRoles(tx, roleIDs, excludeID)
 }
 
 // countRBACManagers counts every non-deleted user who could manage roles and
 // users.
 func countRBACManagers(tx *sql.Tx) (int, error) {
-	var count int
-	err := tx.QueryRow(
-		`SELECT COUNT(DISTINCT u.id) FROM users u
-		WHERE u.deleted_at IS NULL
-		  AND EXISTS(
-			SELECT 1 FROM role_permissions rp
-			JOIN permissions p ON p.id = rp.permission_id
-			WHERE rp.role_id = u.role_id AND p.name IN ('settings:manage', '*')
-		  )`,
-	).Scan(&count)
-	return count, err
+	roleIDs, err := roleIDsWithPermission(tx, "settings:manage", "*")
+	if err != nil {
+		return 0, err
+	}
+	return user.CountByRoles(tx, roleIDs, "")
 }
 
 // countSuperadmins counts non-deleted users holding the superadmin role,
 // excluding the given user.
 func countSuperadmins(tx *sql.Tx, excludeID string) (int, error) {
-	var count int
-	err := tx.QueryRow(
-		`SELECT COUNT(*) FROM users u
-		WHERE u.deleted_at IS NULL AND u.id <> $1
-		  AND EXISTS(
-			SELECT 1 FROM roles r
-			WHERE r.id = u.role_id AND r.name = 'superadmin'
-		  )`,
-		excludeID,
-	).Scan(&count)
-	return count, err
+	roleIDs, err := roleIDsByName(tx, "superadmin")
+	if err != nil {
+		return 0, err
+	}
+	return user.CountByRoles(tx, roleIDs, excludeID)
 }
 
 // countSuperadminsAll counts all non-deleted users holding the superadmin role.
 func (s *Service) countSuperadminsAll() (int, error) {
-	var count int
-	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM users u
-		WHERE u.deleted_at IS NULL
-		  AND EXISTS(
-			SELECT 1 FROM roles r
-			WHERE r.id = u.role_id AND r.name = 'superadmin'
-		  )`,
-	).Scan(&count)
-	return count, err
+	roleIDs, err := roleIDsByName(s.db, "superadmin")
+	if err != nil {
+		return 0, err
+	}
+	return user.CountByRoles(s.db, roleIDs, "")
 }
 
 type UserInfo struct {

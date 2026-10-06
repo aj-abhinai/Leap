@@ -1,8 +1,8 @@
 package seed
 
 import (
-	"crm/internal/auth"
 	"crm/internal/config"
+	"crm/internal/user"
 	"crm/internal/util"
 	"database/sql"
 	"errors"
@@ -33,7 +33,7 @@ func Seed(db *sql.DB, authCfg config.Auth, superadmin config.Superadmin) error {
 	if err := seedPermissions(db); err != nil {
 		return fmt.Errorf("seed permissions: %w", err)
 	}
-	if err := seedSuperadminRole(db, superadmin); err != nil {
+	if err := seedSuperadminRole(db); err != nil {
 		return fmt.Errorf("seed superadmin role: %w", err)
 	}
 	if err := seedSystemRoles(db); err != nil {
@@ -103,25 +103,31 @@ func seedSuperadmin(db *sql.DB, cfg config.Auth, superadmin config.Superadmin) (
 	}
 	defer tx.Rollback()
 
-	var exists bool
-	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM users)`).Scan(&exists); err != nil {
+	count, err := user.Count(tx)
+	if err != nil {
 		return false, fmt.Errorf("check existing users: %w", err)
 	}
-	if exists {
+	if count > 0 {
 		slog.Info("users already exist, skipping bootstrap superadmin")
 		return false, nil
 	}
-	hash, err := auth.HashPassword(password, cfg.BcryptCost)
+	hash, err := user.HashPassword(password, cfg.BcryptCost)
 	if err != nil {
 		return false, fmt.Errorf("hash superadmin password: %w", err)
 	}
-	if _, err := tx.Exec(
-		`INSERT INTO users (name, email, password_hash, must_change_password) VALUES ('Super Admin', $1, $2, true)`,
-		email, hash,
-	); err != nil {
+	created, err := user.Create(tx, user.NewUser{
+		Name:         "Super Admin",
+		Email:        email,
+		PasswordHash: hash,
+	})
+	if err != nil {
 		return false, fmt.Errorf("insert superadmin: %w", err)
 	}
-	if err := ensureSuperadminRole(tx, email, true); err != nil {
+	roleID, err := ensureSuperadminRole(tx)
+	if err != nil {
+		return false, fmt.Errorf("assign bootstrap role: %w", err)
+	}
+	if err := user.SetRole(tx, created.ID, roleID); err != nil {
 		return false, fmt.Errorf("assign bootstrap role: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -165,8 +171,8 @@ func seedPermissions(db *sql.DB) error {
 // seedSuperadminRole ensures the superadmin role and its wildcard permission
 // exist (idempotent every boot). It never assigns the role to a user — that
 // happens atomically with the bootstrap admin inside seedSuperadmin.
-func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
-	if err := ensureSuperadminRole(db, superadmin.Email, false); err != nil {
+func seedSuperadminRole(db *sql.DB) error {
+	if _, err := ensureSuperadminRole(db); err != nil {
 		return err
 	}
 	slog.Info("superadmin role seeded")
@@ -174,17 +180,16 @@ func seedSuperadminRole(db *sql.DB, superadmin config.Superadmin) error {
 }
 
 // ensureSuperadminRole seeds the superadmin role and its wildcard permission
-// (idempotent) and, when assign is true (the fresh-bootstrap path), assigns
-// the role to the given superadmin. On later boots assign is false: the app
-// never re-reconciles user roles.
-func ensureSuperadminRole(q querier, email string, assign bool) error {
+// (idempotent) and returns the role id so the bootstrap path can assign it.
+// On later boots the id is ignored: the app never re-reconciles user roles.
+func ensureSuperadminRole(q querier) (string, error) {
 	var exists bool
 	if err := q.QueryRow(`SELECT EXISTS(SELECT 1 FROM roles WHERE name = 'superadmin')`).Scan(&exists); err != nil {
-		return fmt.Errorf("check existing superadmin role: %w", err)
+		return "", fmt.Errorf("check existing superadmin role: %w", err)
 	}
 	if !exists {
 		if _, err := q.Exec(`INSERT INTO roles (name, description, is_system) VALUES ('superadmin', 'Full system access', true)`); err != nil {
-			return fmt.Errorf("insert superadmin role: %w", err)
+			return "", fmt.Errorf("insert superadmin role: %w", err)
 		}
 	}
 	_, err := q.Exec(
@@ -192,7 +197,7 @@ func ensureSuperadminRole(q querier, email string, assign bool) error {
 		ON CONFLICT (name) DO NOTHING`,
 	)
 	if err != nil {
-		return fmt.Errorf("seed wildcard permission: %w", err)
+		return "", fmt.Errorf("seed wildcard permission: %w", err)
 	}
 	_, err = q.Exec(
 		`INSERT INTO role_permissions (role_id, permission_id)
@@ -201,19 +206,13 @@ func ensureSuperadminRole(q querier, email string, assign bool) error {
 		ON CONFLICT DO NOTHING`,
 	)
 	if err != nil {
-		return fmt.Errorf("link wildcard permission: %w", err)
+		return "", fmt.Errorf("link wildcard permission: %w", err)
 	}
-	if assign {
-		_, err = q.Exec(
-			`UPDATE users SET role_id = r.id, updated_at = now()
-			FROM roles r WHERE r.name = 'superadmin' AND users.email = $1`,
-			email,
-		)
-		if err != nil {
-			return fmt.Errorf("assign superadmin role: %w", err)
-		}
+	var roleID string
+	if err := q.QueryRow(`SELECT id FROM roles WHERE name = 'superadmin'`).Scan(&roleID); err != nil {
+		return "", fmt.Errorf("load superadmin role: %w", err)
 	}
-	return nil
+	return roleID, nil
 }
 
 // seedSystemRoles seeds the Sales and Viewer roles (idempotent, every boot).

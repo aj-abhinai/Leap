@@ -1,7 +1,7 @@
 package rbac
 
 import (
-	"crm/internal/auth"
+	"crm/internal/user"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -45,7 +45,7 @@ func TestRespondErrorMapsPhoneTooLongToBadRequest(t *testing.T) {
 	h := NewHandler(NewService(nil))
 	rr := httptest.NewRecorder()
 
-	h.respondError(rr, auth.ErrPhoneTooLong)
+	h.respondError(rr, user.ErrPhoneTooLong)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rr.Code)
 	}

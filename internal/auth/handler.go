@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crm/internal/activity"
+	"crm/internal/user"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -41,17 +42,28 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 // through respond.ServerError.
 func writeAuthError(w http.ResponseWriter, status int, err error) {
 	var ae *AuthError
-	if !errors.As(err, &ae) {
-		respond.ServerError(w, err)
+	if errors.As(err, &ae) {
+		respond.JSON(
+			w,
+			status,
+			nil,
+			&respond.Error{Code: ae.Code, Message: ae.Message},
+			nil,
+		)
 		return
 	}
-	respond.JSON(
-		w,
-		status,
-		nil,
-		&respond.Error{Code: ae.Code, Message: ae.Message},
-		nil,
-	)
+	var pe *user.PolicyError
+	if errors.As(err, &pe) {
+		respond.JSON(
+			w,
+			status,
+			nil,
+			&respond.Error{Code: pe.Code, Message: pe.Message},
+			nil,
+		)
+		return
+	}
+	respond.ServerError(w, err)
 }
 
 // establishSession writes the refresh and CSRF cookies for a fresh session.

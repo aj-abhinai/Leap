@@ -5,6 +5,7 @@ import (
 	"crm/internal/config"
 	"crm/internal/ctxutil"
 	"crm/internal/testdb"
+	"crm/internal/user"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -370,7 +371,7 @@ func TestHandlerMe(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	var u User
+	var u user.User
 	if err := json.Unmarshal(env.Data, &u); err != nil {
 		t.Fatalf("decode data: %v", err)
 	}
@@ -393,7 +394,7 @@ func TestHandlerUpdateProfile(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	var u User
+	var u user.User
 	if err := json.Unmarshal(env.Data, &u); err != nil {
 		t.Fatalf("decode data: %v", err)
 	}
@@ -420,7 +421,7 @@ func TestHandlerUpdateProfileEmptyPatchSkipsWrite(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	var u User
+	var u user.User
 	if err := json.Unmarshal(env.Data, &u); err != nil {
 		t.Fatalf("decode data: %v", err)
 	}
