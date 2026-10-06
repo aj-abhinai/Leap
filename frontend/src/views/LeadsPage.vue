@@ -26,7 +26,7 @@ import CreatedDateFilter from '@/components/leads/CreatedDateFilter.vue'
 import { useRBACStore } from '@/stores/rbac'
 import { useUsersStore } from '@/stores/users'
 import { toast } from 'vue-sonner'
-import { Plus, Layers, Search, X } from '@lucide/vue'
+import { Plus, Layers, Search, SearchX, FilterX, X } from '@lucide/vue'
 import type { LeadSaveBody } from '@/components/leads/LeadForm.vue'
 import { usePipelineStore } from '@/stores/pipeline'
 import { useLeadsBoardStore } from '@/stores/leadsBoard'
@@ -88,11 +88,22 @@ const { openLeadDrawer } = useLeadDrawerGlobal()
 
 const totalShown = computed(() => kanbanColumns.value.reduce((n, c) => n + c.leads.length, 0))
 
+// The board endpoint caps the cards per stage; count is the true number, so
+// the header reports it whenever it exceeds the loaded cards.
+const totalCount = computed(() => kanbanColumns.value.reduce((n, c) => n + c.count, 0))
+
+// Lead creation needs a stage to start in; without one the form cannot
+// succeed, so the action is not offered at all.
+const canCreateLead = computed(() => (selectedPipeline.value?.stages?.length ?? 0) > 0)
+
+// The loading skeleton mirrors the pipeline's stage count when it is known.
+const skeletonColumns = computed(() => selectedPipeline.value?.stages?.length || 4)
+
 const outcomeOptions = [
-  { value: '', label: 'All' },
-  { value: 'open', label: 'Open' },
-  { value: 'won', label: 'Won' },
-  { value: 'lost', label: 'Lost' },
+  { value: '', label: 'All', dot: '' },
+  { value: 'open', label: 'Open', dot: '' },
+  { value: 'won', label: 'Won', dot: 'won' },
+  { value: 'lost', label: 'Lost', dot: 'lost' },
 ] as const
 
 // Debounce the text search; outcome/assignee/date filters apply immediately.
@@ -194,14 +205,18 @@ watch(
       <div class="flex min-w-0 items-baseline gap-2">
         <h1 class="text-xl font-semibold tracking-tight">Leads</h1>
         <span v-if="hasBoard" class="text-sm tabular-nums text-muted-foreground">
-          {{ totalShown }} leads shown
+          <template v-if="totalCount > totalShown">Showing {{ totalShown }} of {{ totalCount }} leads</template>
+          <template v-else>{{ totalShown }} leads shown</template>
         </span>
       </div>
 
       <div class="flex shrink-0 items-center gap-2">
         <Select v-model="selectedPipelineId" @update:model-value="load()">
           <SelectTrigger class="w-44" aria-label="Pipeline">
-            <SelectValue placeholder="Select pipeline" />
+            <span class="flex min-w-0 items-center gap-2">
+              <Layers class="size-3.5 shrink-0 text-muted-foreground" />
+              <SelectValue placeholder="Select pipeline" />
+            </span>
           </SelectTrigger>
           <SelectContent>
             <SelectItem
@@ -213,7 +228,7 @@ watch(
             </SelectItem>
           </SelectContent>
         </Select>
-        <Sheet v-if="rbac.can('lead:write')" v-model:open="drawerOpen">
+        <Sheet v-if="rbac.can('lead:write') && canCreateLead" v-model:open="drawerOpen">
           <SheetTrigger as-child>
             <Button @click="openCreate()">
               <Plus class="mr-2 size-4" /> Add Lead
@@ -254,6 +269,11 @@ watch(
           placeholder="Search name, phone, email…"
           class="h-9 pl-8 pr-8 [&::-webkit-search-cancel-button]:hidden"
         />
+        <kbd
+          v-if="!search"
+          aria-hidden="true"
+          class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 rounded border bg-muted px-1.5 text-[10px] font-medium text-muted-foreground"
+        >/</kbd>
         <button
           v-if="search"
           type="button"
@@ -276,10 +296,15 @@ watch(
           type="button"
           role="radio"
           :aria-checked="outcomeFilter === opt.value"
-          class="h-8 rounded px-2.5 text-xs transition-colors"
+          class="inline-flex h-8 items-center gap-1.5 rounded px-2.5 text-xs transition-colors"
           :class="outcomeFilter === opt.value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'"
           @click="outcomeFilter = opt.value"
         >
+          <span
+            v-if="opt.dot"
+            class="size-1.5 shrink-0 rounded-full"
+            :class="opt.dot === 'won' ? 'bg-success' : 'bg-destructive'"
+          />
           {{ opt.label }}
         </button>
       </div>
@@ -308,15 +333,16 @@ watch(
       <Button
         v-if="activeFilterCount > 0"
         variant="outline"
-        class="h-9"
+        class="h-9 gap-1.5"
         @click="clearFilters"
       >
-        <X class="size-3.5" /> Clear
+        <FilterX class="size-3.5" /> Clear filters
+        <span class="text-muted-foreground">· {{ activeFilterCount }}</span>
       </Button>
     </div>
 
     <div v-if="loading && !hasBoard" class="flex gap-4 overflow-x-auto pb-4">
-      <div v-for="i in 4" :key="i" class="min-w-64 flex-1 rounded-lg border bg-muted/30 p-4 space-y-3">
+      <div v-for="i in skeletonColumns" :key="i" class="min-w-64 flex-1 rounded-lg border bg-muted/30 p-4 space-y-3">
         <Skeleton class="h-5 w-24" />
         <Skeleton class="h-4 w-full" />
         <Skeleton class="h-4 w-3/4" />
@@ -335,6 +361,18 @@ watch(
         @click="router.push('/settings')"
       >
         <Plus class="mr-2 size-4" /> Create pipeline
+      </Button>
+    </div>
+
+    <div
+      v-else-if="totalShown === 0 && activeFilterCount > 0"
+      class="flex flex-col items-center justify-center py-16 text-center"
+    >
+      <SearchX class="mb-4 size-12 text-muted-foreground/30" />
+      <p class="text-sm font-medium text-muted-foreground">No leads match your filters</p>
+      <p class="mt-1 text-xs text-muted-foreground/60">The filters excluded every lead on this pipeline.</p>
+      <Button class="mt-4" variant="outline" @click="clearFilters">
+        <FilterX class="size-3.5" /> Clear filters
       </Button>
     </div>
 
