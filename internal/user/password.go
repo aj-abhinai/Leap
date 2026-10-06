@@ -1,7 +1,9 @@
-package auth
+package user
 
 import (
 	"unicode"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -48,4 +50,13 @@ func ValidatePassword(password string) error {
 		return ErrPasswordNeedsSpecial
 	}
 	return nil
+}
+
+// HashPassword returns the bcrypt hash of password at cost. It performs no
+// policy check; callers that accept a user-supplied password call
+// ValidatePassword first. The seeded superadmin password is deployment
+// configuration and is hashed as given.
+func HashPassword(password string, cost int) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), cost)
+	return string(bytes), err
 }

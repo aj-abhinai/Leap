@@ -82,7 +82,7 @@ func TestSeedSuperadminRoleNeverReassigns(t *testing.T) {
 
 	// The role + wildcard are ensured every boot, but the user is never
 	// assigned the role (no reconciliation on later boots).
-	if err := seedSuperadminRole(db, config.Superadmin{Email: "super@example.com"}); err != nil {
+	if err := seedSuperadminRole(db); err != nil {
 		t.Fatalf("seedSuperadminRole: %v", err)
 	}
 	assertWildcardLinked(t, db)

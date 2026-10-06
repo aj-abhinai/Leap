@@ -2,6 +2,7 @@ package rbac
 
 import (
 	"crm/internal/testdb"
+	"crm/internal/user"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -506,6 +507,40 @@ func TestCreateUserWithMissingRoleReturnsNotFound(t *testing.T) {
 	)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("createUser(missing role) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateUserRejectsOverlongName(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	_, err := svc.createUser(strings.Repeat("x", 101), "over@example.com", "Password-123", "", "")
+	if !errors.Is(err, user.ErrNameTooLong) {
+		t.Fatalf("createUser(overlong name) = %v, want ErrNameTooLong", err)
+	}
+}
+
+func TestCreateUserRejectsBlankName(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	_, err := svc.createUser("   ", "blank@example.com", "Password-123", "", "")
+	if !errors.Is(err, user.ErrNameRequired) {
+		t.Fatalf("createUser(blank name) = %v, want ErrNameRequired", err)
+	}
+}
+
+func TestUpdateUserRejectsOverlongName(t *testing.T) {
+	db := testdb.New(t)
+	svc := NewService(db)
+
+	u, err := svc.createUser("Rep", "rep-long@example.com", "Password-123", "", "")
+	if err != nil {
+		t.Fatalf("createUser: %v", err)
+	}
+	long := strings.Repeat("x", 101)
+	if _, err := svc.updateUser(u.ID, UpdateUserRequest{Name: &long}, ""); !errors.Is(err, user.ErrNameTooLong) {
+		t.Fatalf("updateUser(overlong name) = %v, want ErrNameTooLong", err)
 	}
 }
 

@@ -2,15 +2,13 @@ package auth
 
 import (
 	"crm/internal/config"
-	"crm/internal/settings"
-	"crm/internal/util"
+	"crm/internal/user"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -33,18 +31,19 @@ func NewService(db *sql.DB, cfg config.Auth) *Service {
 
 // login verifies the credentials and returns the authenticated user with a
 // fresh token pair. An unknown account and a wrong password both return
-// ErrInvalidCredentials, so the caller cannot tell them apart.
-func (s *Service) login(email, password string) (*User, *TokenResponse, error) {
-	var u User
-	err := s.db.QueryRow(
-		`SELECT id, name, email, password_hash, must_change_password, last_login_at FROM users WHERE email = $1 AND deleted_at IS NULL`,
-		util.NormalizeEmail(email),
-	).Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.MustChangePassword, &u.LastLoginAt)
+// ErrInvalidCredentials, so the caller cannot tell them apart. A database
+// failure is returned as-is.
+func (s *Service) login(email, password string) (*user.User, *TokenResponse, error) {
+	u, err := user.GetByEmail(s.db, email)
 	if err != nil {
-		// Equalize response timing: an unknown or deleted account must take
-		// about as long as a known one, so latency cannot enumerate accounts.
-		_ = comparePassword([]byte(s.dummyHash), []byte(password))
-		return nil, nil, ErrInvalidCredentials
+		if errors.Is(err, user.ErrNotFound) {
+			// Equalize response timing: an unknown or deleted account must
+			// take about as long as a known one, so latency cannot enumerate
+			// accounts.
+			_ = comparePassword([]byte(s.dummyHash), []byte(password))
+			return nil, nil, ErrInvalidCredentials
+		}
+		return nil, nil, fmt.Errorf("login: %w", err)
 	}
 	if err := comparePassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		return nil, nil, ErrInvalidCredentials
@@ -54,33 +53,14 @@ func (s *Service) login(email, password string) (*User, *TokenResponse, error) {
 		return nil, nil, err
 	}
 	s.recordLogin(u.ID)
-	return &u, resp, nil
-}
-
-// MustChangePassword reports whether the user is flagged to set a new
-// password before using the application. A soft-deleted user reports false,
-// preserving the documented behavior that existing access tokens stay valid
-// until their short TTL expires.
-func (s *Service) MustChangePassword(userID string) (bool, error) {
-	var must bool
-	err := s.db.QueryRow(
-		`SELECT must_change_password FROM users WHERE id = $1 AND deleted_at IS NULL`,
-		userID,
-	).Scan(&must)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("check must_change_password: %w", err)
-	}
-	return must, nil
+	return u, resp, nil
 }
 
 // recordLogin updates the user's last successful sign-in timestamp. It is a
 // best-effort bookkeeping write: a failure must not fail an already-successful
 // login or orphan the refresh token just issued.
 func (s *Service) recordLogin(userID string) {
-	if _, err := s.db.Exec(`UPDATE users SET last_login_at = now() WHERE id = $1`, userID); err != nil {
+	if err := user.RecordLogin(s.db, userID); err != nil {
 		slog.Error("record last login", "error", err, "user_id", userID)
 	}
 }
@@ -224,79 +204,14 @@ func (s *Service) ValidateJWT(tokenStr string) (string, error) {
 	return sub, nil
 }
 
-// userColumns is the projection every user read returns, in the order scanUser
-// expects.
-const userColumns = `id, name, email, COALESCE(phone, ''), COALESCE(avatar_url, ''), must_change_password, last_login_at, created_at, updated_at`
-
-// scanUser reads one user row in the userColumns order.
-func scanUser(row *sql.Row) (*User, error) {
-	var u User
-	err := row.Scan(
-		&u.ID,
-		&u.Name,
-		&u.Email,
-		&u.Phone,
-		&u.AvatarURL,
-		&u.MustChangePassword,
-		&u.LastLoginAt,
-		&u.CreatedAt,
-		&u.UpdatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &u, nil
-}
-
 // getUser returns the user for userID. An unknown id and a soft-deleted user
-// both return sql.ErrNoRows.
-func (s *Service) getUser(userID string) (*User, error) {
-	return scanUser(s.db.QueryRow(
-		`SELECT `+userColumns+`
-		FROM users
-		WHERE id = $1 AND deleted_at IS NULL`,
-		userID,
-	))
+// both report user.ErrNotFound.
+func (s *Service) getUser(userID string) (*user.User, error) {
+	return user.Get(s.db, userID)
 }
 
-func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*User, error) {
-	if req.Name != nil {
-		name := strings.TrimSpace(*req.Name)
-		if name == "" {
-			return nil, ErrNameRequired
-		}
-		if len([]rune(name)) > 100 {
-			return nil, ErrNameTooLong
-		}
-		req.Name = &name
-	}
-	if req.Phone != nil {
-		// Phones are canonicalized to one stored form ('+' + digits) at every
-		// entry point. The length contract bounds the stored value, so the
-		// canonical form is checked, not the raw input.
-		defaultCC, err := settings.DefaultCountryCode(s.db)
-		if err != nil {
-			return nil, err
-		}
-		canonical := util.CanonicalPhone(*req.Phone, defaultCC)
-		if len([]rune(canonical)) > 20 {
-			return nil, ErrPhoneTooLong
-		}
-		req.Phone = &canonical
-	}
-	u, err := scanUser(s.db.QueryRow(`
-		UPDATE users SET
-			name = COALESCE($2, name),
-			phone = COALESCE($3, phone),
-			updated_at = now()
-		WHERE id = $1 AND deleted_at IS NULL
-		RETURNING `+userColumns,
-		userID, req.Name, req.Phone,
-	))
-	if err != nil {
-		return nil, fmt.Errorf("update profile: %w", err)
-	}
-	return u, nil
+func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*user.User, error) {
+	return user.Update(s.db, userID, user.Patch{Name: req.Name, Phone: req.Phone})
 }
 
 // changePassword verifies the current password and replaces it. Every
@@ -305,21 +220,17 @@ func (s *Service) updateProfile(userID string, req UpdateProfileRequest) (*User,
 // fresh pair cannot be issued after the revocation committed, the caller is
 // logged out too (fail closed), matching the refresh rotation contract.
 func (s *Service) changePassword(userID, currentPassword, newPassword string) (*TokenResponse, error) {
-	if err := ValidatePassword(newPassword); err != nil {
+	if err := user.ValidatePassword(newPassword); err != nil {
 		return nil, err
 	}
-	var currentHash string
-	err := s.db.QueryRow(
-		`SELECT password_hash FROM users WHERE id = $1 AND deleted_at IS NULL`,
-		userID,
-	).Scan(&currentHash)
+	u, err := user.Get(s.db, userID)
 	if err != nil {
 		return nil, fmt.Errorf("change password: %w", err)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(currentPassword)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(currentPassword)); err != nil {
 		return nil, ErrIncorrectPassword
 	}
-	newHash, err := HashPassword(newPassword, s.cfg.BcryptCost)
+	newHash, err := user.HashPassword(newPassword, s.cfg.BcryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("change password: hash: %w", err)
 	}
@@ -330,27 +241,16 @@ func (s *Service) changePassword(userID, currentPassword, newPassword string) (*
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(
-		`UPDATE users SET password_hash = $2, must_change_password = false, updated_at = now() WHERE id = $1`,
-		userID, newHash,
-	); err != nil {
+	if err := user.SetPassword(tx, userID, newHash); err != nil {
 		return nil, fmt.Errorf("change password: update: %w", err)
 	}
-	if _, err := tx.Exec(
-		`UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND NOT revoked`,
-		userID,
-	); err != nil {
+	if err := RevokeUserSessions(tx, userID); err != nil {
 		return nil, fmt.Errorf("change password: revoke sessions: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("change password: %w", err)
 	}
 	return s.generateTokenPair(userID)
-}
-
-func HashPassword(password string, cost int) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), cost)
-	return string(bytes), err
 }
 
 // comparePassword is the bcrypt comparison used by login. It is a variable

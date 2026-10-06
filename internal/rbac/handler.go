@@ -1,9 +1,9 @@
 package rbac
 
 import (
-	"crm/internal/auth"
 	"crm/internal/ctxutil"
 	"crm/internal/respond"
+	"crm/internal/user"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -26,6 +26,17 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 	if h.writeProtected(w, err) {
 		return
 	}
+	var pe *user.PolicyError
+	if errors.As(err, &pe) {
+		respond.JSON(
+			w,
+			http.StatusBadRequest,
+			nil,
+			&respond.Error{Code: pe.Code, Message: pe.Message},
+			nil,
+		)
+		return
+	}
 	switch {
 	case errors.Is(err, ErrNotFound), respond.IsNotFound(err):
 		respond.JSON(
@@ -43,7 +54,7 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 			&respond.Error{Code: "CONFLICT", Message: err.Error()},
 			nil,
 		)
-	case errors.Is(err, ErrInvalidPermission), errors.Is(err, auth.ErrPhoneTooLong):
+	case errors.Is(err, ErrInvalidPermission):
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -366,7 +377,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if err := auth.ValidatePassword(req.Password); err != nil {
+	if err := user.ValidatePassword(req.Password); err != nil {
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -376,7 +387,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	user, err := h.svc.createUser(req.Name, req.Email, req.Password, req.RoleID, ctxutil.GetUserID(r))
+	created, err := h.svc.createUser(req.Name, req.Email, req.Password, req.RoleID, ctxutil.GetUserID(r))
 	if err != nil {
 		h.respondError(w, err)
 		return
@@ -384,7 +395,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(
 		w,
 		http.StatusCreated,
-		user,
+		created,
 		nil,
 		nil,
 	)
@@ -444,7 +455,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	user, err := h.svc.updateUser(id, req, ctxutil.GetUserID(r))
+	updated, err := h.svc.updateUser(id, req, ctxutil.GetUserID(r))
 	if err != nil {
 		h.respondError(w, err)
 		return
@@ -452,7 +463,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(
 		w,
 		http.StatusOK,
-		user,
+		updated,
 		nil,
 		nil,
 	)
@@ -475,7 +486,7 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if err := auth.ValidatePassword(body.Password); err != nil {
+	if err := user.ValidatePassword(body.Password); err != nil {
 		respond.JSON(
 			w,
 			http.StatusBadRequest,
@@ -500,7 +511,7 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ReactivateUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	user, err := h.svc.reactivateUser(id, ctxutil.GetUserID(r))
+	reactivated, err := h.svc.reactivateUser(id, ctxutil.GetUserID(r))
 	if err != nil {
 		h.respondError(w, err)
 		return
@@ -508,7 +519,7 @@ func (h *Handler) ReactivateUser(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(
 		w,
 		http.StatusOK,
-		user,
+		reactivated,
 		nil,
 		nil,
 	)

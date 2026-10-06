@@ -19,6 +19,7 @@ import (
 	"crm/internal/seed"
 	"crm/internal/settings"
 	"crm/internal/tag"
+	"crm/internal/user"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -171,7 +172,7 @@ func main() {
 		r.Get("/api/auth/me/permissions", rbacH.MePermissions)
 
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequirePasswordChanged(authSvc))
+			r.Use(middleware.RequirePasswordChanged(user.NewPasswordChangeChecker(database)))
 
 			r.Get("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:read", contactH.List))
 			r.Post("/api/contacts", middleware.RequirePermission(rbacSvc, "contact:write", contactH.Create))
