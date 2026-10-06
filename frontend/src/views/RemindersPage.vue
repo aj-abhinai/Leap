@@ -4,28 +4,34 @@ import { useRemindersStore, type Reminder } from '@/stores/reminders'
 import ReminderCard from '@/components/leads/ReminderCard.vue'
 import PageState from '@/components/PageState.vue'
 import { BellOff } from '@lucide/vue'
-import { snoozeTarget } from '@/utils/reminders'
-import { statusLabel } from '@/utils/activity'
+import { present, resolveTask, snoozeTarget } from '@/tasks'
+import { useTasks } from '@/tasks/vue'
 import { toast } from 'vue-sonner'
 import { errorMessage } from '@/utils/errors'
 
 const store = useRemindersStore()
+const tasks = useTasks()
 
 onMounted(() => store.fetchReminders())
+
+// statusOf reads the shared task status: Overdue, Open, or Reminded.
+function statusOf(r: Reminder): string {
+  return present(resolveTask(r, tasks.env), 'full', tasks.env).status.label
+}
 
 // /api/reminders is already the current user's recipient queue (lead assignee
 // → task creator on unassigned leads → everyone on genuinely unowned work), so
 // the page renders it as-is; filtering by task creator here would hide work the
 // user is responsible for.
-const overdue = computed(() => store.reminders.filter((r) => statusLabel(r) === 'Overdue'))
-const upcoming = computed(() => store.reminders.filter((r) => statusLabel(r) === 'Open'))
-const dismissed = computed(() => store.reminders.filter((r) => statusLabel(r) === 'Reminded'))
+const overdue = computed(() => store.reminders.filter((r) => statusOf(r) === 'Overdue'))
+const upcoming = computed(() => store.reminders.filter((r) => statusOf(r) === 'Open'))
+const dismissed = computed(() => store.reminders.filter((r) => statusOf(r) === 'Reminded'))
 
 // snooze pushes the reminder forward by minutes; failures surface as a toast
 // and leave the card in place.
 async function snooze(reminder: Reminder, minutes: number) {
   try {
-    await store.snoozeReminder(reminder.lead_id, reminder.id, snoozeTarget(reminder, minutes))
+    await store.snoozeReminder(reminder.lead_id, reminder.id, snoozeTarget(reminder, minutes, tasks.env))
     toast.success('Reminder snoozed')
     await store.fetchReminders()
   } catch (e) {

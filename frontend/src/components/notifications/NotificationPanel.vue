@@ -6,7 +6,8 @@ import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { BellOff, X } from '@lucide/vue'
-import { formatReminderText, formatReminderTime, reminderIcon } from '@/utils/reminders'
+import { iconFor, present, resolveTask } from '@/tasks'
+import { useTasks } from '@/tasks/vue'
 import { timeAgo } from '@/utils/time'
 import { errorMessage } from '@/utils/errors'
 import type { Reminder } from '@/api/reminders'
@@ -15,15 +16,22 @@ import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 const emit = defineEmits<{ close: [] }>()
 const store = useRemindersStore()
 const { openLeadDrawer } = useLeadDrawerGlobal()
+const tasks = useTasks()
 
 // Precompute the per-row display strings once so they are not re-derived on
-// every re-render (formatReminderTime was previously called twice per row).
+// every re-render.
 const openRows = computed(() =>
-  store.openReminders.map((r) => ({
-    ...r,
-    reminderText: formatReminderText(r),
-    reminderTime: formatReminderTime(r),
-  })),
+  store.openReminders.map((r) => {
+    const resolved = resolveTask(r, tasks.env)
+    const view = present(resolved, 'compact', tasks.env)
+    return {
+      ...r,
+      reminderText: resolved.description
+        ? `${resolved.typeName}: ${resolved.description}`
+        : resolved.typeName,
+      reminderTime: view.schedule?.text ?? view.reminder?.text ?? '',
+    }
+  }),
 )
 
 // dismiss removes the reminder and refetches so the row and the bell badge
@@ -67,7 +75,7 @@ async function dismiss(reminder: Reminder) {
           @click="openLeadDrawer(reminder.lead_id)"
         >
           <div class="flex gap-2.5">
-            <component :is="reminderIcon(reminder.type)" class="flex-shrink-0 h-4 w-4 mt-0.5 text-muted-foreground" />
+            <component :is="iconFor(reminder.type)" class="flex-shrink-0 h-4 w-4 mt-0.5 text-muted-foreground" />
             <div class="flex-1 min-w-0">
               <p class="text-xs font-medium truncate">{{ reminder.reminderText }}</p>
               <p v-if="reminder.lead_display_name" class="text-xs text-muted-foreground mt-0.5">

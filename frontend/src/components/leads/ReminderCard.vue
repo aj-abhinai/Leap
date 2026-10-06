@@ -9,8 +9,9 @@ import {
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
 import { AlarmClockPlus, X, ChevronRight } from '@lucide/vue'
-import { allDaySnoozePresets, formatReminderText, reminderIcon, snoozePresets } from '@/utils/reminders'
-import { formatDate, formatDateTime, isAllDayRange } from '@/utils/time'
+import { allDaySnoozePresets, iconFor, present, resolveTask, snoozePresets } from '@/tasks'
+import { useTasks } from '@/tasks/vue'
+import { formatDateTime } from '@/utils/time'
 import { useLeadDrawerGlobal } from '@/composables/useLeadDrawerGlobal'
 
 const props = defineProps<{
@@ -24,26 +25,25 @@ const emit = defineEmits<{
 }>()
 
 const { openLeadDrawer } = useLeadDrawerGlobal()
+const tasks = useTasks()
 
-const reminderText = computed(() => formatReminderText(props.reminder))
-const icon = computed(() => reminderIcon(props.reminder.type))
-const scheduledLabel = computed(() => {
-  const r = props.reminder
-  if (!r.scheduled_at) return ''
-  if (isAllDayRange(r.scheduled_at, r.scheduled_end_at)) return `${formatDate(r.scheduled_at)} (all day)`
-  if (r.scheduled_end_at) return `${formatDateTime(r.scheduled_at)} – ${formatDateTime(r.scheduled_end_at)}`
-  return formatDateTime(r.scheduled_at)
-})
-const remindLabel = computed(() =>
-  props.reminder.remind_at ? formatDateTime(props.reminder.remind_at) : '',
+const resolved = computed(() => resolveTask(props.reminder, tasks.env))
+const view = computed(() => present(resolved.value, 'reminder', tasks.env))
+
+const reminderText = computed(() =>
+  resolved.value.description
+    ? `${resolved.value.typeName}: ${resolved.value.description}`
+    : resolved.value.typeName,
 )
+const icon = computed(() => iconFor(props.reminder.type))
+const scheduledLabel = computed(() => view.value.schedule?.text ?? '')
+const remindLabel = computed(() => view.value.reminder?.text ?? '')
 
 // An all-day task gets day-based snooze presets so its window keeps the shape.
-const snoozeOptions = computed(() =>
-  isAllDayRange(props.reminder.scheduled_at, props.reminder.scheduled_end_at)
-    ? allDaySnoozePresets
-    : snoozePresets,
-)
+const snoozeOptions = computed(() => {
+  const state = resolved.value.state
+  return state.kind === 'open' && state.shape.kind === 'allDay' ? allDaySnoozePresets : snoozePresets
+})
 const createdLabel = computed(() => formatDateTime(props.reminder.created_at))
 </script>
 

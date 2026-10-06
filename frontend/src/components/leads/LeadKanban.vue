@@ -5,6 +5,8 @@ import { type Stage } from '@/stores/pipeline'
 import { useRBACStore } from '@/stores/rbac'
 import { useUsersStore } from '@/stores/users'
 import { addStage as apiAddStage } from '@/api/pipelines'
+import { resolveTask } from '@/tasks'
+import { useTasks } from '@/tasks/vue'
 import { toast } from 'vue-sonner'
 import draggable from 'vuedraggable'
 import { Button } from '@/components/ui/button'
@@ -47,6 +49,7 @@ import { errorMessage } from '@/utils/errors'
 
 const rbac = useRBACStore()
 const users = useUsersStore()
+const tasks = useTasks()
 
 const props = defineProps<{
   columns: (Stage & { leads: Lead[]; count: number })[]
@@ -418,8 +421,11 @@ function handleCloseDialogUpdate(open: boolean) {
 // Overdue boundary: the task's end when it has a window, else its single
 // start time — the same rule as every other task surface.
 function isNextTaskOverdue(lead: Lead): boolean {
-  const boundary = lead.next_task_end_at ?? lead.next_task_at
-  return !!boundary && new Date(boundary).getTime() < Date.now()
+  const resolved = resolveTask(
+    { scheduled_at: lead.next_task_at, scheduled_end_at: lead.next_task_end_at },
+    tasks.env,
+  )
+  return resolved.state.kind === 'open' && resolved.state.overdue
 }
 
 // stage_outcome is the authoritative won/lost signal for a lead; 'open'

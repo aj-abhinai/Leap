@@ -12,9 +12,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { MoreHorizontal, Trash2 } from '@lucide/vue'
-import { reminderIcon, snoozeTarget } from '@/utils/reminders'
+import { behaviorOf, defaultBehaviors, iconFor, resolveTask, snoozeTarget } from '@/tasks'
+import { useTasks } from '@/tasks/vue'
 import { formatDateTime } from '@/utils/time'
-import { typeLabel, isOverdue as isActivityOverdue } from '@/utils/activity'
 import { Badge } from '@/components/ui/badge'
 import TaskRow from '@/components/leads/TaskRow.vue'
 import { errorMessage } from '@/utils/errors'
@@ -32,6 +32,7 @@ const loadError = shallowRef('')
 
 const settings = useSettingsStore()
 const remindersStore = useRemindersStore()
+const tasks = useTasks()
 
 onMounted(() => {
   if (settings.activityTypes.length === 0) settings.fetchTags()
@@ -82,18 +83,28 @@ function isTouchpoint(a: LeadActivity): boolean {
 // Overdue uses the shared due-boundary rule so the timeline and the
 // Activities page never disagree about what slipped.
 function isOverdue(a: LeadActivity): boolean {
-  return isActivityOverdue(a)
+  const state = resolveTask(a, tasks.env).state
+  return state.kind === 'open' && state.overdue
 }
 
 function isUpcoming(a: LeadActivity): boolean {
   return !isTouchpoint(a) && !isOverdue(a)
 }
 
+// dueMs orders open tasks by their due moment; an undated row sorts first.
+function dueMs(a: LeadActivity): number {
+  const state = resolveTask(a, tasks.env).state
+  return state.kind === 'open' && state.dueAt ? new Date(state.dueAt).getTime() : 0
+}
+
 // The quiet "planned for" trace shows only when the plan's day differs from
 // the day the task actually happened.
 function plannedDiffers(a: LeadActivity): boolean {
-  if (!a.occurred_at || !a.scheduled_at) return false
-  return new Date(a.occurred_at).toDateString() !== new Date(a.scheduled_at).toDateString()
+  return resolveTask(a, tasks.env).plannedDiffers
+}
+
+function typeNameOf(a: LeadActivity): string {
+  return resolveTask(a, tasks.env).typeName
 }
 
 // Upcoming sorted by soonest first; overdue sink to the top. Cancelled tasks
@@ -101,11 +112,7 @@ function plannedDiffers(a: LeadActivity): boolean {
 const openActivities = computed(() => {
   return activities.value
     .filter((a) => !isTouchpoint(a) && !a.is_cancelled)
-    .sort((x, y) => {
-      const tx = new Date(x.scheduled_end_at || x.scheduled_at || x.remind_at || 0).getTime()
-      const ty = new Date(y.scheduled_end_at || y.scheduled_at || y.remind_at || 0).getTime()
-      return tx - ty
-    })
+    .sort((x, y) => dueMs(x) - dueMs(y))
 })
 
 const overdueActivities = computed(() => openActivities.value.filter(isOverdue))
@@ -139,7 +146,7 @@ async function markDone(a: LeadActivity) {
     if (a.quick_reply_id) {
       if (settings.quickReplies.length === 0) await settings.fetchTags()
       const qr = settings.quickReplies.find((s) => s.id === a.quick_reply_id)
-      if (qr?.behavior === 'close_lost') {
+      if (behaviorOf(defaultBehaviors, qr?.behavior).closesLead) {
         emit('closeLost')
       }
     }
@@ -150,7 +157,7 @@ async function markDone(a: LeadActivity) {
 
 async function snooze(a: LeadActivity, minutes: number) {
   try {
-    await remindersStore.snoozeReminder(props.leadId, a.id, snoozeTarget(a, minutes))
+    await remindersStore.snoozeReminder(props.leadId, a.id, snoozeTarget(a, minutes, tasks.env))
     toast.success('Reminder snoozed')
     await fetchActivities()
     emit('tasksChanged')
@@ -191,14 +198,14 @@ defineExpose({ fetchActivities })
             <CardContent class="p-3">
               <div class="flex items-start justify-between gap-2">
                 <div class="flex items-start gap-2 min-w-0">
-                  <component :is="reminderIcon(a.type)" class="size-4 mt-0.5 text-muted-foreground shrink-0" />
+                  <component :is="iconFor(a.type)" class="size-4 mt-0.5 text-muted-foreground shrink-0" />
                   <div class="min-w-0">
                     <div class="flex items-center gap-2 flex-wrap">
                       <span
                         class="text-xs font-medium"
                         :class="a.is_cancelled ? 'line-through decoration-muted-foreground/40' : ''"
                       >
-                        {{ typeLabel(a.type) }}
+                        {{ typeNameOf(a) }}
                       </span>
                       <span v-if="a.quick_reply_name" class="text-xs px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
                         {{ a.quick_reply_name }}

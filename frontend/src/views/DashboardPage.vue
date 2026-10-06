@@ -15,7 +15,9 @@ import { Button } from '@/components/ui/button'
 import { Users, FolderOpen, Bell, BellOff, TrendingUp, Calendar, ArrowRight } from '@lucide/vue'
 import { timeAgo } from '@/utils/time'
 import { formatCurrency } from '@/utils/format'
-import { formatReminderText, reminderIcon } from '@/utils/reminders'
+import { iconFor, resolveTask } from '@/tasks'
+import { useTasks } from '@/tasks/vue'
+import type { Reminder } from '@/api/reminders'
 
 const router = useRouter()
 const contactsStore = useContactsStore()
@@ -23,6 +25,7 @@ const leadsStore = useLeadsStore()
 const pipelineStore = usePipelineStore()
 const activitiesStore = useActivitiesStore()
 const remindersStore = useRemindersStore()
+const tasks = useTasks()
 const rbac = useRBACStore()
 const { openLeadDrawer } = useLeadDrawerGlobal()
 const loading = shallowRef(true)
@@ -98,6 +101,12 @@ const openCount = computed(() => stageRows.value.filter((r) => r.outcome === 'op
 const totalCount = computed(() => Math.max(1, stageRows.value.reduce((n, r) => n + r.count, 0)))
 
 const reminders = computed(() => remindersStore.openReminders.slice(0, 5))
+
+// reminderTextOf renders the reminder's label for the dashboard list.
+function reminderTextOf(r: Reminder): string {
+  const resolved = resolveTask(r, tasks.env)
+  return resolved.description ? `${resolved.typeName}: ${resolved.description}` : resolved.typeName
+}
 
 function goToLeads() {
   router.push({ name: 'Leads' })
@@ -305,13 +314,13 @@ function goToActivities() {
               @click="openLeadDrawer(r.lead_id)"
             >
               <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
-                <component :is="reminderIcon(r.type)" class="size-3.5 text-muted-foreground" />
+                <component :is="iconFor(r.type)" class="size-3.5 text-muted-foreground" />
               </div>
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm">
                   <span v-if="r.lead_display_name" class="font-medium">{{ r.lead_display_name }}</span>
-                  <span v-if="r.lead_display_name && formatReminderText(r)" class="text-muted-foreground"> · {{ formatReminderText(r) }}</span>
-                  <template v-else>{{ formatReminderText(r) }}</template>
+                  <span v-if="r.lead_display_name && reminderTextOf(r)" class="text-muted-foreground"> · {{ reminderTextOf(r) }}</span>
+                  <template v-else>{{ reminderTextOf(r) }}</template>
                 </p>
                 <p v-if="r.stage_name" class="mt-0.5 text-xs text-muted-foreground">{{ r.stage_name }}</p>
               </div>
@@ -357,7 +366,7 @@ function goToActivities() {
               @click="openLeadDrawer(entry.lead_id)"
             >
               <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted">
-                <component :is="reminderIcon(entry.type)" class="size-3.5 text-muted-foreground" />
+                <component :is="iconFor(entry.type)" class="size-3.5 text-muted-foreground" />
               </div>
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm">
