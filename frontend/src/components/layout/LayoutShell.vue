@@ -3,6 +3,12 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import AppSidebar from './AppSidebar.vue'
 import SiteHeader from './SiteHeader.vue'
 import LeadActivityDrawer from '@/components/leads/LeadActivityDrawer.vue'
+import { useOrgTasks } from '@/composables/useOrgTasks'
+
+// The authenticated shell installs the org task module for every descendant:
+// pages, the header's notifications, and the lead drawer all read the same
+// env, whose reminder lead follows the settings store.
+useOrgTasks()
 </script>
 
 <template>

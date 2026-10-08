@@ -7,8 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import ErrorAlert from '@/components/ErrorAlert.vue'
 import { toast } from 'vue-sonner'
 import { getNudgeLeadMinutes, setNudgeLeadMinutes, getDefaultCountryCode, setDefaultCountryCode } from '@/api/settings'
+import { useSettingsStore } from '@/stores/settings'
 import { errorMessage } from '@/utils/errors'
 import { Clock, Phone } from '@lucide/vue'
+
+const settings = useSettingsStore()
 
 const nudgeMinutes = shallowRef(5)
 const nudgeLoading = shallowRef(false)
@@ -39,6 +42,8 @@ async function saveNudge() {
   nudgeLoading.value = true
   try {
     await setNudgeLeadMinutes(v)
+    // The saved value reaches the shared task env without a refetch.
+    settings.applyNudgeLead(v)
     toast.success('Reminder lead time saved')
   } catch (e) {
     toast.error(errorMessage(e, 'Failed to save reminder lead time'))

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as api from '@/api/tags'
+import * as settingsApi from '@/api/settings'
 
 export type { Tag } from '@/api/tags'
 
@@ -15,6 +16,12 @@ export const useSettingsStore = defineStore('settings', () => {
   // loadError names the word lists whose last load failed; empty when the
   // last fetch settled all five.
   const loadError = ref('')
+
+  // nudgeLeadMinutes is the org's reminder lead time in minutes; null until
+  // the first successful read. Consumers treat null as "use the built-in
+  // default".
+  const nudgeLeadMinutes = ref<number | null>(null)
+  const nudgeLoaded = ref(false)
 
   async function fetchTags() {
     loading.value = true
@@ -62,5 +69,39 @@ export const useSettingsStore = defineStore('settings', () => {
     await fetchTags()
   }
 
-  return { tags, statuses, quickReplies, activityTypes, lossReasons, loading, loadError, fetchTags, createTag, updateTag, deleteTag }
+  // fetchNudgeLead reads the org reminder lead once per session. A failure is
+  // silent and keeps null: the module default mirrors the server default, so
+  // the app stays usable without the value.
+  async function fetchNudgeLead() {
+    if (nudgeLoaded.value) return
+    try {
+      const res = await settingsApi.getNudgeLeadMinutes()
+      nudgeLeadMinutes.value = res.data.minutes
+      nudgeLoaded.value = true
+    } catch {}
+  }
+
+  // applyNudgeLead records a value saved by this session so the shared task
+  // env picks it up without a refetch.
+  function applyNudgeLead(minutes: number) {
+    nudgeLeadMinutes.value = minutes
+    nudgeLoaded.value = true
+  }
+
+  return {
+    tags,
+    statuses,
+    quickReplies,
+    activityTypes,
+    lossReasons,
+    loading,
+    loadError,
+    fetchTags,
+    createTag,
+    updateTag,
+    deleteTag,
+    nudgeLeadMinutes,
+    fetchNudgeLead,
+    applyNudgeLead,
+  }
 })
