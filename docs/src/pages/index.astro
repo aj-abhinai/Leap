@@ -1,0 +1,744 @@
+---
+// Landing page served at /. The documentation (Introduction, Quickstart,
+// Features, Development, API Reference) lives in src/content/docs/ and is
+// configured in astro.config.mjs; this page only links to it.
+import logo from '../assets/logo.png';
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f6f2" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0c0c0c" />
+    <title>Leap — a self-hosted pipeline CRM in a single binary</title>
+    <meta
+      name="description"
+      content="Leap tracks contacts and leads for internal teams. It has a kanban pipeline, reminders, role-based access, and a full audit log. One Go binary, one PostgreSQL database."
+    />
+    <meta property="og:title" content="Leap — a self-hosted pipeline CRM in a single binary" />
+    <meta
+      property="og:description"
+      content="Contacts, leads, reminders, role-based access, and a full audit log. One Go binary, one PostgreSQL database."
+    />
+    <meta property="og:image" content="https://leapcrm.pages.dev/screenshots/dashboard.png" />
+    <link rel="icon" href="/favicon.png" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="nav">
+      <div class="wrap nav-row">
+        <a class="brand" href="/" aria-label="Leap home">
+          <img src={logo.src} alt="" width="26" height="26" />
+          <span>Leap</span>
+        </a>
+        <nav class="links" aria-label="Primary">
+          <a href="#features">Features</a>
+          <a href="#quickstart">Quickstart</a>
+          <a href="/introduction/">Docs</a>
+          <a class="gh" href="https://github.com/aj-abhinai/leap" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </nav>
+        <a class="btn solid sm" href="/getting-started/quickstart/">Get started<span class="arr" aria-hidden="true">→</span></a>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- ============ hero ============ -->
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow reveal">Self-hosted · Single binary · Internal teams</p>
+            <h1 class="reveal d1">A pipeline CRM that ships as a single binary.</h1>
+            <p class="sub reveal d2">
+              Leap tracks contacts and leads for internal teams. It has a kanban pipeline,
+              reminders, role-based access, and a full audit log. One Go binary and one PostgreSQL
+              database are the whole deployment.
+            </p>
+            <div class="cta reveal d3">
+              <a class="btn solid" href="/getting-started/quickstart/">Get started<span class="arr" aria-hidden="true">→</span></a>
+              <a class="btn ghost" href="https://github.com/aj-abhinai/leap" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+            </div>
+            <ul class="spec reveal d4" role="list">
+              <li><strong>1</strong><span>binary to deploy — the frontend and migrations are embedded</span></li>
+              <li><strong>1</strong><span>dependency — a PostgreSQL 17 database</span></li>
+              <li><strong>3</strong><span>ways to run it — Docker (dev), Docker (production), a single binary</span></li>
+            </ul>
+          </div>
+
+          <div class="term reveal d3" role="img" aria-label="Terminal that runs the command just docker-up for the Leap development stack">
+            <div class="term-bar">
+              <span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span>
+              <span class="term-name">quickstart</span>
+            </div>
+            <pre class="term-body"><span class="t-prompt">$</span> <span class="t-ink">just docker-up</span>
+<span class="t-ok">✓</span> <span class="t-dim">postgres</span>   healthy
+<span class="t-ok">✓</span> <span class="t-dim">pgweb</span>      http://localhost:8081
+<span class="t-ok">✓</span> <span class="t-dim">leap</span>       <span class="t-ink">http://localhost:9000</span></pre>
+            <p class="term-note">dev login — admin@admin.com · admin</p>
+          </div>
+        </div>
+
+        <div class="wrap shot reveal d5">
+          <div class="frame">
+            <div class="frame-bar">
+              <span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span>
+              <span class="frame-url">localhost:9000</span>
+            </div>
+            <picture>
+              <source media="(prefers-color-scheme: dark)" srcset="/screenshots/dashboard-dark.png" />
+              <img src="/screenshots/dashboard.png" alt="The Leap dashboard with pipeline health and recent tasks" width="2100" height="1200" loading="eager" />
+            </picture>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ features ============ -->
+      <section class="sec" id="features">
+        <div class="wrap">
+          <p class="kicker">01 — Features</p>
+          <h2>The features that a small team needs.</h2>
+          <div class="feat-grid">
+            <article class="feat">
+              <span class="idx">01</span>
+              <h3>Pipeline kanban</h3>
+              <p>Custom stages have open, won, and lost outcomes. Leads move across the board. One open lead per contact, pipeline, and program prevents duplicates.</p>
+            </article>
+            <article class="feat">
+              <span class="idx">02</span>
+              <h3>Contacts</h3>
+              <p>One record per client holds multiple phones and emails, tags, statuses, and notes. The app stores phone numbers in the international format. You can import and export contacts as CSV files.</p>
+            </article>
+            <article class="feat">
+              <span class="idx">03</span>
+              <h3>Activities &amp; reminders</h3>
+              <p>Every lead has a timeline of tasks. A quick reply logs an outcome and can create the next task. Reminders use the nudge lead time and show overdue work.</p>
+            </article>
+            <article class="feat">
+              <span class="idx">04</span>
+              <h3>Role-based access</h3>
+              <p>Roles carry per-action permissions on contacts, leads, pipelines, users, and settings. Three protected roles are ready by default: superadmin, Sales, and Viewer.</p>
+            </article>
+            <article class="feat">
+              <span class="idx">05</span>
+              <h3>Audit log</h3>
+              <p>The audit log records every change with the user, the time, and a JSON diff. The activity feed shows the whole team what happened, and when.</p>
+            </article>
+            <article class="feat">
+              <span class="idx">06</span>
+              <h3>Single binary</h3>
+              <p>The Go backend embeds the Vue frontend and all migrations. You deploy one file and start it with one docker compose command.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ screenshots ============ -->
+      <section class="sec">
+        <div class="wrap">
+          <p class="kicker">02 — Inside the app</p>
+          <h2>The screens that your team uses every day.</h2>
+          <div class="shots">
+            <figure class="shot-card wide rise">
+              <img src="/screenshots/leads-kanban.png" alt="The Leap leads kanban board" width="2100" height="1200" loading="lazy" />
+              <figcaption>Pipeline board</figcaption>
+            </figure>
+            <figure class="shot-card rise">
+              <img src="/screenshots/contacts.png" alt="The Leap contacts table" width="2100" height="1200" loading="lazy" />
+              <figcaption>Contacts</figcaption>
+            </figure>
+            <figure class="shot-card rise">
+              <img src="/screenshots/tasks.png" alt="Tasks and reminders in Leap" width="2100" height="1200" loading="lazy" />
+              <figcaption>Tasks &amp; reminders</figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ quickstart ============ -->
+      <section class="sec" id="quickstart">
+        <div class="wrap qs-grid">
+          <div class="qs-copy">
+            <p class="kicker">03 — Quickstart</p>
+            <h2>You can run Leap in minutes.</h2>
+            <ol class="modes" role="list">
+              <li>
+                <span class="tag">dev</span>
+                <div><strong>Docker Compose, development</strong><p>One command starts Leap, PostgreSQL, and the pgweb database browser. The development stack includes an admin login.</p></div>
+              </li>
+              <li>
+                <span class="tag">prod</span>
+                <div><strong>Docker Compose, production</strong><p>You set real secrets in the env file. Leap does not start when a secret is a placeholder.</p></div>
+              </li>
+              <li>
+                <span class="tag">bare</span>
+                <div><strong>Single binary</strong><p>You generate a config, point it at PostgreSQL, and run the file. Migrations apply at startup.</p></div>
+              </li>
+            </ol>
+            <a class="btn ghost" href="/getting-started/quickstart/">Read the Quickstart<span class="arr" aria-hidden="true">→</span></a>
+          </div>
+          <div class="term rise">
+            <div class="term-bar">
+              <span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span>
+              <span class="term-name">docker-compose.yml</span>
+            </div>
+            <pre class="term-body"><span class="t-prompt">$</span> <span class="t-ink">cp docker/.env.example docker/.env</span>
+<span class="t-dim">$</span> <span class="t-ink">docker compose -f docker/docker-compose.yml up -d</span>
+<span class="t-ok">✓</span> <span class="t-dim">leap</span>       <span class="t-ink">http://localhost:9000</span></pre>
+            <p class="term-note">migrations run at startup — a restart is safe</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ stack ============ -->
+      <section class="strip" aria-label="Technology stack">
+        <div class="wrap strip-row">
+          <span class="strip-label">stack</span>
+          <ul role="list">
+            <li>Go 1.25</li>
+            <li>PostgreSQL 17</li>
+            <li>Vue 3</li>
+            <li>Vite</li>
+            <li>Tailwind CSS 4</li>
+            <li>Docker Compose</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="wrap foot-grid">
+        <div class="foot-brand">
+          <a class="brand" href="/"><img src={logo.src} alt="" width="24" height="24" /><span>Leap</span></a>
+          <p>A self-hosted pipeline CRM for internal teams.</p>
+        </div>
+        <nav aria-label="Documentation">
+          <p class="foot-label">documentation</p>
+          <a href="/introduction/">Introduction</a>
+          <a href="/getting-started/quickstart/">Quickstart</a>
+          <a href="/features/">Features</a>
+          <a href="/development/">Development</a>
+          <a href="/api-reference/overview/">API Reference</a>
+        </nav>
+        <nav aria-label="Project">
+          <p class="foot-label">project</p>
+          <a href="https://github.com/aj-abhinai/leap" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="/getting-started/quickstart/">Get started</a>
+        </nav>
+      </div>
+      <div class="wrap foot-base">
+        <span>Leap CRM</span>
+        <a href="https://github.com/aj-abhinai/leap" target="_blank" rel="noopener noreferrer">github.com/aj-abhinai/leap</a>
+      </div>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400..800&family=Geist+Mono:wght@400..600&display=swap');
+
+  /* ---- tokens (light default, dark via OS preference) ----
+     Accent matches the product's --primary red and the docs theme in
+     src/styles/custom.css; dark mode uses the docs' brighter accent-high. */
+  :root {
+    --bg: #f7f6f2;
+    --bg-raised: #fefdfb;
+    --ink: #1a1a1a;
+    --ink-soft: #5f5f5c;
+    --line: #dedbd4;
+    --keyline: #cdc9bf;
+    --grid-line: rgba(26, 26, 26, 0.045);
+    --accent: oklch(0.514 0.222 16.935);
+    --accent-soft: oklch(0.514 0.222 16.935 / 0.08);
+    --accent-ink: #ffffff;
+    --code-bg: #121212;
+    --nav-bg: rgba(247, 246, 242, 0.8);
+    --shadow: 0 1.2rem 3.5rem rgba(26, 26, 26, 0.16);
+    --font-display: 'Geist', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c0c0c;
+      --bg-raised: #141414;
+      --ink: #e8e8e6;
+      --ink-soft: #979793;
+      --line: #262626;
+      --keyline: transparent;
+      --grid-line: rgba(232, 232, 230, 0.05);
+      --accent: oklch(0.66 0.22 17);
+      --accent-soft: oklch(0.66 0.22 17 / 0.1);
+      --accent-ink: #ffffff;
+      --nav-bg: rgba(12, 12, 12, 0.75);
+      --shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.5);
+    }
+  }
+
+  /* ---- base ---- */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-size: 1rem;
+    line-height: 1.6;
+    overflow-x: clip;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: var(--accent); color: var(--accent-ink); }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  .wrap { max-width: 71.5rem; margin-inline: auto; padding-inline: 1.5rem; }
+
+  section { scroll-margin-top: 5.5rem; }
+
+  .skip {
+    position: absolute;
+    inset-inline-start: -100vw;
+    top: 0.75rem;
+    z-index: 100;
+    background: var(--accent);
+    color: var(--accent-ink);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+  }
+  .skip:focus { inset-inline-start: 0.75rem; }
+
+  h1, h2 { font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; text-wrap: balance; }
+
+  h2 { font-size: clamp(1.8rem, 3.6vw, 2.7rem); max-width: 26ch; }
+
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    margin-bottom: 0.9rem;
+  }
+
+  /* ---- buttons ---- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 0.88rem;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    padding: 0.78rem 1.3rem;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
+    white-space: nowrap;
+  }
+  .btn .arr { transition: translate 0.18s ease; }
+  .btn:hover .arr { translate: 3px 0; }
+
+  .btn.solid { background: var(--accent); color: var(--accent-ink); }
+  .btn.solid:hover { transform: translateY(-2px); box-shadow: 0 0.6rem 1.4rem var(--accent-soft); }
+
+  .btn.ghost { border-color: var(--line); color: var(--ink); background: transparent; }
+  .btn.ghost:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-2px); }
+
+  .btn.sm { padding: 0.5rem 0.9rem; font-size: 0.8rem; }
+
+  /* ---- nav ---- */
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: var(--nav-bg);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav-row { display: flex; align-items: center; gap: 2rem; height: 4rem; }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-weight: 800;
+    font-size: 1.2rem;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .brand img { border-radius: 6px; }
+
+  .links { display: flex; align-items: center; gap: 1.7rem; margin-inline-start: auto; }
+
+  .links a {
+    position: relative;
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: 0.92rem;
+    font-weight: 500;
+    transition: color 0.15s ease;
+  }
+  .links a::after {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    bottom: -0.35rem;
+    height: 1.5px;
+    background: var(--accent);
+    scale: 0 1;
+    transform-origin: left;
+    transition: scale 0.22s ease;
+  }
+  .links a:hover { color: var(--ink); }
+  .links a:hover::after { scale: 1 1; }
+
+  .links a.gh { font-family: var(--font-mono); font-size: 0.82rem; }
+
+  @media (max-width: 40rem) {
+    .links { display: none; }
+    .nav-row { gap: 1rem; }
+    .nav-row .btn { margin-inline-start: auto; }
+  }
+
+  /* ---- hero ---- */
+  .hero {
+    position: relative;
+    overflow-x: clip;
+    padding: 6.5rem 0 0;
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 3rem 3rem;
+    mask-image: linear-gradient(to bottom, #000 78%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent);
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset-block-start: -12rem;
+    inset-inline-end: -10rem;
+    width: 42rem;
+    height: 42rem;
+    background: radial-gradient(circle, var(--accent-soft) 0%, transparent 62%);
+    pointer-events: none;
+  }
+
+  .hero-grid {
+    position: relative;
+    display: grid;
+    grid-template-columns: 7fr 5fr;
+    gap: 4rem;
+    align-items: center;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 1.4rem;
+  }
+
+  .hero h1 { font-size: clamp(2.5rem, 5.4vw, 4.2rem); margin-bottom: 1.4rem; }
+
+  .sub { font-size: 1.13rem; color: var(--ink-soft); max-width: 34rem; margin-bottom: 2.2rem; }
+
+  .cta { display: flex; gap: 0.9rem; flex-wrap: wrap; margin-bottom: 3rem; }
+
+  .spec {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--line);
+  }
+  .spec li { padding: 1.1rem 1.2rem 0 0; }
+  .spec li + li { border-left: 1px solid var(--line); padding-inline-start: 1.2rem; }
+  .spec strong {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 1.7rem;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1.2;
+  }
+  .spec span { font-size: 0.8rem; color: var(--ink-soft); line-height: 1.45; display: block; margin-top: 0.2rem; }
+
+  /* ---- terminal window (dark in both themes — the product is a binary) ---- */
+  .term {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .term-bar, .frame-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.7rem 0.9rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
+  .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: rgba(255, 255, 255, 0.16); }
+
+  .term-name {
+    margin-inline-start: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.55);
+    letter-spacing: 0.06em;
+  }
+
+  .term-body {
+    padding: 1.15rem 1.2rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.85;
+    overflow-x: auto;
+  }
+
+  .t-ink { color: #ececea; }
+  .t-dim { color: #8f8f8c; }
+  .t-ok { color: #f5f5f3; }
+  .t-prompt { color: oklch(0.66 0.22 17); }
+
+  .term-note {
+    padding: 0.65rem 1.2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.09);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  /* ---- hero screenshot ---- */
+  .shot { margin-top: 4.5rem; }
+
+  .frame {
+    background: var(--code-bg);
+    border: 1px solid var(--keyline);
+    border-bottom: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .frame-url {
+    margin-inline-start: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.07);
+    padding: 0.2rem 1.1rem;
+    border-radius: 4px;
+  }
+
+  .frame img { display: block; width: 100%; height: auto; }
+
+  /* ---- sections ---- */
+  .sec { padding: 6.5rem 0 0; }
+
+  .sec > .wrap > h2 { margin-bottom: 3rem; }
+
+  /* ---- features: hairline grid ---- */
+  .feat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+  }
+
+  .feat { background: var(--bg); padding: 1.8rem 1.7rem 2.1rem; transition: background 0.2s ease, box-shadow 0.2s ease; }
+  .feat:hover { background: var(--bg-raised); box-shadow: inset 0 2px 0 var(--accent); }
+
+  .feat .idx {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+  }
+
+  .feat h3 { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; margin: 0.8rem 0 0.55rem; }
+
+  .feat p { font-size: 0.92rem; color: var(--ink-soft); }
+
+  @media (max-width: 56rem) { .feat-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 40rem) {
+    .feat-grid { grid-template-columns: 1fr; }
+    .hero-grid { grid-template-columns: 1fr; gap: 3rem; }
+    .spec { grid-template-columns: 1fr; }
+    .spec li + li { border-left: 0; border-top: 1px solid var(--line); padding-inline-start: 0; padding-top: 1.1rem; }
+  }
+
+  /* ---- screenshots ---- */
+  .shots {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.4rem;
+  }
+
+  .shot-card { border: 1px solid var(--keyline); border-radius: 10px; overflow: hidden; background: var(--bg-raised); box-shadow: var(--shadow); }
+  .shot-card.wide { grid-column: 1 / -1; }
+
+  .shot-card img { display: block; width: 100%; height: auto; transition: translate 0.3s ease; }
+  .shot-card:hover img { translate: 0 -3px; }
+
+  .shot-card figcaption {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    padding: 0.75rem 1.1rem;
+    border-top: 1px solid var(--line);
+  }
+
+  /* ---- quickstart ---- */
+  .qs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4rem;
+    align-items: start;
+  }
+
+  .qs-copy h2 { margin-bottom: 2rem; }
+
+  .modes { list-style: none; margin-bottom: 2.2rem; }
+  .modes li { display: flex; gap: 1.1rem; padding: 1.05rem 0; border-top: 1px solid var(--line); }
+  .modes li:last-child { border-bottom: 1px solid var(--line); }
+
+  .tag {
+    flex: none;
+    align-self: start;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-soft);
+    padding: 0.22rem 0.55rem;
+    border-radius: 4px;
+    margin-top: 0.2rem;
+  }
+
+  .modes strong { display: block; font-size: 1rem; letter-spacing: -0.01em; }
+  .modes p { font-size: 0.88rem; color: var(--ink-soft); margin-top: 0.15rem; }
+
+  @media (max-width: 56rem) { .qs-grid { grid-template-columns: 1fr; gap: 3rem; } }
+
+  /* ---- stack strip ---- */
+  .strip {
+    margin-top: 6.5rem;
+    border-block: 1px solid var(--line);
+    background: var(--bg-raised);
+  }
+
+  .strip-row { display: flex; align-items: center; gap: 2rem; padding-block: 1.1rem; flex-wrap: wrap; }
+
+  .strip-label {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+  }
+
+  .strip ul { list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem 0; }
+  .strip li {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--ink-soft);
+  }
+  .strip li + li::before { content: '/'; margin-inline: 0.9rem; color: var(--line); }
+
+  /* ---- footer ---- */
+  .foot { border-top: 1px solid var(--line); margin-top: 5.5rem; }
+
+  .foot-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 3rem;
+    padding-block: 3.5rem;
+  }
+
+  .foot-brand p { font-size: 0.9rem; color: var(--ink-soft); margin-top: 1rem; max-width: 22ch; }
+
+  .foot-label {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--ink-soft);
+    margin-bottom: 1rem;
+  }
+
+  .foot nav { display: flex; flex-direction: column; gap: 0.55rem; align-items: flex-start; }
+
+  .foot nav a { color: var(--ink); text-decoration: none; font-size: 0.92rem; }
+  .foot nav a:hover { color: var(--accent); }
+
+  .foot-base {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding-block: 1.3rem;
+    border-top: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+  }
+  .foot-base a { color: var(--ink-soft); text-decoration: none; }
+  .foot-base a:hover { color: var(--accent); }
+
+  @media (max-width: 40rem) { .foot-grid { grid-template-columns: 1fr; gap: 2.2rem; } }
+
+  /* ---- motion: hero load-in, scroll rises ---- */
+  .reveal { opacity: 0; translate: 0 14px; animation: rise 0.7s cubic-bezier(0.22, 0.8, 0.3, 1) forwards; }
+  .d1 { animation-delay: 0.08s; }
+  .d2 { animation-delay: 0.16s; }
+  .d3 { animation-delay: 0.24s; }
+  .d4 { animation-delay: 0.34s; }
+  .d5 { animation-delay: 0.44s; }
+
+  @keyframes rise { to { opacity: 1; translate: 0 0; } }
+
+  /* Scroll-linked rise where supported; the hidden base state lives in this
+      gate so browsers without scroll timelines show the elements directly. */
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .rise {
+        opacity: 0;
+        translate: 0 14px;
+        animation: rise 0.8s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+        animation-timeline: view(0.85);
+        animation-range: entry 10% entry 55%;
+      }
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal, .rise { animation: none; opacity: 1; translate: 0 0; }
+    .btn, .links a::after, .shot-card img { transition: none; }
+  }
+</style>
