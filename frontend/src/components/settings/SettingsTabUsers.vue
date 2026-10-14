@@ -184,7 +184,7 @@ async function saveEdit() {
     await apiUpdateUser(u.id, {
       name: editName.value.trim(),
       email: editEmail.value.trim(),
-      phone: editPhone.value.trim() || undefined,
+      phone: editPhone.value.trim(),
     })
     toast.success('User updated')
     editingUser.value = null

@@ -34,7 +34,7 @@ func (h *Handler) GetNudgeLeadMinutes(w http.ResponseWriter, r *http.Request) {
 // SetNudgeLeadMinutes serves PUT /api/settings/nudge-lead-minutes. The
 // payload must carry an explicit minutes value: absent or null is rejected so
 // a malformed client cannot silently reset the setting to zero. The change is
-// audited with its before â†’ after value.
+// audited with its before → after value.
 func (h *Handler) SetNudgeLeadMinutes(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Minutes *int `json:"minutes"`
@@ -97,7 +97,7 @@ func (h *Handler) GetDefaultCountryCode(w http.ResponseWriter, r *http.Request) 
 }
 
 // SetDefaultCountryCode serves PUT /api/settings/default-country-code. The
-// change is audited with its before â†’ after value.
+// change is audited with its before → after value.
 func (h *Handler) SetDefaultCountryCode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		CountryCode string `json:"country_code"`

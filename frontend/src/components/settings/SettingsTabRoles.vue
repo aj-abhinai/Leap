@@ -150,8 +150,15 @@ async function saveRole() {
         name: (formName.value ?? '').trim(),
         description: (formDesc.value ?? '').trim(),
       })
-      // Replace the permission set atomically in one request.
-      await setRolePermissions(id, [...formPermissions.value])
+      // Replace the permission set atomically in one request. A failure here
+      // leaves the name and description saved, so it is reported as a
+      // partial save rather than a generic role-save failure.
+      try {
+        await setRolePermissions(id, [...formPermissions.value])
+      } catch {
+        formError.value = 'Name and description saved, but the permission update failed — retry to save the permissions.'
+        return
+      }
       toast.success('Role updated')
     } else {
       const res = await createRole({
