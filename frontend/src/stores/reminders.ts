@@ -10,6 +10,7 @@ const tasksEnv = localEnv()
 export const useRemindersStore = defineStore('reminders', () => {
   const reminders = ref<api.Reminder[]>([])
   const loading = ref(false)
+  const loadError = ref('')
 
   // Open tasks = not done, not cancelled, not yet reminded — a dismissed
   // reminder leaves the bell (snooze re-opens it). The panel and the badge
@@ -32,11 +33,17 @@ export const useRemindersStore = defineStore('reminders', () => {
     }).length
   })
 
+  // fetchReminders never rejects: the bell poller and the page mount call it
+  // fire-and-forget, so a failed refresh keeps the last known list and
+  // reports through loadError instead of an unhandled rejection per poll.
   async function fetchReminders() {
     loading.value = true
+    loadError.value = ''
     try {
       const res = await api.listReminders()
       reminders.value = res.data
+    } catch {
+      loadError.value = 'Failed to refresh reminders'
     } finally {
       loading.value = false
     }
@@ -52,5 +59,5 @@ export const useRemindersStore = defineStore('reminders', () => {
     await api.snoozeReminder(leadId, reminderId, remindAt)
   }
 
-  return { reminders, loading, pendingCount, openReminders, fetchReminders, dismissReminder, snoozeReminder }
+  return { reminders, loading, loadError, pendingCount, openReminders, fetchReminders, dismissReminder, snoozeReminder }
 })

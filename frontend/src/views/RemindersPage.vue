@@ -65,11 +65,13 @@ function hasAny(list: unknown[]): boolean {
 
     <PageState
       :loading="store.loading"
+      :error="store.loadError"
       :empty="store.reminders.length === 0"
       empty-title="No pending reminders"
       empty-hint="Create tasks with reminders from the leads kanban"
       :skeleton-count="5"
       skeleton-class="h-16 w-full"
+      @retry="store.fetchReminders()"
     >
       <template #empty-icon>
         <BellOff class="mb-3 size-10 text-muted-foreground/40" />

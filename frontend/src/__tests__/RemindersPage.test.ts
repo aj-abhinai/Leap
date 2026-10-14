@@ -87,4 +87,26 @@ describe('RemindersPage', () => {
     expect(target.getTime()).toBeGreaterThan(Date.now())
     expect(target.getHours()).toBe(nudge.getHours())
   })
+
+  // A failed load settles in the store and surfaces through PageState with
+  // a retry; retrying refetches and heals the page.
+  it('surfaces a failed load with retry and heals on success', async () => {
+    getMock.mockRejectedValueOnce(new Error('boom'))
+    getMock.mockResolvedValue({ data: [makeReminder()] })
+
+    const wrapper = mount(RemindersPage, {
+      global: { plugins: [createPinia()], stubs: { ReminderCard: true } },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Failed to refresh reminders')
+
+    const retry = wrapper.findAll('button').find((b) => b.text() === 'Retry')
+    expect(retry).toBeDefined()
+    await retry!.trigger('click')
+    await flushPromises()
+
+    expect(getMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.findComponent({ name: 'ReminderCard' }).exists()).toBe(true)
+  })
 })

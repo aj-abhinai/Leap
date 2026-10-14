@@ -53,6 +53,9 @@ async function dismiss(reminder: Reminder) {
     <div class="flex items-center justify-between px-3 py-2.5 border-b">
       <h3 class="font-semibold text-sm">Reminders</h3>
     </div>
+    <p v-if="store.loadError" class="px-3 py-1.5 text-xs text-destructive">
+      {{ store.loadError }} — showing last known
+    </p>
     <div class="flex-1 overflow-y-auto">
       <div v-if="store.loading && store.reminders.length === 0" class="divide-y">
         <div v-for="i in 4" :key="i" class="flex gap-2.5 px-3 py-2.5">
