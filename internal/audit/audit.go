@@ -9,19 +9,11 @@ import (
 	"log/slog"
 )
 
-// Log writes a best-effort entry to the audit log with a description derived
-// from the action, resource type, and resource id. The actor's name is
-// resolved from the users table so the trail stays readable after a rename.
-// resourceID must be a well-formed UUID or empty, and changes must be valid
-// JSON or empty.
-func Log(db *sql.DB, resourceID, resourceType, action, changes, userID string) {
-	LogCustom(db, action+" "+resourceType+" "+resourceID, resourceType, resourceID, action, changes, userID)
-}
-
 // LogCustom writes a best-effort audit entry with an explicit description.
 // Logging must never fail the mutation it describes, so failures are logged
-// and swallowed; the actor's name is resolved from the users table, and
-// resourceID/changes follow the same well-formedness rules as Log. A changes
+// and swallowed; the actor's name is resolved from the users table;
+// resourceID must be a well-formed UUID or empty, and changes must be valid
+// JSON or empty. A changes
 // value that is not valid JSON is dropped (description-only row) so a caller
 // bug cannot lose the audit row itself.
 func LogCustom(db *sql.DB, description, resourceType, resourceID, action, changes, userID string) {
